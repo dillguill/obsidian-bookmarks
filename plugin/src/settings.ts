@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, SecretComponent, Setting, requestUrl } from "obsidian";
+import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import type BookmarksPlugin from "./main";
 
 export interface BookmarksSettings {
@@ -95,7 +95,7 @@ export class BookmarksSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Poll interval (seconds)")
-      .setDesc("Fallback check for finished captures when live updates drop.")
+      .setDesc("How often to check the server for captures sent from other devices.")
       .addText((text) =>
         text.setValue(String(this.plugin.settings.pollIntervalSeconds)).onChange(async (value) => {
           const seconds = Number.parseInt(value, 10);
@@ -108,16 +108,13 @@ export class BookmarksSettingTab extends PluginSettingTab {
   }
 
   private async testConnection(): Promise<boolean> {
-    const { serverUrl } = this.plugin.settings;
-    if (!serverUrl) return false;
+    if (!this.plugin.settings.serverUrl) return false;
     try {
-      const response = await requestUrl({
-        url: new URL("/health", serverUrl).toString(),
-        headers: { Authorization: `Bearer ${this.plugin.getToken() ?? ""}` },
-        throw: false,
-      });
-      return response.status === 200;
-    } catch {
+      const problem = await this.plugin.checkServer();
+      if (problem) new Notice(problem);
+      return problem === null;
+    } catch (err) {
+      new Notice(`Connection failed: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }

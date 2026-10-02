@@ -17,6 +17,64 @@ your vault as deduplicated bookmark notes. See the
 | `docs/`    | Design and phase docs                                            |
 | `spikes/`  | Feasibility probes                                               |
 
+## Try it locally
+
+1. **Start the server** (Docker):
+
+   ```sh
+   cd harness
+   cp .env.example .env    # set BOOKMARKS_TOKENS, e.g. desktop-token,phone-token
+   docker compose up --build
+   ```
+
+   Check it: `curl -H "Authorization: Bearer desktop-token" http://127.0.0.1:8787/health`
+   should return `{"status":"ok","apiVersion":1,...}`.
+
+2. **Install the plugin** into a test vault:
+
+   ```sh
+   npm install
+   npm run build -w plugin
+   mkdir -p <vault>/.obsidian/plugins/bookmarks
+   cp plugin/main.js plugin/manifest.json <vault>/.obsidian/plugins/bookmarks/
+   ```
+
+   Enable **Bookmarks** under Settings → Community plugins, then in its settings set
+   the server URL (`http://127.0.0.1:8787`), add the API token, and press **Test**.
+
+3. **Capture from Obsidian**: copy a URL, run **Bookmarks: Capture URL** from the
+   command palette (or the ribbon icon). The note opens when the capture finishes,
+   with the screenshot embedded at the top. Capturing the same URL again shows
+   "Already saved" with a link to the existing note.
+
+4. **Capture from elsewhere** (the phone path): with Obsidian closed, enqueue a URL
+
+   ```sh
+   curl -X POST -H "Authorization: Bearer phone-token" \
+     "http://127.0.0.1:8787/capture?origin=shortcut&url=https://example.com/"
+   ```
+
+   then open Obsidian. Finished captures are written on startup and every poll
+   interval (60s by default), or straight away with **Bookmarks: Fetch finished
+   captures now**. A phone reaches the server over Tailscale or a TLS reverse
+   proxy; the port is bound to loopback by default.
+
+Sites that block the capture (bot walls, hard paywalls) still get a note with the
+link and a "Capture failed" callout, so nothing sent from the phone is lost.
+
+### Server API
+
+All endpoints need `Authorization: Bearer <token>`.
+
+| Endpoint | What |
+|---|---|
+| `POST /capture` | Enqueue `{url, origin}` (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
+| `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
+| `GET /jobs/:id` | One job. |
+| `GET /jobs/:id/asset/screenshot` / `markdown` | Capture output. |
+| `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
+| `GET /health` | `{status, apiVersion, version}`; the plugin warns when `apiVersion` doesn't match. |
+
 ## Development
 
 Requires Node 22.12+.
@@ -27,6 +85,15 @@ npm run typecheck
 npm test
 npm run build        # plugin/main.js + harness/dist
 ```
+
+The capture engine's real-browser tests run when a Chromium is available:
+`BOOKMARKS_CHROMIUM_PATH=/path/to/chrome npm test -w harness`. `npm run dev -w harness`
+runs the server without Docker (set `BOOKMARKS_TOKENS`, and `BOOKMARKS_CHROMIUM_PATH`
+if Playwright's browser isn't installed).
+
+Releasing: `node scripts/set-version.mjs x.y.z`, commit, then push tag `x.y.z`
+(no `v`). The release workflow publishes `ghcr.io/dillguill/bookmarks-server:x.y.z`
+and a GitHub release with `main.js`, `manifest.json` and a compose file.
 
 Plugin: `npm run dev -w plugin` rebuilds `plugin/main.js` on change. Symlink or
 copy `plugin/` (`main.js`, `manifest.json`) into `<vault>/.obsidian/plugins/bookmarks/`.
