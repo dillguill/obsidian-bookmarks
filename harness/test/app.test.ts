@@ -135,7 +135,7 @@ describe("http app", () => {
       fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
     const initial = (await (await fetch(`${base}/settings`, { headers: auth })).json()) as { settings: unknown };
     expect(initial.settings).toEqual({ screenshotStyle: "full", bannerSites: [], noScreenshotSites: [], templates: [DEFAULT_TEMPLATE],
-      propertyTypes: DEFAULT_TEMPLATE.properties.map(({ name, type }) => ({ name, type })),
+      propertyTypes: DEFAULT_TEMPLATE.properties.map(({ name, type }) => ({ name, type })), hideCaptureId: false,
     });
 
     expect((await put({ screenshotStyle: "huge" })).status).toBe(400);
@@ -241,6 +241,17 @@ describe("http app", () => {
     const note = await fetch(`${base}/jobs/${job.id}/asset/note`, { headers: auth });
     expect(note.headers.get("content-type")).toContain("application/json");
     expect(await note.json()).toMatchObject({ template: "Bare", noteName: "Hello", path: "Clips" });
+
+    // Hiding capture_id drops it, even from a template that names it.
+    await fetch(`${base}/settings`, {
+      method: "PUT",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ templates: [DEFAULT_TEMPLATE], hideCaptureId: true }),
+    });
+    await post("/capture?wait=1", { url: "https://example.com/rendered-hidden" });
+    expect(renders.at(-1)!.templates[0]!.properties.some((p) => p.value === "{{capture_id}}")).toBe(false);
+    const bad = await fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ hideCaptureId: "yes" }) });
+    expect(bad.status).toBe(400);
     await fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: "{}" });
   });
 

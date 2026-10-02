@@ -286,10 +286,15 @@ function renderCapture() {
   $("screenshot-style").value = settings.screenshotStyle;
   $("banner-sites").value = settings.bannerSites.join("\n");
   $("no-screenshot-sites").value = settings.noScreenshotSites.join("\n");
+  $("hide-capture-id").checked = Boolean(settings.hideCaptureId);
 }
 
 const lines = (value) => value.split("\n").map((s) => s.trim()).filter(Boolean);
 
+$("hide-capture-id").addEventListener("change", (e) => {
+  settings.hideCaptureId = e.target.checked;
+  scheduleSave();
+});
 $("screenshot-style").addEventListener("change", (e) => {
   settings.screenshotStyle = e.target.value;
   scheduleSave();

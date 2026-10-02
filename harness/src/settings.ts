@@ -7,6 +7,7 @@ export const DEFAULT_CAPTURE_SETTINGS: CaptureSettings = {
   noScreenshotSites: [],
   templates: [DEFAULT_TEMPLATE],
   propertyTypes: DEFAULT_TEMPLATE.properties.map(({ name, type }) => ({ name, type })),
+  hideCaptureId: false,
 };
 
 const STYLES: ReadonlySet<string> = new Set<ScreenshotStyle>(["full", "banner", "none"]);
@@ -81,7 +82,9 @@ export function parseCaptureSettings(body: unknown): CaptureSettings | string {
     if (!seen.has(name)) propertyTypes.push({ name, type: type as PropertyType });
     seen.add(name);
   }
-  return { screenshotStyle: style as ScreenshotStyle, bannerSites, noScreenshotSites, templates, propertyTypes };
+  const hideCaptureId = fields.hideCaptureId ?? false;
+  if (typeof hideCaptureId !== "boolean") return "hideCaptureId must be true or false.";
+  return { screenshotStyle: style as ScreenshotStyle, bannerSites, noScreenshotSites, templates, propertyTypes, hideCaptureId };
 }
 
 const text = (value: unknown, fallback = ""): string | null =>

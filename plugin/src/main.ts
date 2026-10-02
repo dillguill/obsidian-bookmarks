@@ -8,6 +8,9 @@ import { DEFAULT_TEMPLATE, captureIdPropertyName, chooseTemplate, urlPropertyNam
 import { findUrl, normalizeUrl } from "./url";
 import { writeBookmark, type VaultPort, type WriteResult } from "./writer";
 
+// Server jobs are pruned a few days after delivery, so a few hundred covers any redelivery.
+const WRITTEN_CAPTURES_KEPT = 500;
+
 export default class BookmarksPlugin extends Plugin {
   override settings: BookmarksSettings = DEFAULT_SETTINGS;
   readonly index = new DedupIndex();
@@ -86,6 +89,7 @@ export default class BookmarksPlugin extends Plugin {
     const changed = names(shared.templates) !== names(this.templates);
     this.templates = shared.templates;
     this.settings.templatesCache = shared.templates;
+    this.settings.hideCaptureId = shared.hideCaptureId ?? false;
     await this.saveData(this.settings);
     if (changed) this.buildIndex();
   }
@@ -163,13 +167,24 @@ export default class BookmarksPlugin extends Plugin {
           template,
           notesFolder: template.path || DEFAULT_TEMPLATE.path,
           assetsFolder: this.settings.assetsFolder,
+          hideCaptureId: this.settings.hideCaptureId,
+          writtenCapture: (id) => this.settings.writtenCaptures?.[id] ?? null,
         },
       );
+      if (result.kind === "written") await this.rememberCapture(job.id, result.path);
       await client.delivered(job.id);
       return result;
     } finally {
       this.inFlight.delete(job.id);
     }
+  }
+
+  /** Keeps the last WRITTEN_CAPTURES_KEPT capture ids this device wrote. */
+  private async rememberCapture(id: string, path: string): Promise<void> {
+    const entries = Object.entries(this.settings.writtenCaptures ?? {}).filter(([key]) => key !== id);
+    entries.push([id, path]);
+    this.settings.writtenCaptures = Object.fromEntries(entries.slice(-WRITTEN_CAPTURES_KEPT));
+    await this.saveData(this.settings);
   }
 
   // ---- entry points ----

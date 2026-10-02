@@ -27,6 +27,10 @@ export interface WriteOptions {
   notesFolder: string;
   assetsFolder: string;
   now?: Date;
+  /** Leave capture_id out of the fallback renderer's frontmatter (the shared hideCaptureId setting). */
+  hideCaptureId?: boolean;
+  /** Captures this device already wrote, for when capture_id isn't in the frontmatter. */
+  writtenCapture?: (id: string) => string | null;
 }
 
 export type WriteResult =
@@ -122,7 +126,7 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   const { job } = input;
   const { vault, index, template } = options;
 
-  const existing = index.findByCaptureId(job.id);
+  const existing = index.findByCaptureId(job.id) ?? options.writtenCapture?.(job.id) ?? null;
   if (existing) return { kind: "already-written", path: existing };
 
   const url = bookmarkUrl(job);
@@ -181,7 +185,7 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   vars.content = content;
 
   const body = render(template.noteContentFormat, vars, page).replace(/^\s+/, "").replace(/\n{3,}/g, "\n\n");
-  await vault.createNote(notePath, `${renderFrontmatter(template, vars, page)}\n${body.trimEnd()}\n`);
+  await vault.createNote(notePath, `${renderFrontmatter(template, vars, page, options.hideCaptureId)}\n${body.trimEnd()}\n`);
   index.set(notePath, url, job.id);
   return { kind: "written", path: notePath };
 }

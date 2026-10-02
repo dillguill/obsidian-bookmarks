@@ -106,6 +106,17 @@ describe("writeBookmark", () => {
     expect(vault.files.get(second.path)).toBe(`---\nsource: "https://example.com/post"\ncover: ""\ncapture_id: "${job().id}"\n---\n# Body\n`);
   });
 
+  it("leaves capture_id out when hidden and still skips a capture it already wrote", async () => {
+    const written = new Map<string, string>();
+    const opts = { ...options(), hideCaptureId: true, writtenCapture: (id: string) => written.get(id) ?? null };
+    const first = await writeBookmark({ job: job(), markdown: "", screenshot: null }, opts);
+    expect(vault.files.get(first.path)).not.toContain("capture_id");
+    written.set(job().id, first.path);
+    // A fresh index (Obsidian restarted) has no capture ids, since the frontmatter has none.
+    index = new DedupIndex();
+    expect(await writeBookmark({ job: job(), markdown: "", screenshot: null }, { ...opts, index })).toEqual({ kind: "already-written", path: first.path });
+  });
+
   it("keeps the link when capture failed", async () => {
     const url = "https://www.nytimes.com/2026/10/01/technology/rogue-agents.html";
     const blockPage = { ...job().meta!, title: "Just a moment...", finalUrl: url, canonical: null };

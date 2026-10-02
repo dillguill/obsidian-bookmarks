@@ -72,6 +72,8 @@ server, so every device and every phone Shortcut uses the same settings:
 - **Capture**: screenshot style (full page, banner for the first screen only, or
   none), plus **Sites with banner screenshots** and **Sites without screenshots**
   (one site per line, subdomains included), which override the style.
+  **Hide capture ID** leaves `capture_id` out of new notes; the plugin then remembers
+  which captures it wrote, and URL dedup still skips a page that's already saved.
 - **Templates**: note name, note location, properties and note content, in Obsidian
   Web Clipper's template format. **Import template** takes a Web Clipper template export or Web Clipper's full
   settings export (only the templates are read). Notes are rendered by
