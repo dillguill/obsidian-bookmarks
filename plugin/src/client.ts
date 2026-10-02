@@ -1,5 +1,5 @@
 import { requestUrl, type RequestUrlResponse } from "obsidian";
-import type { AssetKind, CaptureOrigin, Job } from "./api";
+import type { AssetKind, CaptureOrigin, CaptureSettings, Job } from "./api";
 
 export class ServerError extends Error {
   constructor(
@@ -67,6 +67,15 @@ export class ServerClient {
 
   async assetBinary(id: string, kind: AssetKind): Promise<ArrayBuffer> {
     return (await this.request("GET", `/jobs/${id}/asset/${kind}`)).arrayBuffer;
+  }
+
+  /** Capture settings shared by every device, kept on the server. */
+  async getSettings(): Promise<CaptureSettings> {
+    return ((await this.request("GET", "/settings")).json as { settings: CaptureSettings }).settings;
+  }
+
+  async saveSettings(settings: CaptureSettings): Promise<CaptureSettings> {
+    return ((await this.request("PUT", "/settings", settings)).json as { settings: CaptureSettings }).settings;
   }
 
   async delivered(id: string): Promise<void> {

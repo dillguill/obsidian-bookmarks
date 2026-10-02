@@ -5,8 +5,8 @@ import { ServerClient } from "./client";
 import { DedupIndex } from "./dedup";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
 import { DEFAULT_TEMPLATE, captureIdPropertyName, urlPropertyName } from "./template";
-import { findUrl, matchesSiteList, normalizeUrl } from "./url";
-import { bookmarkUrl, writeBookmark, type VaultPort, type WriteResult } from "./writer";
+import { findUrl, normalizeUrl } from "./url";
+import { writeBookmark, type VaultPort, type WriteResult } from "./writer";
 
 export default class BookmarksPlugin extends Plugin {
   override settings: BookmarksSettings = DEFAULT_SETTINGS;
@@ -51,6 +51,20 @@ export default class BookmarksPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<BookmarksSettings>) };
+  }
+
+  /**
+   * Older versions kept "Sites without screenshots" in this device's plugin
+   * data. Moves that list into the server's shared settings once.
+   */
+  private async migrateLocalSites(): Promise<void> {
+    const legacy = this.settings.noScreenshotSites;
+    if (!legacy?.length) return;
+    const client = this.client();
+    const shared = await client.getSettings();
+    await client.saveSettings({ ...shared, noScreenshotSites: [...new Set([...shared.noScreenshotSites, ...legacy])] });
+    delete this.settings.noScreenshotSites;
+    await this.saveData(this.settings);
   }
 
   async saveSettings(): Promise<void> {
@@ -108,8 +122,8 @@ export default class BookmarksPlugin extends Plugin {
     try {
       const client = this.client();
       const markdown = job.assets.includes("markdown") ? await client.assetText(job.id, "markdown") : "";
-      const skipShot = matchesSiteList(bookmarkUrl(job), this.settings.noScreenshotSites) || matchesSiteList(job.url, this.settings.noScreenshotSites);
-      const screenshot = job.assets.includes("screenshot") && !skipShot ? await client.assetBinary(job.id, "screenshot") : null;
+      // The server applies the shared screenshot settings, so a missing screenshot asset means "none".
+      const screenshot = job.assets.includes("screenshot") ? await client.assetBinary(job.id, "screenshot") : null;
       const result = await writeBookmark(
         { job, markdown, screenshot },
         {
@@ -204,6 +218,7 @@ export default class BookmarksPlugin extends Plugin {
         this.versionWarned = true;
         return;
       }
+      await this.migrateLocalSites().catch((err: unknown) => console.warn("bookmarks: settings migration failed", err));
       for (const job of await this.client().finishedJobs()) {
         const result = await this.deliver(job);
         if (result?.kind === "written") written++;

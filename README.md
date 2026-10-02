@@ -62,8 +62,17 @@ your vault as deduplicated bookmark notes. See the
 
 Sites that block the capture (bot walls, hard paywalls) still get a note with the
 link and a "Capture failed" callout but no screenshot, so nothing sent from the phone
-is lost. To skip screenshots for particular sites, list them under **Sites without
-screenshots** in the plugin settings (one per line; subdomains are included).
+is lost.
+
+**Capture settings** (in the plugin's settings under **Capture**) are stored on the
+server, so every device and every phone Shortcut uses the same ones:
+
+- **Screenshot style**: full page (default), banner (first screen only), or none.
+- **Sites with banner screenshots** and **Sites without screenshots**: one site per
+  line, subdomains included; these override the style above.
+
+Other plugin settings (server URL, folders, poll interval) are per device; the API
+token stays in each device's secret storage.
 
 ### Server API
 
@@ -76,6 +85,7 @@ All endpoints need `Authorization: Bearer <token>`.
 | `GET /jobs/:id` | One job. |
 | `GET /jobs/:id/asset/screenshot` / `markdown` | Capture output. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
+| `GET /settings` / `PUT /settings` | Shared capture settings `{screenshotStyle, bannerSites, noScreenshotSites}`. |
 | `GET /health` | `{status, apiVersion, version}`; the plugin warns when `apiVersion` doesn't match. |
 
 ## Development

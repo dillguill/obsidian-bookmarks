@@ -1,6 +1,6 @@
 // Wire types for the bookmarks-server HTTP API; mirrors harness/src/api.ts.
 // Bump API_VERSION in both when the API changes incompatibly.
-export const API_VERSION = 1;
+export const API_VERSION = 2;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -41,3 +41,18 @@ export interface Job {
 }
 
 export type AssetKind = "screenshot" | "markdown";
+
+/** How much of the page the screenshot covers. */
+export type ScreenshotStyle = "full" | "banner" | "none";
+
+/**
+ * Capture settings shared by every device, stored on the server so captures
+ * from a phone Shortcut follow the same rules as the plugin.
+ */
+export interface CaptureSettings {
+  screenshotStyle: ScreenshotStyle;
+  /** Sites (and their subdomains) that get only the first screen. */
+  bannerSites: string[];
+  /** Sites (and their subdomains) saved without a screenshot. */
+  noScreenshotSites: string[];
+}

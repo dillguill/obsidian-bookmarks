@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { API_VERSION, type AssetKind, type CaptureOrigin, type JobStatus } from "./api.js";
 import type { Config } from "./config.js";
 import type { JobStore } from "./db.js";
+import { parseCaptureSettings } from "./settings.js";
 import { urlRejection } from "./ssrf.js";
 import { assetPath, type Worker } from "./worker.js";
 
@@ -71,6 +72,20 @@ export function createApp(deps: AppDeps): Server {
 
     if (method === "GET" && path === "/health") {
       return sendJson(res, 200, { status: "ok", apiVersion: API_VERSION, version: deps.version });
+    }
+
+    if (path === "/settings" && method === "GET") return sendJson(res, 200, { settings: store.getSettings() });
+
+    if (path === "/settings" && method === "PUT") {
+      let parsed: ReturnType<typeof parseCaptureSettings>;
+      try {
+        parsed = parseCaptureSettings(JSON.parse(await readBody(req)));
+      } catch {
+        return sendJson(res, 400, { error: "bad_request", message: "Body must be JSON capture settings." });
+      }
+      if (typeof parsed === "string") return sendJson(res, 400, { error: "bad_request", message: parsed });
+      store.saveSettings(parsed);
+      return sendJson(res, 200, { settings: parsed });
     }
 
     if (method === "POST" && path === "/capture") {

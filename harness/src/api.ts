@@ -1,7 +1,7 @@
 // Wire types for the HTTP API. plugin/src/api.ts mirrors these; bump
 // API_VERSION on any breaking change so a mismatched pair says which side to
 // update (design §5.3).
-export const API_VERSION = 1;
+export const API_VERSION = 2;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -42,3 +42,18 @@ export interface Job {
 }
 
 export type AssetKind = "screenshot" | "markdown";
+
+/** How much of the page the screenshot covers. */
+export type ScreenshotStyle = "full" | "banner" | "none";
+
+/**
+ * Capture settings shared by every device, stored on the server so captures
+ * from a phone Shortcut follow the same rules as the plugin.
+ */
+export interface CaptureSettings {
+  screenshotStyle: ScreenshotStyle;
+  /** Sites (and their subdomains) that get only the first screen. */
+  bannerSites: string[];
+  /** Sites (and their subdomains) saved without a screenshot. */
+  noScreenshotSites: string[];
+}

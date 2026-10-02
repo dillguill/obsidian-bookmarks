@@ -1,7 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { AssetKind, CaptureOrigin, Job, JobStatus, PageMeta } from "./api.js";
+import type { AssetKind, CaptureOrigin, CaptureSettings, Job, JobStatus, PageMeta } from "./api.js";
+import { DEFAULT_CAPTURE_SETTINGS } from "./settings.js";
 import { ulid } from "./ulid.js";
 
 interface Row {
@@ -56,6 +57,7 @@ export class JobStore {
         delivered_at TEXT
       );
       CREATE INDEX IF NOT EXISTS jobs_status ON jobs (status, id);
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
     // A crash mid-capture leaves rows running; retry them.
     this.db.prepare("UPDATE jobs SET status = 'pending' WHERE status = 'running'").run();
@@ -124,6 +126,17 @@ export class JobStore {
       .prepare("UPDATE jobs SET assets = '[]' WHERE status = 'delivered' AND delivered_at < ? AND assets != '[]' RETURNING id")
       .all(cutoff.toISOString()) as unknown as Array<{ id: string }>;
     return rows.map((row) => row.id);
+  }
+
+  getSettings(): CaptureSettings {
+    const row = this.db.prepare("SELECT value FROM settings WHERE key = 'capture'").get() as { value: string } | undefined;
+    return { ...DEFAULT_CAPTURE_SETTINGS, ...(row ? (JSON.parse(row.value) as Partial<CaptureSettings>) : {}) };
+  }
+
+  saveSettings(settings: CaptureSettings): void {
+    this.db
+      .prepare("INSERT INTO settings (key, value) VALUES ('capture', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
+      .run(JSON.stringify(settings));
   }
 
   close(): void {

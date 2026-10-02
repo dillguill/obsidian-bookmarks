@@ -319,9 +319,9 @@ Each phase is independently useful with a concrete exit.
   experience inside Obsidian.
 - **Phase 5 — power features.** Opt-in AI tagging/summary (BYOK), screenshot
   backfill for pending captures, archival retention/pruning policy, bulk
-  re-capture. Screenshot style setting: full page (today's only mode),
-  banner (first screen only), or none, chosen globally with per-site
-  overrides next to "Sites without screenshots". *Exit:* the
+  re-capture. (Screenshot style setting, full page / banner / none with
+  per-site overrides, done 2026-10-02 as server-side shared capture
+  settings.) *Exit:* the
   Karakeep-replacement feature set is complete.
 
 ---
