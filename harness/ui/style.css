@@ -94,7 +94,13 @@ button.add { align-self: flex-start; }
 }
 .status.show { opacity: 1; }
 .status.error { color: var(--danger); }
-details summary { cursor: pointer; }
+h2 { font-size: 15px; margin: 24px 0 4px; }
+a { color: var(--accent); }
+.key { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.key td { border-top: 1px solid var(--border); padding: 7px 8px 7px 0; vertical-align: top; font-size: 13px; }
+.key td:first-child { width: 38%; white-space: nowrap; }
+code.copy { cursor: pointer; }
+code.copy:hover { outline: 1px solid var(--accent); }
 
 @media (max-width: 720px) {
   .layout { flex-direction: column; }
@@ -102,4 +108,5 @@ details summary { cursor: pointer; }
   .content { padding: 20px 16px 48px; }
   .property { grid-template-columns: 1fr 1fr auto; }
   .property select { grid-column: 1 / -1; }
+  .key td:first-child { white-space: normal; word-break: break-all; }
 }

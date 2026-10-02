@@ -89,7 +89,7 @@ window.addEventListener("beforeunload", (event) => {
 // ---- sections ----
 
 function show(section) {
-  for (const id of ["signin", "general", "capture", "template"]) $(id).hidden = id !== section;
+  for (const id of ["signin", "general", "capture", "variables", "template"]) $(id).hidden = id !== section;
 }
 
 function showSignIn(message) {
@@ -386,6 +386,26 @@ function showImportNote(text) {
 }
 
 // ---- navigation and sign-in ----
+
+for (const el of document.querySelectorAll("[data-goto]")) {
+  el.addEventListener("click", (event) => {
+    event.preventDefault();
+    view = { section: el.dataset.goto, template: view.template };
+    render();
+  });
+}
+
+for (const el of document.querySelectorAll("code.copy")) {
+  el.title = "Copy";
+  el.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(el.textContent);
+      status(`Copied ${el.textContent}`);
+    } catch {
+      status("Couldn't copy; select the text instead.", true);
+    }
+  });
+}
 
 for (const el of document.querySelectorAll(".nav-item[data-section]")) {
   el.addEventListener("click", () => {

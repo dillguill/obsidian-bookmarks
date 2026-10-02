@@ -13,6 +13,7 @@
       <div class="brand">Bookmarks</div>
       <button class="nav-item" data-section="general">General</button>
       <button class="nav-item" data-section="capture">Capture</button>
+      <button class="nav-item" data-section="variables">Variables</button>
       <div class="nav-heading">
         <span>Templates</span>
         <button class="icon-button" id="new-template" title="New template" aria-label="New template">+</button>
@@ -82,6 +83,57 @@
         </div>
       </section>
 
+      <section id="variables" hidden>
+        <h1>Variables</h1>
+        <p class="desc">Use these in a template's note name, properties and note content. Click one to copy it. Filters go inside the braces, e.g. <code>{{title|kebab}}</code>, and can be chained.</p>
+        <h2>Page</h2>
+        <p class="desc">From the captured page.</p>
+        <table class="key">
+            <tr><td><code class="copy">{{title}}</code></td><td>Page title (falls back to words from the URL).</td></tr>
+            <tr><td><code class="copy">{{url}}</code></td><td>Link saved for the bookmark: the page's canonical URL when it's on the same site.</td></tr>
+            <tr><td><code class="copy">{{description}}</code></td><td>Page description or summary.</td></tr>
+            <tr><td><code class="copy">{{author}}</code></td><td>Author, when the page names one.</td></tr>
+            <tr><td><code class="copy">{{published}}</code></td><td>Publish date, when the page has one.</td></tr>
+            <tr><td><code class="copy">{{site}}</code></td><td>Site name, e.g. Hugging Face.</td></tr>
+            <tr><td><code class="copy">{{domain}}</code></td><td>Domain without www, e.g. huggingface.co.</td></tr>
+            <tr><td><code class="copy">{{image}}</code></td><td>Main image URL (the social preview image).</td></tr>
+            <tr><td><code class="copy">{{favicon}}</code></td><td>Site icon URL.</td></tr>
+            <tr><td><code class="copy">{{content}}</code></td><td>The readable page text as Markdown.</td></tr>
+        </table>
+        <h2>Capture</h2>
+        <p class="desc">About this bookmark.</p>
+        <table class="key">
+            <tr><td><code class="copy">{{date}}</code></td><td>When the note was written. Format it with <code>|date:"YYYY-MM-DD"</code>.</td></tr>
+            <tr><td><code class="copy">{{capture_id}}</code></td><td>The capture's id; always saved so a capture is never written twice.</td></tr>
+        </table>
+        <h2>Screenshot</h2>
+        <p class="desc">Empty when there's no screenshot (style none, a no-screenshot site, or a blocked page).</p>
+        <table class="key">
+            <tr><td><code class="copy">{{screenshot_embed}}</code></td><td>Shows the image in the note: <code>![[path]]</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_link}}</code></td><td>Link to the image: <code>[[path]]</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot}}</code></td><td>The image's vault path, e.g. <code>Bookmarks/assets/note.jpg</code>.</td></tr>
+        </table>
+        <h2>Schema and meta</h2>
+        <p class="desc">Read from the page's schema.org data and meta tags, as in Web Clipper.</p>
+        <table class="key">
+            <tr><td><code class="copy">{{schema:@Type:path}}</code></td><td>A value from schema.org data of that type, e.g. <code>{{schema:@Recipe:name}}</code> or <code>{{schema:@BreadcrumbList:itemListElement[2].name}}</code>. <code>[*]</code> takes every item.</td></tr>
+            <tr><td><code class="copy">{{schema:path}}</code></td><td>The same, from any schema.org object on the page.</td></tr>
+            <tr><td><code class="copy">{{meta:name:author}}</code></td><td>A <code>&lt;meta name=…&gt;</code> tag.</td></tr>
+            <tr><td><code class="copy">{{meta:property:og:title}}</code></td><td>A <code>&lt;meta property=…&gt;</code> tag.</td></tr>
+        </table>
+        <h2>Filters</h2>
+        <table class="key">
+            <tr><td><code class="copy">|kebab</code></td><td>My Page Title becomes my-page-title.</td></tr>
+            <tr><td><code class="copy">|safe_name</code></td><td>Removes characters not allowed in file names.</td></tr>
+            <tr><td><code class="copy">|trim</code></td><td>Removes spaces at the ends.</td></tr>
+            <tr><td><code class="copy">|lower</code></td><td>lowercase</td></tr>
+            <tr><td><code class="copy">|upper</code></td><td>UPPERCASE</td></tr>
+            <tr><td><code class="copy">|date:"YYYY-MM-DD"</code></td><td>Formats a date. Tokens: YYYY MM DD HH mm ss.</td></tr>
+        </table>
+        <h2>Not supported yet</h2>
+        <p class="desc">These come out empty for now: <code>{{selector:…}}</code> and <code>{{selectorHtml:…}}</code> (planned with the power features), and prompt variables like <code>{{"summary of page"}}</code> (planned for the AI stage). Other Web Clipper filters (split, join, wikilink, replace…) leave the value unchanged.</p>
+      </section>
+
       <section id="template" hidden>
         <div class="title-row">
           <h1 id="template-title">Template</h1>
@@ -123,11 +175,7 @@
         <div class="setting column">
           <label class="setting-name" for="t-content">Note content</label>
           <textarea id="t-content" rows="8" spellcheck="false"></textarea>
-          <details class="desc">
-            <summary>Available variables</summary>
-            <p><code>{{url}}</code> <code>{{title}}</code> <code>{{description}}</code> <code>{{author}}</code> <code>{{domain}}</code> <code>{{site}}</code> <code>{{published}}</code> <code>{{image}}</code> <code>{{favicon}}</code> <code>{{date}}</code> <code>{{content}}</code> <code>{{screenshot}}</code> <code>{{screenshot_link}}</code> <code>{{screenshot_embed}}</code> <code>{{capture_id}}</code> <code>{{schema:@Type:path}}</code> <code>{{meta:name:author}}</code></p>
-            <p>Filters: <code>|kebab</code> <code>|safe_name</code> <code>|trim</code> <code>|lower</code> <code>|upper</code> <code>|date:"YYYY-MM-DD"</code></p>
-          </details>
+          <p class="desc">See <a href="#" data-goto="variables">Variables</a> for everything you can use in templates.</p>
         </div>
       </section>
     </main>
