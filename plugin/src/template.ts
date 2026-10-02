@@ -1,11 +1,13 @@
 // Templates use Obsidian Web Clipper's JSON format (design §4) and are edited
 // on the server's settings page. The plugin renders a subset: plain
-// `{{variable}}` and the filters below. Web Clipper variables the server can't
-// fill yet (schema:, meta:, selectors, prompts) render empty, as Web Clipper
-// does for missing values; other unknown text passes through unchanged.
+// `{{variable}}`, `{{schema:…}}`, `{{meta:…}}` and the filters below. Web
+// Clipper variables the server can't fill yet (selectors, prompts) render
+// empty, as Web Clipper does for missing values; other unknown text passes
+// through unchanged.
 // DEFAULT_TEMPLATE mirrors harness/src/template-default.ts.
 
 import type { ClipperTemplate } from "./api";
+import { pageVariable, type PageData } from "./page-data";
 
 export type { ClipperTemplate, PropertyType, TemplateProperty } from "./api";
 
@@ -82,16 +84,17 @@ function applyFilter(value: string, filter: string): string {
   }
 }
 
-/** Web Clipper variables that need the live page or an LLM. */
+/** Web Clipper variables that need the live page or an LLM (schema/meta need the capture's page data). */
 export const UNSUPPORTED_VARIABLE = /^(schema|meta|selector|selectorHtml):|^"/;
 
 /** Renders `{{name|filter|filter:"arg"}}` expressions in `text`. */
-export function render(text: string, vars: Variables): string {
+export function render(text: string, vars: Variables, page?: PageData): string {
   return text.replace(/\{\{([^{}]+)\}\}/g, (whole, expr: string) => {
     const [name, ...filters] = expr.split("|");
     const key = name!.trim();
-    if (!(key in vars)) return UNSUPPORTED_VARIABLE.test(key) ? "" : whole;
-    return filters.reduce((value, filter) => applyFilter(value, filter), vars[key] ?? "");
+    const value = key in vars ? vars[key] : pageVariable(key, page);
+    if (value === undefined) return UNSUPPORTED_VARIABLE.test(key) ? "" : whole;
+    return filters.reduce((acc, filter) => applyFilter(acc, filter), value ?? "");
   });
 }
 
@@ -104,13 +107,13 @@ function yamlScalar(value: string): string {
  * Renders the frontmatter block. The URL and capture_id properties are
  * required whatever the template says (dedup and idempotency depend on them).
  */
-export function renderFrontmatter(template: ClipperTemplate, vars: Variables): string {
+export function renderFrontmatter(template: ClipperTemplate, vars: Variables, page?: PageData): string {
   const properties = [...template.properties];
   if (!properties.some((p) => p.value === URL_VARIABLE)) properties.unshift({ name: "source", value: URL_VARIABLE, type: "text" });
   if (!properties.some((p) => p.value === CAPTURE_ID_VARIABLE)) properties.push({ name: "capture_id", value: CAPTURE_ID_VARIABLE, type: "text" });
 
   const lines = properties.map(({ name, value, type }) => {
-    const rendered = render(value, vars).trim();
+    const rendered = render(value, vars, page).trim();
     const key = /^[\w-]+$/.test(name) ? name : yamlScalar(name);
     switch (type) {
       case "multitext": {

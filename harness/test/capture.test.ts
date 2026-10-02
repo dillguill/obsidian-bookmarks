@@ -46,7 +46,10 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
           <main style="height:100vh;overflow:auto"><article>${"<p>Inner scrolling paragraph with plenty of words in it.</p>".repeat(200)}</article></main></body></html>`);
         return;
       }
-      res.end(`<html><head><title>Article</title><link rel="icon" href="/fav.ico"></head><body>
+      res.end(`<html><head><title>Article</title><link rel="icon" href="/fav.ico">
+        <meta name="author" content="Grace"><meta property="og:title" content="Article">
+        <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BreadcrumbList","itemListElement":[{"name":"Home"},{"name":"Docs"}]}]}</script>
+        <script type="application/ld+json">{ not json</script></head><body>
         <div id="onetrust-consent-sdk" style="position:fixed;bottom:0">We use cookies</div>
         <article><h1>Article</h1>${"<p>Some readable words for the extractor to find here.</p>".repeat(40)}</article></body></html>`);
     });
@@ -64,6 +67,8 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
     expect(result.meta.title).toBe("Article");
     expect(result.meta.favicon).toBe(`${base}/fav.ico`);
     expect(result.markdown).toContain("Some readable words");
+    expect(result.meta.metaTags).toMatchObject({ "name:author": "Grace", "property:og:title": "Article" });
+    expect(result.meta.schema).toContainEqual({ "@type": "BreadcrumbList", itemListElement: [{ name: "Home" }, { name: "Docs" }] });
     expect(result.screenshotExt).toBe("jpg");
     expect(result.screenshot!.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
   });

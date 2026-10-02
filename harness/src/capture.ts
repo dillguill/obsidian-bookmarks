@@ -259,7 +259,7 @@ export class PlaywrightEngine implements CaptureEngine {
       const DefuddleCtor = (window as unknown as { Defuddle: new (doc: Document, opts: object) => { parse(): Record<string, unknown> } }).Defuddle;
       const r = new DefuddleCtor(document, { url: pageUrl }).parse();
       return {
-        title: String(r.title ?? document.title ?? ""),
+        title: String(r.title || document.title || ""),
         description: String(r.description ?? ""),
         author: String(r.author ?? ""),
         site: String(r.site ?? ""),
@@ -271,7 +271,38 @@ export class PlaywrightEngine implements CaptureEngine {
         content: String(r.content ?? ""),
         canonical: document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href ?? null,
         bodyText: (document.body?.innerText ?? "").slice(0, 5000),
+        ...pageData(),
       };
+
+      /** JSON-LD objects and meta tags for Web Clipper's {{schema:…}} and {{meta:…}} variables. */
+      function pageData() {
+        const schema: unknown[] = [];
+        let budget = 200_000;
+        const add = (value: unknown) => {
+          if (Array.isArray(value)) return value.forEach(add);
+          if (!value || typeof value !== "object") return;
+          const size = JSON.stringify(value).length;
+          if (size > budget) return;
+          budget -= size;
+          schema.push(value);
+          const graph = (value as { "@graph"?: unknown })["@graph"];
+          if (graph) add(graph);
+        };
+        for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+          try {
+            add(JSON.parse(script.textContent ?? ""));
+          } catch {
+            // malformed JSON-LD is common; skip it
+          }
+        }
+        const metaTags: Record<string, string> = {};
+        for (const el of document.querySelectorAll<HTMLMetaElement>("meta[name], meta[property]")) {
+          const key = el.hasAttribute("property") ? `property:${el.getAttribute("property")}` : `name:${el.getAttribute("name")}`;
+          const content = el.content?.trim();
+          if (content && !(key in metaTags) && Object.keys(metaTags).length < 300) metaTags[key] = content.slice(0, 2000);
+        }
+        return { schema, metaTags };
+      }
     }, page.url());
 
     const finalUrl = page.url();
@@ -289,6 +320,8 @@ export class PlaywrightEngine implements CaptureEngine {
       wordCount: parsed.wordCount,
       httpStatus: response?.status() ?? null,
       truncated: false,
+      schema: parsed.schema,
+      metaTags: parsed.metaTags,
     };
 
     const blocked = blockReason(meta, parsed.bodyText);

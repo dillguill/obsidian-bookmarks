@@ -150,7 +150,7 @@ presets, `meta:`, `schema:`, and filters; `selector:` is evaluated by the
 container (the only place with the page DOM), so templates sync from the plugin
 to the container, which also lets remote captures pick a template by trigger.
 Not supported: `highlights`, `selection` (no user in a headless browser),
-prompt variables (deferred to the AI phase, §7), and `behavior` other than
+prompt variables (deferred to the AI phase, Phase 6 in §9), and `behavior` other than
 "create new note". Import lists anything it skipped. The URL and `capture_id`
 properties are required whatever the template says (dedup and idempotency
 depend on them). The MVP ships one built-in default template in this format;
@@ -267,7 +267,7 @@ warning, but the plugin is the authority.
 
 - **Manual tags + auto metadata** by default (no AI dependency): capture fills
   the mapped metadata properties for filtering/browsing.
-- **Opt-in AI auto-tagging** (later phase): capture can suggest tags/summary via
+- **Opt-in AI auto-tagging** (Phase 6, its own stage): capture can suggest tags/summary via
   a BYOK LLM (reuse `obsidian-chat`'s provider setup style). Off by default,
   per-capture or batch. Adds an AI dependency only when enabled.
 
@@ -317,12 +317,19 @@ Each phase is independently useful with a concrete exit.
 - **Phase 4 — the browse view.** Optional custom `ItemView`: screenshot grid,
   property filters, search, quick edits. *Exit:* a clean Karakeep-like browse
   experience inside Obsidian.
-- **Phase 5 — power features.** Opt-in AI tagging/summary (BYOK), screenshot
-  backfill for pending captures, archival retention/pruning policy, bulk
-  re-capture. (Screenshot style setting, full page / banner / none with
-  per-site overrides, done 2026-10-02 as server-side shared capture
-  settings.) *Exit:* the
-  Karakeep-replacement feature set is complete.
+- **Phase 5 — power features.** Screenshot backfill for pending captures,
+  archival retention/pruning policy, bulk re-capture, Web Clipper selector
+  variables (`{{selector:…}}`, `{{selectorHtml:…}}`, evaluated on the server
+  at capture time). (Done 2026-10-02: screenshot style setting, full page /
+  banner / none with per-site overrides, as server-side shared settings with
+  a settings page; Web Clipper template import with `{{schema:…}}` and
+  `{{meta:…}}` variables.) *Exit:* the Karakeep-replacement feature set is
+  complete, without any AI dependency.
+- **Phase 6 — AI (opt-in, its own stage).** Kept separate so nothing before it
+  needs a model. BYOK provider settings (OpenRouter, Ollama and the like, keys
+  stored only on the server), Web Clipper prompt variables (`{{"summary of
+  page"}}`), auto-tagging and summaries. Off by default. *Exit:* templates
+  that use prompt variables render as they do in Web Clipper.
 
 ---
 

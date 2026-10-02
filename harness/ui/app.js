@@ -324,7 +324,7 @@ function templatesFrom(json) {
 }
 
 // Variables the server can't fill yet; they come out empty in notes.
-const UNSUPPORTED_VARIABLE = /\{\{\s*(schema:|meta:|selector:|selectorHtml:|")/;
+const UNSUPPORTED_VARIABLE = /\{\{\s*(selector:|selectorHtml:|")/;
 
 function importTemplate(raw, fallbackName) {
   return {
@@ -372,7 +372,7 @@ $("import-file").addEventListener("change", async (e) => {
   const summary = `Imported ${imported.length} template${imported.length === 1 ? "" : "s"}.`;
   showImportNote(
     partial.length
-      ? `${summary} ${partial.join(", ")} use${partial.length === 1 ? "s" : ""} schema, meta, selector or prompt variables, which the server can't fill yet; they come out empty.`
+      ? `${summary} ${partial.join(", ")} use${partial.length === 1 ? "s" : ""} selector or prompt variables, which the server can't fill yet; they come out empty.`
       : summary,
   );
 });

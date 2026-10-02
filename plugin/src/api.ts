@@ -23,6 +23,10 @@ export interface PageMeta {
   httpStatus: number | null;
   /** Screenshot was cut at the height cap. */
   truncated: boolean;
+  /** schema.org JSON-LD objects on the page (arrays and @graph flattened), for `{{schema:…}}`. */
+  schema?: unknown[];
+  /** `<meta>` values keyed "name:author" or "property:og:title", for `{{meta:…}}`. */
+  metaTags?: Record<string, string>;
 }
 
 export interface Job {
