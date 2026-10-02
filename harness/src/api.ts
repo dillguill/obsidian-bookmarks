@@ -62,6 +62,13 @@ export interface CaptureSettings {
   noScreenshotSites: string[];
   /** Note templates; the first is the default. */
   templates: ClipperTemplate[];
+  /** Property name -> type, shared by every template, like Web Clipper's Properties settings. */
+  propertyTypes: PropertyTypeEntry[];
+}
+
+export interface PropertyTypeEntry {
+  name: string;
+  type: PropertyType;
 }
 
 export type PropertyType = "text" | "multitext" | "number" | "checkbox" | "date" | "datetime";

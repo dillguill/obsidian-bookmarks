@@ -53,6 +53,148 @@ function status(text, isError = false) {
   if (!isError) statusTimer = setTimeout(() => el.classList.remove("show"), 1500);
 }
 
+// ---- drag to reorder ----
+
+/**
+ * Makes `row` draggable by `handle` within `container` (pointer events, so it
+ * works with a mouse or a finger), plus Alt+Up/Down on the focused handle.
+ * Calls onMove(from, to) once the row is dropped somewhere new.
+ */
+function makeSortable(container, row, handle, onMove) {
+  handle.addEventListener("pointerdown", (down) => {
+    if (down.button !== 0) return;
+    down.preventDefault();
+    // Listen on window: moving the row in the DOM would drop pointer capture on the handle.
+    const rows = () => [...container.children];
+    const from = rows().indexOf(row);
+    row.classList.add("dragging");
+    const move = (event) => {
+      const others = rows().filter((r) => r !== row);
+      const before = others.find((r) => {
+        const box = r.getBoundingClientRect();
+        return event.clientY < box.top + box.height / 2;
+      });
+      if (before) container.insertBefore(row, before);
+      else container.append(row);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      row.classList.remove("dragging");
+      const to = rows().indexOf(row);
+      if (to !== from) onMove(from, to);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  });
+  handle.addEventListener("keydown", (event) => {
+    if (!event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+    event.preventDefault();
+    const from = [...container.children].indexOf(row);
+    const to = from + (event.key === "ArrowUp" ? -1 : 1);
+    if (to < 0 || to >= container.children.length) return;
+    onMove(from, to);
+    container.children[to]?.querySelector(".handle")?.focus();
+  });
+}
+
+function dragHandle(label) {
+  const handle = document.createElement("button");
+  handle.type = "button";
+  handle.className = "handle";
+  handle.textContent = "⠿";
+  handle.title = "Drag to reorder (or Alt+Up/Down)";
+  handle.setAttribute("aria-label", label);
+  return handle;
+}
+
+function moveItem(list, from, to) {
+  const [item] = list.splice(from, 1);
+  list.splice(to, 0, item);
+}
+
+// ---- property types (shared, like Obsidian's) ----
+
+function typeOf(name) {
+  return settings.propertyTypes.find((p) => p.name === name.trim())?.type;
+}
+
+/** Records a type for a property name and applies it to that property in every template. */
+function setPropertyType(name, type) {
+  const key = name.trim();
+  if (!key) return;
+  const entry = settings.propertyTypes.find((p) => p.name === key);
+  if (entry) entry.type = type;
+  else settings.propertyTypes.push({ name: key, type });
+  for (const t of settings.templates) for (const p of t.properties) if (p.name.trim() === key) p.type = type;
+}
+
+function renderPropertyNames() {
+  $("property-names").replaceChildren(...settings.propertyTypes.map((p) => new Option(p.name)));
+}
+
+function typeSelect(value, onChange) {
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", "Property type");
+  for (const name of PROPERTY_TYPES) select.add(new Option(name, name));
+  select.value = value;
+  select.addEventListener("change", () => onChange(select.value));
+  return select;
+}
+
+function renderPropertyTypes() {
+  const container = $("property-types");
+  container.replaceChildren(
+    ...settings.propertyTypes.map((entry, i) => {
+      const row = document.createElement("div");
+      row.className = "property type-row";
+      const name = document.createElement("input");
+      name.type = "text";
+      name.value = entry.name;
+      name.setAttribute("aria-label", "Property name");
+      name.addEventListener("change", () => {
+        const next = name.value.trim();
+        if (!next || settings.propertyTypes.some((p, j) => j !== i && p.name === next)) {
+          name.value = entry.name;
+          return;
+        }
+        entry.name = next;
+        renderPropertyNames();
+        scheduleSave();
+      });
+      const type = typeSelect(entry.type, (value) => {
+        setPropertyType(entry.name, value);
+        scheduleSave();
+      });
+      const remove = document.createElement("button");
+      remove.className = "icon-button";
+      remove.textContent = "×";
+      remove.title = "Remove property type";
+      remove.addEventListener("click", () => {
+        settings.propertyTypes.splice(i, 1);
+        renderPropertyTypes();
+        renderPropertyNames();
+        scheduleSave();
+      });
+      row.append(name, type, remove);
+      return row;
+    }),
+  );
+}
+
+$("add-property-type").addEventListener("click", () => {
+  let n = 1;
+  while (typeOf(`property ${n}`)) n++;
+  settings.propertyTypes.push({ name: `property ${n}`, type: "text" });
+  renderPropertyTypes();
+  renderPropertyNames();
+  scheduleSave();
+  const inputs = $("property-types").querySelectorAll("input");
+  inputs[inputs.length - 1]?.select();
+});
+
 // ---- saving ----
 
 function scheduleSave() {
@@ -89,7 +231,7 @@ window.addEventListener("beforeunload", (event) => {
 // ---- sections ----
 
 function show(section) {
-  for (const id of ["signin", "general", "capture", "variables", "template"]) $(id).hidden = id !== section;
+  for (const id of ["signin", "general", "capture", "properties", "variables", "template"]) $(id).hidden = id !== section;
 }
 
 function showSignIn(message) {
@@ -105,8 +247,10 @@ function render() {
     el.classList.toggle("active", el.dataset.section === view.section);
   }
   renderTemplateList();
+  renderPropertyNames();
   if (view.section === "template") renderTemplate();
   else if (view.section === "capture") renderCapture();
+  else if (view.section === "properties") renderPropertyTypes();
   show(view.section);
 }
 
@@ -114,6 +258,8 @@ function renderTemplateList() {
   const list = $("template-list");
   list.replaceChildren(
     ...settings.templates.map((t, i) => {
+      const row = document.createElement("div");
+      row.className = "nav-row";
       const button = document.createElement("button");
       button.className = "nav-item";
       button.textContent = i === 0 ? `${t.name || "Untitled"} (default)` : t.name || "Untitled";
@@ -122,7 +268,16 @@ function renderTemplateList() {
         view = { section: "template", template: i };
         render();
       });
-      return button;
+      const handle = dragHandle(`Reorder ${t.name || "template"}`);
+      makeSortable(list, row, handle, (from, to) => {
+        const selected = settings.templates[view.template];
+        moveItem(settings.templates, from, to);
+        view.template = settings.templates.indexOf(selected);
+        render();
+        scheduleSave();
+      });
+      row.append(handle, button);
+      return row;
     }),
   );
 }
@@ -171,17 +326,22 @@ function renderTemplate() {
 
 function renderProperties() {
   const t = current();
-  $("t-properties").replaceChildren(
+  const container = $("t-properties");
+  container.replaceChildren(
     ...t.properties.map((prop, i) => {
       const row = document.createElement("div");
       row.className = "property";
 
-      const type = document.createElement("select");
-      type.setAttribute("aria-label", "Property type");
-      for (const name of PROPERTY_TYPES) type.add(new Option(name, name));
-      type.value = prop.type;
-      type.addEventListener("change", () => {
-        prop.type = type.value;
+      const handle = dragHandle(`Reorder ${prop.name || "property"}`);
+      makeSortable(container, row, handle, (from, to) => {
+        moveItem(t.properties, from, to);
+        renderProperties();
+        scheduleSave();
+      });
+
+      const type = typeSelect(prop.type, (value) => {
+        prop.type = value;
+        setPropertyType(prop.name, value);
         scheduleSave();
       });
 
@@ -189,10 +349,24 @@ function renderProperties() {
       name.type = "text";
       name.placeholder = "name";
       name.value = prop.name;
+      name.setAttribute("list", "property-names");
       name.setAttribute("aria-label", "Property name");
       name.addEventListener("input", () => {
         prop.name = name.value;
+        // A known property keeps its shared type, as in Obsidian.
+        const known = typeOf(prop.name);
+        if (known && known !== prop.type) {
+          prop.type = known;
+          type.value = known;
+        }
         if (prop.name.trim()) scheduleSave();
+      });
+      name.addEventListener("change", () => {
+        if (prop.name.trim() && !typeOf(prop.name)) {
+          setPropertyType(prop.name, prop.type);
+          renderPropertyNames();
+          scheduleSave();
+        }
       });
 
       const value = document.createElement("input");
@@ -217,7 +391,7 @@ function renderProperties() {
         scheduleSave();
       });
 
-      row.append(type, name, value, remove);
+      row.append(handle, type, name, value, remove);
       return row;
     }),
   );
@@ -317,7 +491,7 @@ function templatesFrom(json) {
     const keys = Object.keys(json).filter((key) => key.startsWith("template_") && key !== "template_list");
     const ordered = [...order.filter((key) => keys.includes(key)), ...keys.filter((key) => !order.includes(key))];
     const templates = ordered.map((key) => json[key]).filter((t) => t && typeof t === "object" && !Array.isArray(t));
-    if (templates.length) return Object.assign(templates, { fullExport: true });
+    if (templates.length) return Object.assign(templates, { fullExport: true, propertyTypes: json.property_types });
   }
   if (json && typeof json === "object" && ("noteContentFormat" in json || "properties" in json)) return [json];
   throw new Error("This file doesn't look like a Web Clipper template.");
@@ -354,6 +528,11 @@ $("import-file").addEventListener("change", async (e) => {
     try {
       const raws = templatesFrom(JSON.parse(await file.text()));
       fullExport ||= Boolean(raws.fullExport);
+      for (const entry of Array.isArray(raws.propertyTypes) ? raws.propertyTypes : []) {
+        if (entry && entry.name && PROPERTY_TYPES.includes(entry.type) && !typeOf(String(entry.name))) {
+          settings.propertyTypes.push({ name: String(entry.name).trim(), type: entry.type });
+        }
+      }
       for (const raw of raws) imported.push(importTemplate(raw, file.name.replace(/\.json$/i, "")));
     } catch (err) {
       status(`${file.name}: ${err.message}`, true);
@@ -361,6 +540,7 @@ $("import-file").addEventListener("change", async (e) => {
     }
   }
   if (!imported.length) return;
+  for (const t of imported) for (const p of t.properties) if (!typeOf(p.name)) settings.propertyTypes.push({ name: p.name.trim(), type: p.type });
   // A full Web Clipper export brings its own default (its first template), so it goes on top.
   if (fullExport) settings.templates.unshift(...imported);
   else settings.templates.push(...imported);

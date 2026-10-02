@@ -7,7 +7,7 @@
 // DEFAULT_TEMPLATE mirrors harness/src/template-default.ts.
 
 import type { ClipperTemplate } from "./api";
-import { pageVariable, type PageData } from "./page-data";
+import { pageVariable, schemaValue, type PageData } from "./page-data";
 
 export type { ClipperTemplate, PropertyType, TemplateProperty } from "./api";
 
@@ -143,9 +143,11 @@ export function captureIdPropertyName(template: ClipperTemplate): string {
   return template.properties.find((p) => p.value === CAPTURE_ID_VARIABLE)?.name ?? "capture_id";
 }
 
-function triggerMatches(trigger: string, url: string): boolean {
+function triggerMatches(trigger: string, url: string, page: PageData | undefined): boolean {
   const t = trigger.trim();
-  if (!t || t.startsWith("schema:")) return false; // schema triggers need the page's JSON-LD; not supported yet
+  if (!t) return false;
+  // "schema:@Recipe" matches pages with that schema.org type; "schema:@Recipe:name" needs that value too.
+  if (t.startsWith("schema:")) return Boolean(page && schemaValue(t.slice("schema:".length), page));
   const regex = /^\/(.+)\/([a-z]*)$/.exec(t);
   if (regex) {
     try {
@@ -157,7 +159,7 @@ function triggerMatches(trigger: string, url: string): boolean {
   return url.startsWith(t);
 }
 
-/** The first template with a trigger matching `url`, else the first template (the default). */
-export function chooseTemplate(templates: readonly ClipperTemplate[], url: string): ClipperTemplate {
-  return templates.find((t) => t.triggers?.some((trigger) => triggerMatches(trigger, url))) ?? templates[0] ?? DEFAULT_TEMPLATE;
+/** The first template with a trigger matching the page, else the first template (the default). */
+export function chooseTemplate(templates: readonly ClipperTemplate[], url: string, page?: PageData): ClipperTemplate {
+  return templates.find((t) => t.triggers?.some((trigger) => triggerMatches(trigger, url, page))) ?? templates[0] ?? DEFAULT_TEMPLATE;
 }

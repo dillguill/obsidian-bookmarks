@@ -1,4 +1,4 @@
-import type { CaptureSettings, ClipperTemplate, PropertyType, ScreenshotStyle, TemplateProperty } from "./api.js";
+import type { CaptureSettings, ClipperTemplate, PropertyType, PropertyTypeEntry, ScreenshotStyle, TemplateProperty } from "./api.js";
 import { DEFAULT_TEMPLATE } from "./template-default.js";
 
 export const DEFAULT_CAPTURE_SETTINGS: CaptureSettings = {
@@ -6,6 +6,7 @@ export const DEFAULT_CAPTURE_SETTINGS: CaptureSettings = {
   bannerSites: [],
   noScreenshotSites: [],
   templates: [DEFAULT_TEMPLATE],
+  propertyTypes: DEFAULT_TEMPLATE.properties.map(({ name, type }) => ({ name, type })),
 };
 
 const STYLES: ReadonlySet<string> = new Set<ScreenshotStyle>(["full", "banner", "none"]);
@@ -67,7 +68,20 @@ export function parseCaptureSettings(body: unknown): CaptureSettings | string {
     if (typeof template === "string") return `Template ${i + 1}: ${template}`;
     templates.push(template);
   }
-  return { screenshotStyle: style as ScreenshotStyle, bannerSites, noScreenshotSites, templates };
+  const rawTypes = fields.propertyTypes ?? DEFAULT_CAPTURE_SETTINGS.propertyTypes;
+  if (!Array.isArray(rawTypes) || rawTypes.length > 1000) return "propertyTypes must be a list.";
+  const propertyTypes: PropertyTypeEntry[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawTypes) {
+    const entry = (raw ?? {}) as Record<string, unknown>;
+    const name = text(entry.name)?.trim();
+    const type = entry.type ?? "text";
+    if (!name) return "every property type needs a name.";
+    if (typeof type !== "string" || !PROPERTY_TYPES.has(type)) return `property "${name}" has unknown type ${String(type)}.`;
+    if (!seen.has(name)) propertyTypes.push({ name, type: type as PropertyType });
+    seen.add(name);
+  }
+  return { screenshotStyle: style as ScreenshotStyle, bannerSites, noScreenshotSites, templates, propertyTypes };
 }
 
 const text = (value: unknown, fallback = ""): string | null =>

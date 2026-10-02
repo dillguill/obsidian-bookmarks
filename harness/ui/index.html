@@ -13,6 +13,7 @@
       <div class="brand">Bookmarks</div>
       <button class="nav-item" data-section="general">General</button>
       <button class="nav-item" data-section="capture">Capture</button>
+      <button class="nav-item" data-section="properties">Properties</button>
       <button class="nav-item" data-section="variables">Variables</button>
       <div class="nav-heading">
         <span>Templates</span>
@@ -23,6 +24,7 @@
         Import template
         <input type="file" id="import-file" accept="application/json,.json" multiple hidden>
       </label>
+      <datalist id="property-names"></datalist>
     </nav>
 
     <main class="content">
@@ -81,6 +83,13 @@
           </div>
           <textarea id="no-screenshot-sites" rows="4" placeholder="nytimes.com&#10;reddit.com"></textarea>
         </div>
+      </section>
+
+      <section id="properties" hidden>
+        <h1>Properties</h1>
+        <p class="desc">Property types are shared by every template, as in Obsidian. Changing a type here, or in a template, changes it everywhere. A new property in a template takes its type from this list.</p>
+        <div id="property-types" class="properties"></div>
+        <button id="add-property-type" class="add">+ Add property type</button>
       </section>
 
       <section id="variables" hidden>
@@ -152,7 +161,7 @@
         <div class="setting column">
           <div class="setting-info">
             <label class="setting-name" for="t-triggers">Template triggers</label>
-            <div class="desc">One per line: a URL prefix like <code>https://github.com/</code> or a regex like <code>/youtube\.com\/watch/</code>. The first template that matches is used; otherwise the default (top) template.</div>
+            <div class="desc">One per line: a URL prefix like <code>https://github.com/</code>, a regex like <code>/youtube\.com\/watch/</code>, or a schema.org type like <code>schema:@Recipe</code>. The first template that matches is used; otherwise the default (top) template.</div>
           </div>
           <textarea id="t-triggers" rows="3"></textarea>
         </div>
@@ -169,6 +178,7 @@
             <div class="setting-name">Properties</div>
             <div class="desc">The page URL and capture id are always saved, even if you remove them here.</div>
           </div>
+          <div class="desc">Drag <span aria-hidden="true">⠿</span> to reorder.</div>
           <div id="t-properties" class="properties"></div>
           <button id="t-add-property" class="add">+ Add property</button>
         </div>

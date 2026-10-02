@@ -64,6 +64,15 @@ describe("chooseTemplate", () => {
     expect(chooseTemplate(templates, "https://www.YouTube.com/watch?v=1").name).toBe("Video");
   });
 
+  it("matches schema.org triggers against the captured page", () => {
+    const recipe = [named("Default"), named("Recipe", ["schema:@Recipe"]), named("Rated", ["schema:@Product:aggregateRating.ratingValue"])];
+    const page = { schema: [{ "@type": "Recipe", name: "Soup" }] };
+    expect(chooseTemplate(recipe, "https://food.example/soup", page).name).toBe("Recipe");
+    expect(chooseTemplate(recipe, "https://food.example/soup").name).toBe("Default");
+    expect(chooseTemplate(recipe, "https://shop.example/x", { schema: [{ "@type": "Product" }] }).name).toBe("Default");
+    expect(chooseTemplate(recipe, "https://shop.example/x", { schema: [{ "@type": "Product", aggregateRating: { ratingValue: 4 } }] }).name).toBe("Rated");
+  });
+
   it("falls back to the first template, then the built-in one", () => {
     expect(chooseTemplate(templates, "https://example.com/").name).toBe("Default");
     expect(chooseTemplate([], "https://example.com/")).toBe(DEFAULT_TEMPLATE);

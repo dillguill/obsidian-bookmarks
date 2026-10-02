@@ -149,7 +149,8 @@ export default class BookmarksPlugin extends Plugin {
       const markdown = job.assets.includes("markdown") ? await client.assetText(job.id, "markdown") : "";
       // The server applies the shared screenshot settings, so a missing screenshot asset means "none".
       const screenshot = job.assets.includes("screenshot") ? await client.assetBinary(job.id, "screenshot") : null;
-      const template = chooseTemplate(this.templates, job.url);
+      // A failed job's metadata describes the block page, so schema triggers only see successful captures.
+      const template = chooseTemplate(this.templates, job.url, job.status === "done" ? (job.meta ?? undefined) : undefined);
       const result = await writeBookmark(
         { job, markdown, screenshot },
         {
