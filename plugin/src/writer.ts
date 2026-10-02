@@ -1,4 +1,4 @@
-import type { Job } from "./api";
+import { SCREENSHOT_MARKER, type Job, type RenderedNote } from "./api";
 import type { DedupIndex } from "./dedup";
 import type { PageData } from "./page-data";
 import { formatDate, render, renderFrontmatter, type ClipperTemplate, type Variables } from "./template";
@@ -16,6 +16,8 @@ export interface CapturedBookmark {
   /** Readable markdown; empty when the job failed or the page had none. */
   markdown: string;
   screenshot: ArrayBuffer | null;
+  /** The note as the server rendered it with Web Clipper's engine; absent for failed captures and older servers. */
+  note?: RenderedNote | null;
 }
 
 export interface WriteOptions {
@@ -58,13 +60,31 @@ export function bookmarkUrl(job: Job): string {
   return canonical && sameSite(canonical, final) ? canonical : final;
 }
 
-function noteBaseName(template: ClipperTemplate, vars: Variables, page: PageData | undefined): string {
-  const name = render(template.noteNameFormat, vars, page)
+function cleanName(name: string): string {
+  return name
     .replace(/[\\/:*?"<>|#^[\]]/g, "")
     .replace(/-{2,}/g, "-")
     .replace(/^[-\s.]+|[-\s.]+$/g, "")
     .slice(0, 120);
-  return name || `bookmark-${formatDate(vars.date ?? "", "YYYY-MM-DD")}`;
+}
+
+function noteBaseName(template: ClipperTemplate, vars: Variables, page: PageData | undefined): string {
+  return cleanName(render(template.noteNameFormat, vars, page)) || `bookmark-${formatDate(vars.date ?? "", "YYYY-MM-DD")}`;
+}
+
+/** Swaps the server's screenshot marker for the saved file's vault path, or drops it when there's no screenshot. */
+function fillScreenshot(text: string, path: string | null): string {
+  if (path) return text.split(SCREENSHOT_MARKER).join(path);
+  return text.split(`![[${SCREENSHOT_MARKER}]]`).join("").split(`[[${SCREENSHOT_MARKER}]]`).join("").split(SCREENSHOT_MARKER).join("");
+}
+
+async function saveScreenshot(input: CapturedBookmark, options: WriteOptions, noteBase: string): Promise<string | null> {
+  const { job } = input;
+  if (!input.screenshot || !job.screenshotExt) return null;
+  await options.vault.ensureFolder(options.assetsFolder);
+  const shotPath = await freePath(options.vault, options.assetsFolder, noteBase, job.screenshotExt);
+  await options.vault.writeBinary(shotPath, input.screenshot);
+  return shotPath;
 }
 
 async function freePath(vault: VaultPort, folder: string, base: string, ext: string): Promise<string> {
@@ -109,6 +129,19 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   const duplicate = index.findByUrl(url, job.url, job.meta?.finalUrl);
   if (duplicate) return { kind: "duplicate", path: duplicate };
 
+  if (input.note && job.status === "done") {
+    const { note } = input;
+    const folder = note.path.replace(/^\/+|\/+$/g, "") || options.notesFolder;
+    const base = cleanName(note.noteName) || `bookmark-${formatDate((options.now ?? new Date()).toISOString(), "YYYY-MM-DD")}`;
+    await vault.ensureFolder(folder);
+    const notePath = await freePath(vault, folder, base, "md");
+    const shotPath = await saveScreenshot(input, options, notePath.slice(notePath.lastIndexOf("/") + 1, -3));
+    const body = fillScreenshot(note.content, shotPath).replace(/^\s+/, "").trimEnd();
+    await vault.createNote(notePath, `${fillScreenshot(note.frontmatter, shotPath)}${body ? `${body}\n` : ""}`);
+    index.set(notePath, url, job.id);
+    return { kind: "written", path: notePath };
+  }
+
   // A failed job's metadata describes the block page, not the bookmark.
   const meta = job.status === "failed" ? null : job.meta;
   const vars: Variables = {
@@ -134,10 +167,8 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   const notePath = await freePath(vault, options.notesFolder, base, "md");
   const noteBase = notePath.slice(notePath.lastIndexOf("/") + 1, -3);
 
-  if (input.screenshot && job.screenshotExt) {
-    await vault.ensureFolder(options.assetsFolder);
-    const shotPath = await freePath(vault, options.assetsFolder, noteBase, job.screenshotExt);
-    await vault.writeBinary(shotPath, input.screenshot);
+  const shotPath = await saveScreenshot(input, options, noteBase);
+  if (shotPath) {
     vars.screenshot = shotPath;
     vars.screenshot_link = `[[${shotPath}]]`;
     vars.screenshot_embed = `![[${shotPath}]]`;

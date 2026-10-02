@@ -21,6 +21,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/harness/dist ./dist
 COPY harness/ui ./ui
+COPY harness/vendor ./vendor
 COPY harness/package.json ./package.json
 RUN mkdir -p /app/data && chown pwuser:pwuser /app/data
 USER pwuser

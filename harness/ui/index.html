@@ -98,7 +98,7 @@
         <h2>Page</h2>
         <p class="desc">From the captured page.</p>
         <table class="key">
-            <tr><td><code class="copy">{{title}}</code></td><td>Page title (falls back to words from the URL).</td></tr>
+            <tr><td><code class="copy">{{title}}</code></td><td>Page title.</td></tr>
             <tr><td><code class="copy">{{url}}</code></td><td>Link saved for the bookmark: the page's canonical URL when it's on the same site.</td></tr>
             <tr><td><code class="copy">{{description}}</code></td><td>Page description or summary.</td></tr>
             <tr><td><code class="copy">{{author}}</code></td><td>Author, when the page names one.</td></tr>
@@ -108,11 +108,13 @@
             <tr><td><code class="copy">{{image}}</code></td><td>Main image URL (the social preview image).</td></tr>
             <tr><td><code class="copy">{{favicon}}</code></td><td>Site icon URL.</td></tr>
             <tr><td><code class="copy">{{content}}</code></td><td>The readable page text as Markdown.</td></tr>
+            <tr><td><code class="copy">{{words}}</code></td><td>Word count of the readable text.</td></tr>
+            <tr><td><code class="copy">{{language}}</code></td><td>Page language, e.g. en.</td></tr>
         </table>
         <h2>Capture</h2>
         <p class="desc">About this bookmark.</p>
         <table class="key">
-            <tr><td><code class="copy">{{date}}</code></td><td>When the note was written. Format it with <code>|date:"YYYY-MM-DD"</code>.</td></tr>
+            <tr><td><code class="copy">{{date}}</code></td><td>When the page was captured, in the server's time zone (<code>TZ</code>). Format it with <code>|date:"YYYY-MM-DD"</code>.</td></tr>
             <tr><td><code class="copy">{{capture_id}}</code></td><td>The capture's id; always saved so a capture is never written twice.</td></tr>
         </table>
         <h2>Screenshot</h2>
@@ -130,17 +132,24 @@
             <tr><td><code class="copy">{{meta:name:author}}</code></td><td>A <code>&lt;meta name=…&gt;</code> tag.</td></tr>
             <tr><td><code class="copy">{{meta:property:og:title}}</code></td><td>A <code>&lt;meta property=…&gt;</code> tag.</td></tr>
         </table>
-        <h2>Filters</h2>
+        <h2>Selectors</h2>
+        <p class="desc">Read from the page as the server's browser rendered it.</p>
+        <table class="key">
+            <tr><td><code class="copy">{{selector:h1}}</code></td><td>Text of the elements matching a CSS selector.</td></tr>
+            <tr><td><code class="copy">{{selector:img.hero?src}}</code></td><td>An attribute of the matching elements.</td></tr>
+            <tr><td><code class="copy">{{selectorHtml:article}}</code></td><td>HTML of the matching elements.</td></tr>
+        </table>
+        <h2>Filters and logic</h2>
+        <p class="desc">Notes are rendered by Web Clipper's own template engine, so every Web Clipper <a href="https://help.obsidian.md/web-clipper/filters" target="_blank" rel="noopener">filter</a> and <a href="https://help.obsidian.md/web-clipper/logic" target="_blank" rel="noopener">logic</a> tag works.</p>
         <table class="key">
             <tr><td><code class="copy">|kebab</code></td><td>My Page Title becomes my-page-title.</td></tr>
             <tr><td><code class="copy">|safe_name</code></td><td>Removes characters not allowed in file names.</td></tr>
-            <tr><td><code class="copy">|trim</code></td><td>Removes spaces at the ends.</td></tr>
-            <tr><td><code class="copy">|lower</code></td><td>lowercase</td></tr>
-            <tr><td><code class="copy">|upper</code></td><td>UPPERCASE</td></tr>
-            <tr><td><code class="copy">|date:"YYYY-MM-DD"</code></td><td>Formats a date. Tokens: YYYY MM DD HH mm ss.</td></tr>
+            <tr><td><code class="copy">|date:"YYYY-MM-DD"</code></td><td>Formats a date.</td></tr>
+            <tr><td><code class="copy">|split:","|wikilink|join</code></td><td>Turns "a, b" into "[[a]], [[b]]".</td></tr>
+            <tr><td><code class="copy">{% if author %}…{% endif %}</code></td><td>Includes text only when a value is set.</td></tr>
         </table>
         <h2>Not supported yet</h2>
-        <p class="desc">These come out empty for now: <code>{{selector:…}}</code> and <code>{{selectorHtml:…}}</code> (planned with the power features), and prompt variables like <code>{{"summary of page"}}</code> (planned for the AI stage). Other Web Clipper filters (split, join, wikilink, replace…) leave the value unchanged.</p>
+        <p class="desc">Prompt variables like <code>{{"summary of page"}}</code> come out empty (planned for the AI stage), and so do <code>{{highlights}}</code> and <code>{{selection}}</code>, which need you in the browser.</p>
       </section>
 
       <section id="template" hidden>

@@ -47,7 +47,28 @@ export interface Job {
   template: string | null;
 }
 
-export type AssetKind = "screenshot" | "markdown";
+/** `note` is the note rendered with Web Clipper's engine ({@link RenderedNote}, JSON). */
+export type AssetKind = "screenshot" | "markdown" | "note";
+
+/**
+ * A note rendered on the server by Obsidian Web Clipper's template engine.
+ * The plugin only picks a free file name, saves the screenshot and swaps
+ * SCREENSHOT_MARKER for its vault path (or removes it when there is none).
+ */
+export interface RenderedNote {
+  /** Name of the template used. */
+  template: string;
+  /** File name without ".md", before collision suffixes. */
+  noteName: string;
+  /** Vault folder. */
+  path: string;
+  /** "---\n…\n---\n" */
+  frontmatter: string;
+  content: string;
+}
+
+/** Stands in for the screenshot's vault path in a RenderedNote: `{{screenshot}}` is the marker, `{{screenshot_link}}` is `[[marker]]`, `{{screenshot_embed}}` is `![[marker]]`. */
+export const SCREENSHOT_MARKER = "bookmarks-screenshot-path-5f2c9e";
 
 /** How much of the page the screenshot covers. */
 export type ScreenshotStyle = "full" | "banner" | "none";

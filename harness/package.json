@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:clipper": "node scripts/build-clipper.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

@@ -1,5 +1,7 @@
 // Templates use Obsidian Web Clipper's JSON format (design §4) and are edited
-// on the server's settings page. The plugin renders a subset: plain
+// on the server's settings page. The server renders notes with Web Clipper's
+// own engine; this renderer is the fallback for failed captures and older
+// servers, and covers a subset: plain
 // `{{variable}}`, `{{schema:…}}`, `{{meta:…}}` and the filters below. Web
 // Clipper variables the server can't fill yet (selectors, prompts) render
 // empty, as Web Clipper does for missing values; other unknown text passes

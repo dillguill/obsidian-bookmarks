@@ -145,10 +145,12 @@ Capturable data points and their default targets **for this user's vault**:
 **Template format: Web Clipper's.** The field mapping is expressed as an
 [Obsidian Web Clipper template](https://obsidian.md/help/web-clipper/templates)
 (`noteNameFormat`, `path`, `properties`, `noteContentFormat`, triggers), so
-users can import their existing Web Clipper templates. Supported variables:
-presets, `meta:`, `schema:`, and filters; `selector:` is evaluated by the
-container (the only place with the page DOM), so templates sync from the plugin
-to the container, which also lets remote captures pick a template by trigger.
+users can import their existing Web Clipper templates. The container renders
+notes with Web Clipper's own template engine (vendored from its MIT-licensed
+repo at a pinned commit, injected into the captured page), so presets,
+`meta:`, `schema:`, `selector:`, filters and logic match Web Clipper exactly
+and remote captures pick a template by trigger. The plugin only names the
+file, saves the screenshot and fills in its path.
 Not supported: `highlights`, `selection` (no user in a headless browser),
 prompt variables (deferred to the AI phase, Phase 6 in §9), and `behavior` other than
 "create new note". Import lists anything it skipped. The URL and `capture_id`
@@ -318,12 +320,11 @@ Each phase is independently useful with a concrete exit.
   property filters, search, quick edits. *Exit:* a clean Karakeep-like browse
   experience inside Obsidian.
 - **Phase 5 — power features.** Screenshot backfill for pending captures,
-  archival retention/pruning policy, bulk re-capture, Web Clipper selector
-  variables (`{{selector:…}}`, `{{selectorHtml:…}}`, evaluated on the server
-  at capture time). (Done 2026-10-02: screenshot style setting, full page /
-  banner / none with per-site overrides, as server-side shared settings with
-  a settings page; Web Clipper template import with `{{schema:…}}` and
-  `{{meta:…}}` variables.) *Exit:* the Karakeep-replacement feature set is
+  archival retention/pruning policy, bulk re-capture. (Done 2026-10-02:
+  screenshot style setting, full page / banner / none with per-site
+  overrides, as server-side shared settings with a settings page; Web Clipper
+  template import; notes rendered by Web Clipper's own engine, which brings
+  `{{schema:…}}`, `{{meta:…}}`, `{{selector:…}}`, filters and logic.) *Exit:* the Karakeep-replacement feature set is
   complete, without any AI dependency.
 - **Phase 6 — AI (opt-in, its own stage).** Kept separate so nothing before it
   needs a model. BYOK provider settings (OpenRouter, Ollama and the like, keys

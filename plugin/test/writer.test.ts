@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Job } from "../src/api";
+import { SCREENSHOT_MARKER, type Job, type RenderedNote } from "../src/api";
 import { DedupIndex } from "../src/dedup";
 import { DEFAULT_TEMPLATE } from "../src/template";
 import { writeBookmark, type VaultPort } from "../src/writer";
@@ -83,6 +83,27 @@ describe("writeBookmark", () => {
     vault.files.set("Bookmarks/notes/example-com-a-post-2026-10-02.md", "someone else's note");
     const result = await writeBookmark({ job: job(), markdown: "", screenshot: null }, options());
     expect(result.path).toBe("Bookmarks/notes/example-com-a-post-2026-10-02-2.md");
+  });
+
+  it("writes the server-rendered note, filling in the screenshot path", async () => {
+    const note: RenderedNote = {
+      template: "Clips",
+      noteName: "A Post: notes",
+      path: "Clips/example.com/",
+      frontmatter: `---\nsource: "https://example.com/post"\ncover: "[[${SCREENSHOT_MARKER}]]"\ncapture_id: "${job().id}"\n---\n`,
+      content: `![[${SCREENSHOT_MARKER}]]\n\n# Body`,
+    };
+    const result = await writeBookmark({ job: job(), markdown: "ignored", screenshot: new ArrayBuffer(3), note }, options());
+    expect(result).toEqual({ kind: "written", path: "Clips/example.com/A Post notes.md" });
+    expect(vault.files.has("Bookmarks/assets/A Post notes.jpg")).toBe(true);
+    expect(vault.files.get(result.path)).toBe(
+      `---\nsource: "https://example.com/post"\ncover: "[[Bookmarks/assets/A Post notes.jpg]]"\ncapture_id: "${job().id}"\n---\n![[Bookmarks/assets/A Post notes.jpg]]\n\n# Body\n`,
+    );
+    expect(index.findByUrl("https://example.com/post")).toBe(result.path);
+
+    // Without a screenshot the marker disappears.
+    const second = await writeBookmark({ job: job({ id: "01JABCDEFGHJKMNPQRSTVWXYZ1", url: "https://example.com/other", meta: null, screenshotExt: null }), markdown: "", screenshot: null, note }, options());
+    expect(vault.files.get(second.path)).toBe(`---\nsource: "https://example.com/post"\ncover: ""\ncapture_id: "${job().id}"\n---\n# Body\n`);
   });
 
   it("keeps the link when capture failed", async () => {
