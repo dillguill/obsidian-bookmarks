@@ -74,10 +74,14 @@ server, so every device and every phone Shortcut uses the same settings:
   (one site per line, subdomains included), which override the style.
 - **Templates**: note name, note location, properties and note content, in Obsidian
   Web Clipper's template format. **Import template** takes a Web Clipper template export or Web Clipper's full
-  settings export (only the templates are read). `{{schema:…}}` and `{{meta:…}}`
-  variables work; selector and prompt (AI) variables aren't filled yet and come out empty.
-  The first template whose trigger (a URL prefix or `/regex/`) matches a capture is
-  used; otherwise the default, top one.
+  settings export (only the templates are read). Notes are rendered by
+  [Web Clipper's own template engine](https://github.com/obsidianmd/obsidian-clipper)
+  running in the server's browser, so filters, logic, `{{schema:…}}`, `{{meta:…}}` and
+  `{{selector:…}}` behave as they do in Web Clipper. Prompt (AI) variables,
+  `{{highlights}}` and `{{selection}}` come out empty. A template picked at capture
+  time wins; otherwise the first template whose trigger (a URL prefix, `/regex/` or
+  `schema:@Type`) matches, else the default, top one. Set `TZ` in `.env` so
+  `{{date}}` uses your time zone.
 
 Server URL, API token, screenshot folder and poll interval are set per device in the
 plugin; the token stays in each device's secret storage.

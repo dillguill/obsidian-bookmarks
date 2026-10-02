@@ -1,7 +1,10 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SCREENSHOT_MARKER } from "../src/api.js";
 import { blockReason, PlaywrightEngine } from "../src/capture.js";
+import { renderRequest } from "../src/render.js";
+import { DEFAULT_CAPTURE_SETTINGS } from "../src/settings.js";
 
 describe("blockReason", () => {
   const page = (title: string, wordCount: number, httpStatus: number | null = 200) => ({ title, wordCount, httpStatus });
@@ -71,6 +74,28 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
     expect(result.meta.schema).toContainEqual({ "@type": "BreadcrumbList", itemListElement: [{ name: "Home" }, { name: "Docs" }] });
     expect(result.screenshotExt).toBe("jpg");
     expect(result.screenshot!.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
+  });
+
+  it("renders the note with Web Clipper's engine: schema, meta, selectors, filters and logic", async () => {
+    const template = {
+      ...DEFAULT_CAPTURE_SETTINGS.templates[0]!,
+      name: "Docs",
+      triggers: ["schema:@BreadcrumbList"],
+      noteNameFormat: "{{title|lower}} by {{meta:name:author}}",
+      path: "Clips/{{domain}}",
+      noteContentFormat: '{% if schema:@BreadcrumbList:itemListElement[1].name == "Docs" %}In docs{% endif %}\n{{selector:h1}}\n{{screenshot_embed}}',
+      properties: [{ name: "crumbs", value: "{{schema:@BreadcrumbList:itemListElement[*].name|join}}", type: "multitext" as const }],
+    };
+    const settings = { ...DEFAULT_CAPTURE_SETTINGS, templates: [DEFAULT_CAPTURE_SETTINGS.templates[0]!, template] };
+    const result = await engine.capture(`${base}/`, "none", renderRequest(settings, null, "01JOB"));
+    const note = result.note!;
+    expect(note.template).toBe("Docs");
+    expect(note.noteName).toBe("article by Grace");
+    expect(note.path).toBe("Clips/127.0.0.1");
+    expect(note.content).toBe(`In docs\nArticle\n![[${SCREENSHOT_MARKER}]]`);
+    expect(note.frontmatter).toContain('crumbs:\n  - "Home"\n  - "Docs"');
+    expect(note.frontmatter).toContain(`capture_id: "01JOB"`);
+    expect(note.frontmatter).toContain(`source: "${base}/"`);
   });
 
   it("captures inner-scroll layouts at full height", async () => {

@@ -1,8 +1,9 @@
 import { createRequire } from "node:module";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import TurndownService from "turndown";
-import type { PageMeta, ScreenshotStyle } from "./api.js";
+import type { PageMeta, RenderedNote, ScreenshotStyle } from "./api.js";
 import type { Config } from "./config.js";
+import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
 import { urlRejection } from "./ssrf.js";
 
 const require = createRequire(import.meta.url);
@@ -15,6 +16,8 @@ export interface CaptureResult {
   /** Null when the screenshot style is "none". */
   screenshot: Buffer | null;
   screenshotExt: "jpg" | "png" | null;
+  /** Null when no render was requested or Web Clipper's engine failed on the page. */
+  note: RenderedNote | null;
 }
 
 /** The site served a bot wall or challenge instead of the page. */
@@ -28,7 +31,7 @@ export class BlockedError extends Error {
 }
 
 export interface CaptureEngine {
-  capture(url: string, style: ScreenshotStyle): Promise<CaptureResult>;
+  capture(url: string, style: ScreenshotStyle, render?: RenderRequest | null): Promise<CaptureResult>;
   close(): Promise<void>;
 }
 
@@ -41,6 +44,7 @@ type EngineOptions = Pick<
   | "screenshotFormat"
   | "allowPrivateNetworks"
   | "chromiumPath"
+  | "timezone"
 >;
 
 const BLOCK_TITLES = /^(just a moment|attention required|access denied|are you a robot|security check|verify you are human|pardon our interruption)/i;
@@ -92,6 +96,27 @@ async function waitForDomQuiet(page: Page, quietMs = 500, maxMs = 5000): Promise
       }),
     { quiet: quietMs, max: maxMs },
   );
+}
+
+/**
+ * Renders the note with Obsidian Web Clipper's own engine on the live page, so
+ * templates behave as they do in Web Clipper. A failure here falls back to the
+ * plugin's simpler renderer rather than failing the capture.
+ */
+async function renderNote(page: Page, render: RenderRequest, url: string): Promise<RenderedNote | null> {
+  try {
+    await page.addScriptTag({ path: CLIPPER_BUNDLE_PATH });
+    return await page.evaluate(
+      ({ request, pageUrl }) => {
+        const clipper = (globalThis as unknown as { __bookmarksClipper: { clipPage(o: object): Promise<RenderedNote> } }).__bookmarksClipper;
+        return clipper.clipPage({ ...request, url: pageUrl });
+      },
+      { request: render, pageUrl: url },
+    );
+  } catch (err) {
+    console.warn(`render failed for ${url}: ${String((err as Error)?.message ?? err).split("\n")[0]}`);
+    return null;
+  }
 }
 
 /** Hides cookie/consent banners and restores page scrolling before the screenshot. */
@@ -188,7 +213,7 @@ export class PlaywrightEngine implements CaptureEngine {
     return this.browser;
   }
 
-  async capture(url: string, style: ScreenshotStyle): Promise<CaptureResult> {
+  async capture(url: string, style: ScreenshotStyle, render: RenderRequest | null = null): Promise<CaptureResult> {
     const browser = await this.getBrowser();
     const context = await browser.newContext({
       viewport: VIEWPORT,
@@ -197,6 +222,8 @@ export class PlaywrightEngine implements CaptureEngine {
       bypassCSP: true,
       userAgent: this.options.userAgent,
       locale: "en-US",
+      // Web Clipper's engine formats {{date}} in the page's time zone.
+      timezoneId: this.options.timezone,
       extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
     });
     // tsx/esbuild (npm run dev) wraps functions in __name(), which page.evaluate
@@ -205,13 +232,13 @@ export class PlaywrightEngine implements CaptureEngine {
     try {
       // A timed-out page can leave Chromium wedged for every later context, so
       // restart the browser rather than just closing this context.
-      return await withTimeout(this.run(context, url, style), this.options.captureTimeoutMs, () => void this.restart());
+      return await withTimeout(this.run(context, url, style, render), this.options.captureTimeoutMs, () => void this.restart());
     } finally {
       await context.close().catch(() => {});
     }
   }
 
-  private async run(context: BrowserContext, url: string, style: ScreenshotStyle): Promise<CaptureResult> {
+  private async run(context: BrowserContext, url: string, style: ScreenshotStyle, render: RenderRequest | null): Promise<CaptureResult> {
     const { allowPrivateNetworks, maxHeight, scrollBudgetMs, screenshotFormat } = this.options;
     // Re-check every document the page loads (redirects, iframes), so a public
     // URL can't bounce the browser into the private network (design §8).
@@ -328,7 +355,8 @@ export class PlaywrightEngine implements CaptureEngine {
     if (blocked) throw new BlockedError(`Blocked by site: ${blocked}`, meta);
 
     const markdown = this.turndown.turndown(parsed.content);
-    if (style === "none") return { meta, markdown, screenshot: null, screenshotExt: null };
+    const note = render ? await renderNote(page, render, bookmarkUrl(meta)) : null;
+    if (style === "none") return { meta, markdown, screenshot: null, screenshotExt: null, note };
 
     await hideOverlays(page);
     const type = screenshotFormat;
@@ -338,7 +366,7 @@ export class PlaywrightEngine implements CaptureEngine {
       // First screen only, at the original viewport size even if it was grown for an inner scroller.
       await page.evaluate(() => window.scrollTo(0, 0));
       const screenshot = await page.screenshot({ ...format, clip: { x: 0, y: 0, ...VIEWPORT } });
-      return { meta, markdown, screenshot, screenshotExt: ext };
+      return { meta, markdown, screenshot, screenshotExt: ext, note };
     }
 
     const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0));
@@ -349,7 +377,7 @@ export class PlaywrightEngine implements CaptureEngine {
       ...(meta.truncated ? { clip: { x: 0, y: 0, width: VIEWPORT.width, height: maxHeight } } : {}),
     });
 
-    return { meta, markdown, screenshot, screenshotExt: ext };
+    return { meta, markdown, screenshot, screenshotExt: ext, note };
   }
 
   private restart(): void {

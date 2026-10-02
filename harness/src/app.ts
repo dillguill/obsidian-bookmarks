@@ -159,7 +159,7 @@ export function createApp(deps: AppDeps): Server {
       return sendJson(res, 200, { jobs: store.list(statuses, limit) });
     }
 
-    const jobMatch = /^\/jobs\/([0-9A-Z]{26})(?:\/(delivered|asset\/(screenshot|markdown)))?$/.exec(path);
+    const jobMatch = /^\/jobs\/([0-9A-Z]{26})(?:\/(delivered|asset\/(screenshot|markdown|note)))?$/.exec(path);
     if (jobMatch) {
       const [, id, action, kind] = jobMatch as unknown as [string, string, string | undefined, AssetKind | undefined];
       const job = store.get(id);
@@ -178,7 +178,11 @@ export function createApp(deps: AppDeps): Server {
         const info = await stat(file).catch(() => null);
         if (!info) return sendJson(res, 404, { error: "no_asset" });
         const contentType =
-          kind === "markdown" ? "text/markdown; charset=utf-8" : job.screenshotExt === "jpg" ? "image/jpeg" : "image/png";
+          kind === "markdown"
+            ? "text/markdown; charset=utf-8"
+            : kind === "note"
+              ? "application/json; charset=utf-8"
+              : job.screenshotExt === "jpg" ? "image/jpeg" : "image/png";
         res.writeHead(200, { "content-type": contentType, "content-length": info.size });
         createReadStream(file).pipe(res);
         return;

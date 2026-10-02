@@ -1,5 +1,5 @@
 import { Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
-import { API_VERSION, type ClipperTemplate, type Job } from "./api";
+import { API_VERSION, type ClipperTemplate, type Job, type RenderedNote } from "./api";
 import { CaptureModal } from "./capture-modal";
 import { ServerClient } from "./client";
 import { DedupIndex } from "./dedup";
@@ -153,8 +153,10 @@ export default class BookmarksPlugin extends Plugin {
       const template =
         this.templates.find((t) => t.name === job.template) ??
         chooseTemplate(this.templates, job.url, job.status === "done" ? (job.meta ?? undefined) : undefined);
+      // Rendered on the server with Web Clipper's engine; older servers and failed captures use the plugin's renderer.
+      const note = job.assets.includes("note") ? (JSON.parse(await client.assetText(job.id, "note")) as RenderedNote) : null;
       const result = await writeBookmark(
-        { job, markdown, screenshot },
+        { job, markdown, screenshot, note },
         {
           vault: this.vaultPort(),
           index: this.index,

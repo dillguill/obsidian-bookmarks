@@ -28,6 +28,8 @@ export interface Config {
   allowPrivateNetworks: boolean;
   /** Use a local Chromium instead of Playwright's bundled one. */
   chromiumPath: string | undefined;
+  /** IANA time zone for dates in notes ({{date}}); the system zone (UTC in Docker) when unset. */
+  timezone?: string;
 }
 
 function int(value: string | undefined, fallback: number): number {
@@ -58,5 +60,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     screenshotFormat: env.BOOKMARKS_SCREENSHOT_FORMAT === "png" ? "png" : "jpeg",
     allowPrivateNetworks: env.BOOKMARKS_ALLOW_PRIVATE_NETWORKS === "1",
     chromiumPath: env.BOOKMARKS_CHROMIUM_PATH || undefined,
+    timezone: env.TZ || undefined,
   };
 }

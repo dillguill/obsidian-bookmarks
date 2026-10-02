@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Job, PageMeta } from "../src/api.js";
 import { createApp } from "../src/app.js";
 import { BlockedError, type CaptureEngine } from "../src/capture.js";
+import type { RenderRequest } from "../src/render.js";
 import { JobStore } from "../src/db.js";
 import { DEFAULT_TEMPLATE } from "../src/template-default.js";
 import { Worker } from "../src/worker.js";
@@ -28,14 +29,17 @@ const meta = (url: string): PageMeta => ({
 });
 
 const styles: string[] = [];
+const renders: (RenderRequest | null | undefined)[] = [];
 const engine: CaptureEngine = {
-  async capture(url, style) {
+  async capture(url, style, render) {
     styles.push(style);
+    renders.push(render);
     if (url.includes("blocked")) throw new BlockedError("Blocked by site: bot wall", meta(url));
     if (url.includes("slow")) await new Promise((resolve) => setTimeout(resolve, 300));
-    if (style === "none") return { meta: meta(url), markdown: "# Hello", screenshot: null, screenshotExt: null };
+    const note = url.includes("rendered") ? { template: render!.templateName ?? "Bookmark", noteName: "Hello", path: "Clips", frontmatter: "---\ntitle: \"Hello\"\n---\n", content: "# Hello" } : null;
+    if (style === "none") return { meta: meta(url), markdown: "# Hello", screenshot: null, screenshotExt: null, note };
     const finalUrl = url.includes("redirect") ? "https://paywalled.example/landing" : url;
-    return { meta: meta(finalUrl), markdown: "# Hello", screenshot: Buffer.from([0xff, 0xd8, 0xff]), screenshotExt: "jpg" };
+    return { meta: meta(finalUrl), markdown: "# Hello", screenshot: Buffer.from([0xff, 0xd8, 0xff]), screenshotExt: "jpg", note };
   },
   async close() {},
 };
@@ -216,6 +220,28 @@ describe("http app", () => {
     expect(bad.status).toBe(422);
     expect(((await bad.json()) as { error: string }).error).toBe("unknown_template");
     await put({});
+  });
+
+  it("renders notes with the shared templates and serves them as the note asset", async () => {
+    const custom = { ...DEFAULT_TEMPLATE, name: "Bare", properties: [{ name: "title", value: "{{title}}", type: "text" as const }] };
+    await fetch(`${base}/settings`, {
+      method: "PUT",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ templates: [DEFAULT_TEMPLATE, custom], propertyTypes: [{ name: "tags", type: "multitext" }] }),
+    });
+    const { job } = (await (await post("/capture?wait=1", { url: "https://example.com/rendered", template: "Bare" })).json()) as { job: Job };
+    const request = renders.at(-1)!;
+    expect(request.templateName).toBe("Bare");
+    expect(request.extra.capture_id).toBe(job.id);
+    expect(request.propertyTypes.tags).toBe("multitext");
+    // URL and capture_id properties are added when a template leaves them out.
+    expect(request.templates[1]!.properties.map((p) => p.value)).toEqual(["{{url}}", "{{title}}", "{{capture_id}}"]);
+
+    expect(job.assets).toContain("note");
+    const note = await fetch(`${base}/jobs/${job.id}/asset/note`, { headers: auth });
+    expect(note.headers.get("content-type")).toContain("application/json");
+    expect(await note.json()).toMatchObject({ template: "Bare", noteName: "Hello", path: "Clips" });
+    await fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: "{}" });
   });
 
   it("serves the settings page without a token", async () => {
