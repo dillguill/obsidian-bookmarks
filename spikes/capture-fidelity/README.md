@@ -16,7 +16,7 @@ node capture.mjs https://some.real/article ...   # the real test
 Outputs land in `out/` (`.png`, `.md`, `.json` per URL, plus `report.json`).
 Knobs: `MAX_HEIGHT` (20000), `NAV_TIMEOUT` (30000), `QUIET_MS` (500),
 `SETTLE_MAX` (5000), `CHROMIUM_PATH` (use a local Chromium instead of
-Playwright's download).
+Playwright's download), `USER_AGENT` (override the `HeadlessChrome` UA).
 
 ## Results so far (2026-10-02, local fixtures only)
 
@@ -45,6 +45,50 @@ Findings to carry into the capture engine:
 5. Defuddle's UMD bundle (`defuddle/full`) injects with `page.addScriptTag`, so
    extraction runs on the real rendered DOM with no jsdom.
 
-Still to do before calling the stack proven: run against ~15 real sites
-(news, Medium/Substack, GitHub, YouTube, docs sites, a paywalled site, a
-cookie-wall site) and look at the screenshots and markdown by hand.
+## Real sites (2026-10-02, cloud datacenter IP)
+
+16 URLs, 1280px viewport, run once with Playwright's default UA and once with
+`USER_AGENT` set to a desktop Chrome string. Screenshots and markdown were
+checked by hand.
+
+| Site | Result |
+|---|---|
+| Wikipedia, paulgraham.com, martinfowler.com, Substack (ACX) | Clean markdown and screenshot. PG and ACX hit the 20000px cap. |
+| MDN, GitHub repo | Defuddle injection refused by the page's CSP until the context used `bypassCSP: true`; then clean markdown. |
+| Stack Overflow | Full question + answers, but the cookie banner sits on top of the screenshot. Served with HTTP 403 and real content. 52000px page, ~19s. |
+| The Verge | Paywall overlay in the screenshot; markdown stops at the paywall (~290 words). ~35s. Body is the scroller, so `documentElement.scrollHeight` reads 800 and lazy content below isn't scrolled into view. |
+| Obsidian Docs (Publish) | Markdown fine; screenshot is one viewport because content scrolls inside a container, not the page. |
+| Hacker News front page | Fine (list page, metadata + links). |
+| YouTube, Reddit, X | Blocked with the default UA (429, "blocked by network security", navigation failure). All load with a browser UA. YouTube gives title + description; Reddit subreddit gives ~0 words (feed page); X markdown picks a reply, not the post itself. |
+| Medium, Allrecipes | Cloudflare "Just a moment" challenge with either UA. |
+| NYT | 403 with either UA. |
+
+Medium, Allrecipes and NYT also 403 a plain `curl` from this IP, so they may be
+blocking the datacenter address rather than the browser; a run from a home
+server would tell.
+
+What this changes for the capture server:
+
+1. **Set `bypassCSP: true`** on the browser context, or inject Defuddle via
+   `page.evaluate` source. Without it, major sites (GitHub, MDN) fail.
+2. **Send a normal desktop UA** (and probably `Accept-Language`). The
+   `HeadlessChrome` default is blocked outright by YouTube, Reddit and X.
+3. **Detect block/challenge pages** ("Just a moment...", "Attention Required!",
+   "You've been blocked", 403/429 with near-empty text) and mark the job
+   `blocked` instead of writing a junk note. Don't treat non-2xx as failure on
+   its own: Stack Overflow returned 403 with the full page.
+4. **Scroll height**: measure `max(documentElement, body)` scrollHeight, and for
+   inner-scroller layouts (docs sites, app shells) find the largest scrollable
+   element; otherwise the screenshot is one viewport.
+5. **Hard time cap per capture** (~20s), not just a height cap: long pages and
+   ad-heavy news sites took 18-35s.
+6. **Overlays**: hide common cookie/consent/paywall banners before the
+   screenshot (a small selector list or a consent-dismiss library). Paywalled
+   text is out of scope.
+7. **Site-specific extractors** for X (post text from meta/oEmbed) and feed
+   pages; Defuddle's generic pick is wrong on X and empty on Reddit listings.
+8. **Normalize metadata**: resolve relative favicons (Wikipedia's is
+   `/static/...`), and record the final URL and canonical (Wikipedia redirected
+   to a different title) for dedup.
+9. **Screenshot size**: full-page PNGs reach 3-4.5MB; consider JPEG/WebP for
+   the archive copy.

@@ -1,0 +1,18 @@
+# Compose file attached to each GitHub release: runs the published image.
+# Next to it, create .env from .env.example and run `docker compose up -d`.
+services:
+  bookmarks-server:
+    image: ghcr.io/dillguill/bookmarks-server:latest
+    env_file: .env
+    environment:
+      BOOKMARKS_HOST: 0.0.0.0
+    ports:
+      # Loopback only by default; expose via Tailscale or a TLS reverse proxy
+      # rather than binding to the WAN (design §8).
+      - "127.0.0.1:${BOOKMARKS_PORT:-8787}:8787"
+    volumes:
+      - bookmarks-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  bookmarks-data:

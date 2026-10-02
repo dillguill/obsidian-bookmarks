@@ -1,5 +1,6 @@
-import { App, PluginSettingTab, SecretComponent, Setting, requestUrl } from "obsidian";
+import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import type BookmarksPlugin from "./main";
+import { siteEntry } from "./url";
 
 export interface BookmarksSettings {
   /** Base URL of the bookmarks-server container, e.g. https://bookmarks.tailnet.ts.net */
@@ -13,6 +14,8 @@ export interface BookmarksSettings {
   assetsFolder: string;
   /** Poll fallback interval for draining completed jobs (design §3). */
   pollIntervalSeconds: number;
+  /** Sites (and their subdomains) whose bookmarks are saved without a screenshot. */
+  noScreenshotSites: string[];
 }
 
 export const DEFAULT_SETTINGS: BookmarksSettings = {
@@ -21,6 +24,7 @@ export const DEFAULT_SETTINGS: BookmarksSettings = {
   notesFolder: "Bookmarks/notes",
   assetsFolder: "Bookmarks/assets",
   pollIntervalSeconds: 60,
+  noScreenshotSites: [],
 };
 
 export class BookmarksSettingTab extends PluginSettingTab {
@@ -94,8 +98,22 @@ export class BookmarksSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Sites without screenshots")
+      .setDesc("One site per line, e.g. nytimes.com. Bookmarks from these sites and their subdomains keep the link and text but no screenshot. Blocked pages never get one.")
+      .addTextArea((area) => {
+        area
+          .setPlaceholder("nytimes.com\nreddit.com")
+          .setValue(this.plugin.settings.noScreenshotSites.join("\n"))
+          .onChange(async (value) => {
+            this.plugin.settings.noScreenshotSites = value.split("\n").map(siteEntry).filter(Boolean);
+            await this.plugin.saveSettings();
+          });
+        area.inputEl.rows = 4;
+      });
+
+    new Setting(containerEl)
       .setName("Poll interval (seconds)")
-      .setDesc("Fallback check for finished captures when live updates drop.")
+      .setDesc("How often to check the server for captures sent from other devices.")
       .addText((text) =>
         text.setValue(String(this.plugin.settings.pollIntervalSeconds)).onChange(async (value) => {
           const seconds = Number.parseInt(value, 10);
@@ -108,16 +126,13 @@ export class BookmarksSettingTab extends PluginSettingTab {
   }
 
   private async testConnection(): Promise<boolean> {
-    const { serverUrl } = this.plugin.settings;
-    if (!serverUrl) return false;
+    if (!this.plugin.settings.serverUrl) return false;
     try {
-      const response = await requestUrl({
-        url: new URL("/health", serverUrl).toString(),
-        headers: { Authorization: `Bearer ${this.plugin.getToken() ?? ""}` },
-        throw: false,
-      });
-      return response.status === 200;
-    } catch {
+      const problem = await this.plugin.checkServer();
+      if (problem) new Notice(problem);
+      return problem === null;
+    } catch (err) {
+      new Notice(`Connection failed: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }

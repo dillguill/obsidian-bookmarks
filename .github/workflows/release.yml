@@ -1,0 +1,63 @@
+name: Release
+
+# Push a tag equal to the version (x.y.z, no "v") after running
+# scripts/set-version.mjs. Publishes the plugin release Obsidian expects and the
+# server image, with the same version on both (design §5.3).
+on:
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Check versions match the tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          for f in manifest.json plugin/manifest.json plugin/package.json harness/package.json; do
+            v=$(node -p "require('./$f').version")
+            if [ "$v" != "$tag" ]; then echo "$f has version $v, tag is $tag"; exit 1; fi
+          done
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Prepare compose file for the release
+        run: sed "s#ghcr.io/dillguill/bookmarks-server:latest#ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/bookmarks-server:${GITHUB_REF_NAME}#" harness/docker-compose.release.yml > docker-compose.yml
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" plugin/main.js plugin/manifest.json docker-compose.yml harness/.env.example --title "$GITHUB_REF_NAME" --generate-notes
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/bookmarks-server" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: harness/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+            ${{ steps.image.outputs.name }}:latest
