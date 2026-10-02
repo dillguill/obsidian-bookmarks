@@ -1,0 +1,19 @@
+{
+  "name": "@obsidian-bookmarks/plugin",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Obsidian plugin: sole vault writer for bookmarks captured by the harness",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.13.1",
+    "typescript": "~5.9.3"
+  }
+}

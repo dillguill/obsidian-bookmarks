@@ -1,7 +1,7 @@
 # Obsidian Bookmarks — Design
 
 **Status:** Design approved (2026-09-18), pre-implementation
-**Author:** Dillon (with Claude)
+**Author:** Dillon
 **Related:** `obsidian-chat` (sibling project; shares the Tailscale/self-host operational style, differs in packaging — see `obsidian-chat/PLAN.md` Phase 6 Docker consideration)
 
 ---

@@ -1,0 +1,17 @@
+{
+  "name": "obsidian-bookmarks",
+  "private": true,
+  "description": "Save clippings similar to Karakeep with rich metadata to Obsidian",
+  "workspaces": [
+    "plugin",
+    "harness"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces --if-present"
+  }
+}
