@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import TurndownService from "turndown";
-import type { PageMeta } from "./api.js";
+import type { PageMeta, ScreenshotStyle } from "./api.js";
 import type { Config } from "./config.js";
 import { urlRejection } from "./ssrf.js";
 
@@ -12,8 +12,9 @@ const VIEWPORT = { width: 1280, height: 800 };
 export interface CaptureResult {
   meta: PageMeta;
   markdown: string;
-  screenshot: Buffer;
-  screenshotExt: "jpg" | "png";
+  /** Null when the screenshot style is "none". */
+  screenshot: Buffer | null;
+  screenshotExt: "jpg" | "png" | null;
 }
 
 /** The site served a bot wall or challenge instead of the page. */
@@ -27,7 +28,7 @@ export class BlockedError extends Error {
 }
 
 export interface CaptureEngine {
-  capture(url: string): Promise<CaptureResult>;
+  capture(url: string, style: ScreenshotStyle): Promise<CaptureResult>;
   close(): Promise<void>;
 }
 
@@ -187,7 +188,7 @@ export class PlaywrightEngine implements CaptureEngine {
     return this.browser;
   }
 
-  async capture(url: string): Promise<CaptureResult> {
+  async capture(url: string, style: ScreenshotStyle): Promise<CaptureResult> {
     const browser = await this.getBrowser();
     const context = await browser.newContext({
       viewport: VIEWPORT,
@@ -204,13 +205,13 @@ export class PlaywrightEngine implements CaptureEngine {
     try {
       // A timed-out page can leave Chromium wedged for every later context, so
       // restart the browser rather than just closing this context.
-      return await withTimeout(this.run(context, url), this.options.captureTimeoutMs, () => void this.restart());
+      return await withTimeout(this.run(context, url, style), this.options.captureTimeoutMs, () => void this.restart());
     } finally {
       await context.close().catch(() => {});
     }
   }
 
-  private async run(context: BrowserContext, url: string): Promise<CaptureResult> {
+  private async run(context: BrowserContext, url: string, style: ScreenshotStyle): Promise<CaptureResult> {
     const { allowPrivateNetworks, maxHeight, scrollBudgetMs, screenshotFormat } = this.options;
     // Re-check every document the page loads (redirects, iframes), so a public
     // URL can't bounce the browser into the private network (design §8).
@@ -293,18 +294,29 @@ export class PlaywrightEngine implements CaptureEngine {
     const blocked = blockReason(meta, parsed.bodyText);
     if (blocked) throw new BlockedError(`Blocked by site: ${blocked}`, meta);
 
+    const markdown = this.turndown.turndown(parsed.content);
+    if (style === "none") return { meta, markdown, screenshot: null, screenshotExt: null };
+
     await hideOverlays(page);
+    const type = screenshotFormat;
+    const format = type === "jpeg" ? { type, quality: 80 } : { type };
+    const ext = type === "jpeg" ? "jpg" : "png";
+    if (style === "banner") {
+      // First screen only, at the original viewport size even if it was grown for an inner scroller.
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const screenshot = await page.screenshot({ ...format, clip: { x: 0, y: 0, ...VIEWPORT } });
+      return { meta, markdown, screenshot, screenshotExt: ext };
+    }
+
     const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0));
     meta.truncated = height > maxHeight || VIEWPORT.height + extra > maxHeight;
-    const type = screenshotFormat;
     const screenshot = await page.screenshot({
       fullPage: true,
-      type,
-      ...(type === "jpeg" ? { quality: 80 } : {}),
+      ...format,
       ...(meta.truncated ? { clip: { x: 0, y: 0, width: VIEWPORT.width, height: maxHeight } } : {}),
     });
 
-    return { meta, markdown: this.turndown.turndown(parsed.content), screenshot, screenshotExt: type === "jpeg" ? "jpg" : "png" };
+    return { meta, markdown, screenshot, screenshotExt: ext };
   }
 
   private restart(): void {

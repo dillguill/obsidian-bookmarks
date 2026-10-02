@@ -60,18 +60,32 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
   });
 
   it("extracts markdown despite a strict CSP and resolves the favicon", async () => {
-    const result = await engine.capture(`${base}/`);
+    const result = await engine.capture(`${base}/`, "full");
     expect(result.meta.title).toBe("Article");
     expect(result.meta.favicon).toBe(`${base}/fav.ico`);
     expect(result.markdown).toContain("Some readable words");
     expect(result.screenshotExt).toBe("jpg");
-    expect(result.screenshot.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
+    expect(result.screenshot!.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
   });
 
   it("captures inner-scroll layouts at full height", async () => {
-    const result = await engine.capture(`${base}/inner`);
+    const result = await engine.capture(`${base}/inner`, "full");
     // JPEG height lives in the SOF0 marker; just check it's well past one viewport.
-    const sof = result.screenshot.indexOf(Buffer.from([0xff, 0xc0]));
-    expect(result.screenshot.readUInt16BE(sof + 5)).toBeGreaterThan(2000);
+    const sof = result.screenshot!.indexOf(Buffer.from([0xff, 0xc0]));
+    expect(result.screenshot!.readUInt16BE(sof + 5)).toBeGreaterThan(2000);
+  });
+
+  it("captures only the first screen for the banner style", async () => {
+    const result = await engine.capture(`${base}/inner`, "banner");
+    const sof = result.screenshot!.indexOf(Buffer.from([0xff, 0xc0]));
+    expect(result.screenshot!.readUInt16BE(sof + 5)).toBe(800);
+    expect(result.screenshot!.readUInt16BE(sof + 7)).toBe(1280);
+  });
+
+  it("skips the screenshot for the none style but keeps the text", async () => {
+    const result = await engine.capture(`${base}/`, "none");
+    expect(result.screenshot).toBeNull();
+    expect(result.screenshotExt).toBeNull();
+    expect(result.markdown).toContain("Some readable words");
   });
 });

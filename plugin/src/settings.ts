@@ -1,6 +1,6 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
+import type { ClipperTemplate } from "./api";
 import type BookmarksPlugin from "./main";
-import { siteEntry } from "./url";
 
 export interface BookmarksSettings {
   /** Base URL of the bookmarks-server container, e.g. https://bookmarks.tailnet.ts.net */
@@ -10,21 +10,25 @@ export interface BookmarksSettings {
    * never written to data.json (design §8).
    */
   tokenSecretName: string;
-  notesFolder: string;
+  /** Legacy: the notes folder is now each template's note location; migrated to the server once. */
+  notesFolder?: string;
   assetsFolder: string;
   /** Poll fallback interval for draining completed jobs (design §3). */
   pollIntervalSeconds: number;
-  /** Sites (and their subdomains) whose bookmarks are saved without a screenshot. */
-  noScreenshotSites: string[];
+  /**
+   * Legacy per-device site list from before capture settings moved to the
+   * server; migrated there on the next successful sync, then removed.
+   */
+  noScreenshotSites?: string[];
+  /** Last templates fetched from the server, so the dedup index works offline. */
+  templatesCache?: ClipperTemplate[];
 }
 
 export const DEFAULT_SETTINGS: BookmarksSettings = {
   serverUrl: "",
   tokenSecretName: "",
-  notesFolder: "Bookmarks/notes",
   assetsFolder: "Bookmarks/assets",
   pollIntervalSeconds: 60,
-  noScreenshotSites: [],
 };
 
 export class BookmarksSettingTab extends PluginSettingTab {
@@ -79,11 +83,13 @@ export class BookmarksSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Bookmark notes folder")
-      .addText((text) =>
-        text.setValue(this.plugin.settings.notesFolder).onChange(async (value) => {
-          this.plugin.settings.notesFolder = value.trim();
-          await this.plugin.saveSettings();
+      .setName("Capture settings and templates")
+      .setDesc("Screenshot style, site lists and note templates are shared by every device, so they're edited on the server's settings page.")
+      .addButton((button) =>
+        button.setButtonText("Open settings page").onClick(() => {
+          const url = this.plugin.settingsPageUrl();
+          if (url) window.open(url);
+          else new Notice("Set the server URL first.");
         }),
       );
 
@@ -98,20 +104,6 @@ export class BookmarksSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Sites without screenshots")
-      .setDesc("One site per line, e.g. nytimes.com. Bookmarks from these sites and their subdomains keep the link and text but no screenshot. Blocked pages never get one.")
-      .addTextArea((area) => {
-        area
-          .setPlaceholder("nytimes.com\nreddit.com")
-          .setValue(this.plugin.settings.noScreenshotSites.join("\n"))
-          .onChange(async (value) => {
-            this.plugin.settings.noScreenshotSites = value.split("\n").map(siteEntry).filter(Boolean);
-            await this.plugin.saveSettings();
-          });
-        area.inputEl.rows = 4;
-      });
-
-    new Setting(containerEl)
       .setName("Poll interval (seconds)")
       .setDesc("How often to check the server for captures sent from other devices.")
       .addText((text) =>
@@ -123,6 +115,7 @@ export class BookmarksSettingTab extends PluginSettingTab {
           }
         }),
       );
+
   }
 
   private async testConnection(): Promise<boolean> {
