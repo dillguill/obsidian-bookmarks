@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findUrl, normalizeUrl } from "../src/url";
+import { findUrl, matchesSiteList, normalizeUrl } from "../src/url";
 
 describe("normalizeUrl", () => {
   it("drops www, case, fragment, trailing slash and scheme", () => {
@@ -21,5 +21,20 @@ describe("findUrl", () => {
   it("pulls the first URL out of clipboard text", () => {
     expect(findUrl("look at https://example.com/a?b=1). thanks")).toBe("https://example.com/a?b=1");
     expect(findUrl("no links here")).toBeNull();
+  });
+});
+
+describe("matchesSiteList", () => {
+  const sites = ["nytimes.com", "https://www.Reddit.com/r/ObsidianMD", "*.example.org", ""];
+  it("matches listed sites and their subdomains", () => {
+    expect(matchesSiteList("https://www.nytimes.com/2026/x.html", sites)).toBe(true);
+    expect(matchesSiteList("https://cooking.nytimes.com/", sites)).toBe(true);
+    expect(matchesSiteList("https://old.reddit.com/", sites)).toBe(true);
+    expect(matchesSiteList("https://docs.example.org/", sites)).toBe(true);
+  });
+  it("doesn't match lookalikes or unlisted sites", () => {
+    expect(matchesSiteList("https://notnytimes.com/", sites)).toBe(false);
+    expect(matchesSiteList("https://example.com/", sites)).toBe(false);
+    expect(matchesSiteList("not a url", sites)).toBe(false);
   });
 });

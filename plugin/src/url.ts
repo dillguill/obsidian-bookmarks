@@ -52,3 +52,25 @@ export function findUrl(text: string): string | null {
   const candidate = match[0].replace(/[),.;!?]+$/, "");
   return normalizeUrl(candidate) ? candidate : null;
 }
+
+/** "https://www.NYTimes.com/x" -> "nytimes.com", for entries in a site list. */
+export function siteEntry(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z]+:\/\//, "")
+    .replace(/^\*\./, "")
+    .replace(/^www\./, "")
+    .replace(/[/?#:].*$/, "");
+}
+
+/** True when the URL's host is a listed site or a subdomain of one. */
+export function matchesSiteList(url: string, sites: readonly string[]): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+  return sites.map(siteEntry).some((site) => site && (host === site || host.endsWith(`.${site}`)));
+}

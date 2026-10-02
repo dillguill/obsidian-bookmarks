@@ -60,7 +60,9 @@ your vault as deduplicated bookmark notes. See the
    proxy; the port is bound to loopback by default.
 
 Sites that block the capture (bot walls, hard paywalls) still get a note with the
-link and a "Capture failed" callout, so nothing sent from the phone is lost.
+link and a "Capture failed" callout but no screenshot, so nothing sent from the phone
+is lost. To skip screenshots for particular sites, list them under **Sites without
+screenshots** in the plugin settings (one per line; subdomains are included).
 
 ### Server API
 

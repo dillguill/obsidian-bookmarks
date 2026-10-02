@@ -1,5 +1,6 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import type BookmarksPlugin from "./main";
+import { siteEntry } from "./url";
 
 export interface BookmarksSettings {
   /** Base URL of the bookmarks-server container, e.g. https://bookmarks.tailnet.ts.net */
@@ -13,6 +14,8 @@ export interface BookmarksSettings {
   assetsFolder: string;
   /** Poll fallback interval for draining completed jobs (design §3). */
   pollIntervalSeconds: number;
+  /** Sites (and their subdomains) whose bookmarks are saved without a screenshot. */
+  noScreenshotSites: string[];
 }
 
 export const DEFAULT_SETTINGS: BookmarksSettings = {
@@ -21,6 +24,7 @@ export const DEFAULT_SETTINGS: BookmarksSettings = {
   notesFolder: "Bookmarks/notes",
   assetsFolder: "Bookmarks/assets",
   pollIntervalSeconds: 60,
+  noScreenshotSites: [],
 };
 
 export class BookmarksSettingTab extends PluginSettingTab {
@@ -92,6 +96,20 @@ export class BookmarksSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }),
       );
+
+    new Setting(containerEl)
+      .setName("Sites without screenshots")
+      .setDesc("One site per line, e.g. nytimes.com. Bookmarks from these sites and their subdomains keep the link and text but no screenshot. Blocked pages never get one.")
+      .addTextArea((area) => {
+        area
+          .setPlaceholder("nytimes.com\nreddit.com")
+          .setValue(this.plugin.settings.noScreenshotSites.join("\n"))
+          .onChange(async (value) => {
+            this.plugin.settings.noScreenshotSites = value.split("\n").map(siteEntry).filter(Boolean);
+            await this.plugin.saveSettings();
+          });
+        area.inputEl.rows = 4;
+      });
 
     new Setting(containerEl)
       .setName("Poll interval (seconds)")
