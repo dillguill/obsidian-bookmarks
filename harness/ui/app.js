@@ -303,50 +303,87 @@ $("template-export").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 });
 
-/** Accepts a Web Clipper template export, a list of them, or {templates: [...]}. */
+/**
+ * Accepts a Web Clipper template export, Web Clipper's full settings export
+ * (templates under "template_<id>", ordered by template_list), a list of
+ * templates, or {templates: [...]}. Only templates are read; the rest of a
+ * settings export (including any API keys in it) is ignored.
+ */
 function templatesFrom(json) {
   if (Array.isArray(json)) return json;
   if (json && Array.isArray(json.templates)) return json.templates;
+  if (json && typeof json === "object" && Object.keys(json).some((key) => key.startsWith("template_"))) {
+    const order = Array.isArray(json.template_list) ? json.template_list.map((id) => `template_${id}`) : [];
+    const keys = Object.keys(json).filter((key) => key.startsWith("template_") && key !== "template_list");
+    const ordered = [...order.filter((key) => keys.includes(key)), ...keys.filter((key) => !order.includes(key))];
+    const templates = ordered.map((key) => json[key]).filter((t) => t && typeof t === "object" && !Array.isArray(t));
+    if (templates.length) return Object.assign(templates, { fullExport: true });
+  }
   if (json && typeof json === "object" && ("noteContentFormat" in json || "properties" in json)) return [json];
   throw new Error("This file doesn't look like a Web Clipper template.");
+}
+
+// Variables the server can't fill yet; they come out empty in notes.
+const UNSUPPORTED_VARIABLE = /\{\{\s*(schema:|meta:|selector:|selectorHtml:|")/;
+
+function importTemplate(raw, fallbackName) {
+  return {
+    schemaVersion: raw.schemaVersion || "0.1.0",
+    name: uniqueName(String(raw.name || fallbackName)),
+    behavior: "create",
+    noteNameFormat: String(raw.noteNameFormat ?? settings.templates[0].noteNameFormat),
+    path: String(raw.path ?? settings.templates[0].path),
+    noteContentFormat: String(raw.noteContentFormat ?? "{{content}}"),
+    properties: (Array.isArray(raw.properties) ? raw.properties : [])
+      .filter((p) => p && p.name)
+      .map((p) => ({
+        name: String(p.name),
+        value: String(p.value ?? ""),
+        type: PROPERTY_TYPES.includes(p.type) ? p.type : "text",
+      })),
+    triggers: Array.isArray(raw.triggers) ? raw.triggers.map(String) : [],
+  };
 }
 
 $("import-file").addEventListener("change", async (e) => {
   const files = [...e.target.files];
   e.target.value = "";
-  let added = 0;
+  const imported = [];
+  let fullExport = false;
   for (const file of files) {
     try {
-      for (const raw of templatesFrom(JSON.parse(await file.text()))) {
-        const t = {
-          schemaVersion: raw.schemaVersion || "0.1.0",
-          name: uniqueName(String(raw.name || file.name.replace(/\.json$/i, ""))),
-          behavior: "create",
-          noteNameFormat: String(raw.noteNameFormat ?? settings.templates[0].noteNameFormat),
-          path: String(raw.path ?? settings.templates[0].path),
-          noteContentFormat: String(raw.noteContentFormat ?? "{{content}}"),
-          properties: (Array.isArray(raw.properties) ? raw.properties : [])
-            .filter((p) => p && p.name)
-            .map((p) => ({
-              name: String(p.name),
-              value: String(p.value ?? ""),
-              type: PROPERTY_TYPES.includes(p.type) ? p.type : "text",
-            })),
-          triggers: Array.isArray(raw.triggers) ? raw.triggers.map(String) : [],
-        };
-        settings.templates.push(t);
-        added++;
-      }
+      const raws = templatesFrom(JSON.parse(await file.text()));
+      fullExport ||= Boolean(raws.fullExport);
+      for (const raw of raws) imported.push(importTemplate(raw, file.name.replace(/\.json$/i, "")));
     } catch (err) {
       status(`${file.name}: ${err.message}`, true);
+      return;
     }
   }
-  if (added) {
-    view = { section: "template", template: settings.templates.length - 1 };
-    render();
-    scheduleSave();
-  }
+  if (!imported.length) return;
+  // A full Web Clipper export brings its own default (its first template), so it goes on top.
+  if (fullExport) settings.templates.unshift(...imported);
+  else settings.templates.push(...imported);
+  view = { section: "template", template: fullExport ? 0 : settings.templates.length - 1 };
+  render();
+  scheduleSave();
+  const partial = imported
+    .filter((t) => [t.noteNameFormat, t.noteContentFormat, ...t.properties.map((p) => p.value)].some((v) => UNSUPPORTED_VARIABLE.test(v))).map((t) => t.name);
+  const summary = `Imported ${imported.length} template${imported.length === 1 ? "" : "s"}.`;
+  showImportNote(
+    partial.length
+      ? `${summary} ${partial.join(", ")} use${partial.length === 1 ? "s" : ""} schema, meta, selector or prompt variables, which the server can't fill yet; they come out empty.`
+      : summary,
+  );
 });
+
+function showImportNote(text) {
+  const note = $("template-default-note");
+  note.textContent = text;
+  setTimeout(() => {
+    if (view.section === "template") renderTemplate();
+  }, 12000);
+}
 
 // ---- navigation and sign-in ----
 

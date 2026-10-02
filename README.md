@@ -73,7 +73,9 @@ server, so every device and every phone Shortcut uses the same settings:
   none), plus **Sites with banner screenshots** and **Sites without screenshots**
   (one site per line, subdomains included), which override the style.
 - **Templates**: note name, note location, properties and note content, in Obsidian
-  Web Clipper's template format. **Import template** takes Web Clipper JSON exports.
+  Web Clipper's template format. **Import template** takes a Web Clipper template export or Web Clipper's full
+  settings export (only the templates are read). Schema, meta, selector and prompt
+  variables aren't filled yet and come out empty.
   The first template whose trigger (a URL prefix or `/regex/`) matches a capture is
   used; otherwise the default, top one.
 
