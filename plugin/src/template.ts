@@ -1,6 +1,8 @@
 // Templates use Obsidian Web Clipper's JSON format (design §4) and are edited
 // on the server's settings page. The plugin renders a subset: plain
-// `{{variable}}` and the filters below; anything else passes through unchanged.
+// `{{variable}}` and the filters below. Web Clipper variables the server can't
+// fill yet (schema:, meta:, selectors, prompts) render empty, as Web Clipper
+// does for missing values; other unknown text passes through unchanged.
 // DEFAULT_TEMPLATE mirrors harness/src/template-default.ts.
 
 import type { ClipperTemplate } from "./api";
@@ -80,12 +82,15 @@ function applyFilter(value: string, filter: string): string {
   }
 }
 
+/** Web Clipper variables that need the live page or an LLM. */
+export const UNSUPPORTED_VARIABLE = /^(schema|meta|selector|selectorHtml):|^"/;
+
 /** Renders `{{name|filter|filter:"arg"}}` expressions in `text`. */
 export function render(text: string, vars: Variables): string {
   return text.replace(/\{\{([^{}]+)\}\}/g, (whole, expr: string) => {
     const [name, ...filters] = expr.split("|");
     const key = name!.trim();
-    if (!(key in vars)) return whole;
+    if (!(key in vars)) return UNSUPPORTED_VARIABLE.test(key) ? "" : whole;
     return filters.reduce((value, filter) => applyFilter(value, filter), vars[key] ?? "");
   });
 }

@@ -45,6 +45,16 @@ describe("renderFrontmatter", () => {
   });
 });
 
+describe("Web Clipper variables", () => {
+  it("renders variables that need the live page or an LLM as empty", () => {
+    const vars = { title: "T", author: "A" };
+    expect(render("[[{{schema:@WebApplication:creator.name}}]]", vars)).toBe("[[]]");
+    expect(render('{{meta:name:author}}|{{"summary of page"}}|{{selectorHtml:article[data-x*="y"]|markdown}}', vars)).toBe("||");
+    expect(render('{{author|split:", "|wikilink|join}}', vars)).toBe("A");
+    expect(render("{{unknown}}", vars)).toBe("{{unknown}}");
+  });
+});
+
 describe("chooseTemplate", () => {
   const named = (name: string, triggers?: string[]) => ({ ...DEFAULT_TEMPLATE, name, triggers });
   const templates = [named("Default"), named("GitHub", ["https://github.com/"]), named("Video", ["/youtube\\.com\\/watch/i", "schema:@VideoObject"])];
