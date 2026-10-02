@@ -1,6 +1,7 @@
 # Obsidian Bookmarks — Design
 
-**Status:** Design approved (2026-09-18), pre-implementation
+**Status:** Design approved (2026-09-18), pre-implementation. MVP decisions
+added 2026-10-02 (§2, §4, §5.3, §10).
 **Author:** Dillon
 **Related:** `obsidian-chat` (sibling project; shares the Tailscale/self-host operational style, differs in packaging — see `obsidian-chat/PLAN.md` Phase 6 Docker consideration)
 
@@ -68,6 +69,18 @@ Obsidian. A single Docker image is cross-platform, one-command to run, is the
 format Karakeep's own users already expect, and decouples the always-on piece
 from Obsidian entirely.
 
+**Why not an always-on Obsidian host (rejected 2026-10-02).** The alternative MVP
+was a full plugin that captures in-process (Electron) and receives remote
+captures through an HTTP listener in a desktop Obsidian left running on a host.
+Rejected because: Electron's `webContents.capturePage` is viewport-only, so
+full-page screenshots need an unproven CDP workaround inside Obsidian; Obsidian
+mobile has no Electron/Node, so phone captures must reach a desktop host anyway
+(the server again, in a GUI app that restarts, updates and sleeps); a headless
+Linux host needs Xvfb; and arbitrary-URL browsing would run in the process that
+holds the vault. Obsidian's headless Sync client does not run plugins, so it
+does not remove the GUI requirement. An always-on Obsidian remains *optional*
+as a drainer (§3).
+
 **Why the container is required (no degraded fallback).** A no-server mode
 (desktop-only in-plugin capture, lightweight mobile) was explicitly rejected: it
 guts the differentiator (server-side headless capture + remote entry points) and
@@ -129,6 +142,20 @@ Capturable data points and their default targets **for this user's vault**:
 | Capture id (ULID)     | `capture_id`            | **yes**  |
 | Capture origin        | *(off by default)*      | —        |
 
+**Template format: Web Clipper's.** The field mapping is expressed as an
+[Obsidian Web Clipper template](https://obsidian.md/help/web-clipper/templates)
+(`noteNameFormat`, `path`, `properties`, `noteContentFormat`, triggers), so
+users can import their existing Web Clipper templates. Supported variables:
+presets, `meta:`, `schema:`, and filters; `selector:` is evaluated by the
+container (the only place with the page DOM), so templates sync from the plugin
+to the container, which also lets remote captures pick a template by trigger.
+Not supported: `highlights`, `selection` (no user in a headless browser),
+prompt variables (deferred to the AI phase, §7), and `behavior` other than
+"create new note". Import lists anything it skipped. The URL and `capture_id`
+properties are required whatever the template says (dedup and idempotency
+depend on them). The MVP ships one built-in default template in this format;
+import, triggers and `selector:` follow.
+
 Out of the box for this vault, only `screenshot` and `capture_id` are new
 properties; the URL flows into the existing `source` property. (Note: `source`
 here is the URL. "Capture origin" — command/share/bookmarklet/api — is a
@@ -156,9 +183,13 @@ index, built on load and kept warm via `metadataCache` events.
 
 On capture, before writing:
 - **No match** -> write new note.
-- **Match** -> modal: **Open existing** / **Re-capture** (refresh
+- **Match (MVP)** -> no new note; a non-blocking Karakeep-style **"Already
+  saved"** notice with **Open existing**. Drained jobs (nobody at the screen)
+  follow the same rule and never block: the duplicate is skipped, acked, and
+  logged.
+- **Match (later)** -> the notice gains **Replace** / **Update** (refresh
   screenshot + markdown + captured timestamp, keep tags/status/manual edits) /
-  **Add anyway** (new note, cross-linked to the original).
+  **Merge** options, plus a setting for the default action on drained jobs.
 
 The container may do a cheap `GET /precheck?url=` dup hint for early phone-side
 warning, but the plugin is the authority.
@@ -191,7 +222,17 @@ warning, but the plugin is the authority.
   - `GET /health`, `GET /precheck?url=` — status + cheap dup hint.
 
 **5.3 Packaging**
-- Published image (GHCR/Docker Hub) + `docker-compose.yml`; `docker compose up`.
+- One monorepo, two release artifacts from one release workflow, **lockstep
+  versions** (same `x.y.z` for plugin and server):
+  - **Server:** `ghcr.io/dillguill/bookmarks-server:x.y.z` + `latest`;
+    `docker-compose.yml` attached to the GitHub release; `docker compose up`.
+  - **Plugin:** Obsidian community directory, which requires `manifest.json` at
+    the repo root and a GitHub release tagged exactly `x.y.z` with `main.js` +
+    `manifest.json` attached. The release step copies `plugin/manifest.json` to
+    the root. BRAT installs betas from the same releases.
+- `GET /health` reports an `apiVersion`; the plugin checks it and tells the user
+  which side to update on mismatch. Plugin settings show the compose snippet
+  and "Test connection", so the plugin is the single starting point.
 - Retention: keep delivered results N days, then prune blobs (configurable).
 
 ---
@@ -290,9 +331,15 @@ Each phase is independently useful with a concrete exit.
 5. **Delivery:** SSE push + poll fallback; **plugin is the sole vault writer**;
    idempotent by `capture_id`.
 6. **Capture output:** full-page screenshot + readable markdown.
-7. **Dedup:** normalized-URL match (computed, not stored) -> Open / Re-capture /
-   Add-anyway.
+7. **Dedup:** normalized-URL match (computed, not stored). MVP: non-blocking
+   "Already saved" notice, drained duplicates skipped; Replace / Update / Merge
+   later (2026-10-02).
 8. **Capture stack:** Playwright + Chromium + Defuddle + Turndown; SQLite queue.
 9. **Browse UI:** optional custom plugin view, **not** an Obsidian `.base`;
    deferred.
 10. **AI tagging:** opt-in, off by default; reuse BYOK provider style.
+11. **MVP architecture:** thin plugin + Docker server; always-on Obsidian host
+    rejected (§2, 2026-10-02).
+12. **Templates:** Web Clipper template format, importable (§4, 2026-10-02).
+13. **Shipping:** one monorepo, lockstep versions, GHCR image + community
+    plugin release (§5.3, 2026-10-02).
