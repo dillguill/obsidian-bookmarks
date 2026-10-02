@@ -1,0 +1,14 @@
+{
+  "name": "spike-capture-fidelity",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fixtures": "node fixtures/serve.mjs",
+    "capture": "node capture.mjs"
+  },
+  "dependencies": {
+    "defuddle": "^0.19.4",
+    "playwright": "^1.63.0",
+    "turndown": "^7.2.4"
+  }
+}
