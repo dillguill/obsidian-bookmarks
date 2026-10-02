@@ -11,6 +11,8 @@ const DEFUDDLE = require.resolve('defuddle/full');
 const VIEWPORT = { width: 1280, height: 800 };
 const MAX_HEIGHT = Number(process.env.MAX_HEIGHT ?? 20000);
 const NAV_TIMEOUT = Number(process.env.NAV_TIMEOUT ?? 30000);
+// Headless Chromium's default UA says "HeadlessChrome", which some sites block.
+const USER_AGENT = process.env.USER_AGENT || undefined;
 
 // networkidle fires before client-side renders that run on timers, so also wait
 // until the DOM stops changing for QUIET_MS (capped at SETTLE_MAX).
@@ -42,11 +44,13 @@ const rows = [];
 for (const [i, url] of urls.entries()) {
   const t0 = Date.now();
   const name = `out/${i + 1}-${new URL(url).hostname.replace(/[^a-z0-9.-]/gi, '_')}`;
-  const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: false });
+  // bypassCSP: strict CSPs (GitHub, MDN) otherwise refuse the injected Defuddle script.
+  const context = await browser.newContext({ viewport: VIEWPORT, acceptDownloads: false, bypassCSP: true, userAgent: USER_AGENT });
   const page = await context.newPage();
   const row = { url };
   try {
-    await page.goto(url, { waitUntil: 'load', timeout: NAV_TIMEOUT });
+    const res = await page.goto(url, { waitUntil: 'load', timeout: NAV_TIMEOUT });
+    row.status = res?.status();
     await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
     row.settleMs = await waitForDomQuiet(page);
 
