@@ -301,13 +301,16 @@ Each phase is independently useful with a concrete exit.
 - **Spike 0 — capture fidelity.** Prove Playwright-in-Docker gives good
   full-page screenshots + Defuddle markdown on real-world sites (SPA, paywall-ish,
   lazy-loaded). Throwaway. *Exit:* confidence in the capture stack.
+  *Done 2026-10-02* (16 real sites, `spikes/capture-fidelity/README.md`).
 - **Phase 1 — container MVP.** Capture engine + SQLite queue + HTTP API + token
   auth + published image + `docker compose up`. *Exit:* `POST /capture` a URL,
-  get screenshot + markdown + metadata.
+  get screenshot + markdown + metadata. *Done 2026-10-02* (PR #5), except
+  the published image, which waits on the first release tag.
 - **Phase 2 — plugin MVP (desktop).** Settings (URL/token/field-map/folders),
   `writeBookmark()` + dedup, SSE+poll drainer, in-Obsidian capture command.
   *Exit:* paste a URL in Obsidian -> deduped bookmark note with screenshot +
-  readable body in the vault.
+  readable body in the vault. *Done 2026-10-02* (PR #5), with poll-only
+  draining; SSE is deferred.
 - **Phase 3 — remote & mobile entry points.** Bookmarklet + iOS Shortcut +
   mobile share -> enqueue to container; mobile plugin drains. *Exit:* capture from
   the phone with Obsidian closed; appears next time Obsidian runs.
@@ -316,7 +319,10 @@ Each phase is independently useful with a concrete exit.
   experience inside Obsidian.
 - **Phase 5 — power features.** Opt-in AI tagging/summary (BYOK), screenshot
   backfill for pending captures, archival retention/pruning policy, bulk
-  re-capture. *Exit:* the Karakeep-replacement feature set is complete.
+  re-capture. Screenshot style setting: full page (today's only mode),
+  banner (first screen only), or none, chosen globally with per-site
+  overrides next to "Sites without screenshots". *Exit:* the
+  Karakeep-replacement feature set is complete.
 
 ---
 
