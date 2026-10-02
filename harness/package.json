@@ -1,0 +1,21 @@
+{
+  "name": "@obsidian-bookmarks/harness",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Capture backend (bookmarks-server): Playwright capture engine, SQLite job queue, HTTP API + SSE",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.3"
+  }
+}
