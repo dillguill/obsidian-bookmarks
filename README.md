@@ -56,8 +56,9 @@ your vault as deduplicated bookmark notes. See the
 
    then open Obsidian. Finished captures are written on startup and every poll
    interval (60s by default), or straight away with **Bookmarks: Fetch finished
-   captures now**. A phone reaches the server over Tailscale or a TLS reverse
-   proxy; the port is bound to loopback by default.
+   captures now**. To share from a phone, see
+   [Saving bookmarks from your phone](docs/phone-capture.md) (Tailscale plus an
+   iOS Shortcut).
 
 Sites that block the capture (bot walls, hard paywalls) still get a note with the
 link and a "Capture failed" callout but no screenshot, so nothing sent from the phone
