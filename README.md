@@ -74,8 +74,8 @@ server, so every device and every phone Shortcut uses the same settings:
   (one site per line, subdomains included), which override the style.
 - **Templates**: note name, note location, properties and note content, in Obsidian
   Web Clipper's template format. **Import template** takes a Web Clipper template export or Web Clipper's full
-  settings export (only the templates are read). Schema, meta, selector and prompt
-  variables aren't filled yet and come out empty.
+  settings export (only the templates are read). `{{schema:…}}` and `{{meta:…}}`
+  variables work; selector and prompt (AI) variables aren't filled yet and come out empty.
   The first template whose trigger (a URL prefix or `/regex/`) matches a capture is
   used; otherwise the default, top one.
 
@@ -88,12 +88,13 @@ All endpoints need `Authorization: Bearer <token>`.
 
 | Endpoint | What |
 |---|---|
-| `POST /capture` | Enqueue `{url, origin}` (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
+| `POST /capture` | Enqueue `{url, origin, template?}` (`template` picks one by name; otherwise triggers decide) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
 | `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
 | `GET /jobs/:id` | One job. |
 | `GET /jobs/:id/asset/screenshot` / `markdown` | Capture output. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
 | `GET /settings` / `PUT /settings` | Shared settings `{screenshotStyle, bannerSites, noScreenshotSites, templates}`. |
+| `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |
 | `GET /ui/` | The settings page (static, no token needed to load it; it signs in with one). |
 | `GET /health` | `{status, apiVersion, version}`; the plugin warns when `apiVersion` doesn't match. |
 

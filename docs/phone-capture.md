@@ -57,12 +57,28 @@ Shortcuts doesn't treat an HTTP error as a failure, which is why step 3 checks
 the reply for an `error` field (a bad token, or a rejected URL such as a
 private-network address).
 
+### Choosing a template
+
+Without a `template` field the server's first matching template is used (by
+trigger, else the default). To pick one each time, add these before the
+**Get Contents of URL** step above:
+
+1. **Get Contents of URL** `https://mac-mini.your-tailnet.ts.net/templates`,
+   method **GET**, with the same `Authorization` header.
+2. **Get Dictionary Value** for key `templates` from **Contents of URL**.
+3. **Choose from List** with *Dictionary Value*.
+
+Then add a third text field to the capture request's JSON body:
+`template` = **Chosen Item**. The list always matches the templates on the
+settings page.
+
 ## 3. Android
 
 Any app that can send an HTTP request from the share menu works, for example
 [HTTP Shortcuts](https://http-shortcuts.rmy.ch/). Use the same request as the iOS
 Shortcut: `POST /capture`, the `Authorization: Bearer <token>` header, and a
-JSON body `{"url": "<shared URL>", "origin": "share"}`.
+JSON body `{"url": "<shared URL>", "origin": "share"}`, plus `"template": "<name>"`
+to pick a template (`GET /templates` lists the names).
 
 ## 4. Getting the notes
 

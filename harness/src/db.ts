@@ -14,6 +14,7 @@ interface Row {
   meta: string | null;
   assets: string;
   screenshot_ext: string | null;
+  template: string | null;
   created_at: string;
   updated_at: string;
   delivered_at: string | null;
@@ -31,6 +32,7 @@ function toJob(row: Row): Job {
     meta: row.meta ? (JSON.parse(row.meta) as PageMeta) : null,
     assets: JSON.parse(row.assets) as AssetKind[],
     screenshotExt: row.screenshot_ext as Job["screenshotExt"],
+    template: row.template ?? null,
   };
 }
 
@@ -59,16 +61,19 @@ export class JobStore {
       CREATE INDEX IF NOT EXISTS jobs_status ON jobs (status, id);
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+    // Databases from before the template column existed.
+    const columns = this.db.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === "template")) this.db.exec("ALTER TABLE jobs ADD COLUMN template TEXT");
     // A crash mid-capture leaves rows running; retry them.
     this.db.prepare("UPDATE jobs SET status = 'pending' WHERE status = 'running'").run();
   }
 
-  create(url: string, origin: CaptureOrigin): Job {
+  create(url: string, origin: CaptureOrigin, template: string | null = null): Job {
     const now = new Date().toISOString();
     const id = ulid();
     this.db
-      .prepare("INSERT INTO jobs (id, url, origin, status, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?)")
-      .run(id, url, origin, now, now);
+      .prepare("INSERT INTO jobs (id, url, origin, status, template, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?)")
+      .run(id, url, origin, template, now, now);
     return this.get(id)!;
   }
 

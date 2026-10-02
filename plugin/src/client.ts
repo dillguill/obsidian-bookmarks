@@ -52,8 +52,8 @@ export class ServerClient {
   }
 
   /** With `wait`, the server holds the request until the job settles or its wait cap passes. */
-  async capture(url: string, origin: CaptureOrigin, wait: boolean): Promise<Job> {
-    const response = await this.request("POST", `/capture${wait ? "?wait=1" : ""}`, { url, origin });
+  async capture(url: string, origin: CaptureOrigin, wait: boolean, template: string | null = null): Promise<Job> {
+    const response = await this.request("POST", `/capture${wait ? "?wait=1" : ""}`, { url, origin, ...(template ? { template } : {}) });
     return (response.json as { job: Job }).job;
   }
 

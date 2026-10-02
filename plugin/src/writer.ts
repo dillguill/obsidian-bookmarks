@@ -1,5 +1,6 @@
 import type { Job } from "./api";
 import type { DedupIndex } from "./dedup";
+import type { PageData } from "./page-data";
 import { formatDate, render, renderFrontmatter, type ClipperTemplate, type Variables } from "./template";
 
 /** The slice of the vault the writer needs, so it can be tested without Obsidian. */
@@ -57,8 +58,8 @@ export function bookmarkUrl(job: Job): string {
   return canonical && sameSite(canonical, final) ? canonical : final;
 }
 
-function noteBaseName(template: ClipperTemplate, vars: Variables): string {
-  const name = render(template.noteNameFormat, vars)
+function noteBaseName(template: ClipperTemplate, vars: Variables, page: PageData | undefined): string {
+  const name = render(template.noteNameFormat, vars, page)
     .replace(/[\\/:*?"<>|#^[\]]/g, "")
     .replace(/-{2,}/g, "-")
     .replace(/^[-\s.]+|[-\s.]+$/g, "")
@@ -127,7 +128,8 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
     screenshot_embed: "",
   };
 
-  const base = noteBaseName(template, vars);
+  const page: PageData | undefined = meta ?? undefined;
+  const base = noteBaseName(template, vars, page);
   await vault.ensureFolder(options.notesFolder);
   const notePath = await freePath(vault, options.notesFolder, base, "md");
   const noteBase = notePath.slice(notePath.lastIndexOf("/") + 1, -3);
@@ -147,8 +149,8 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   }
   vars.content = content;
 
-  const body = render(template.noteContentFormat, vars).replace(/^\s+/, "").replace(/\n{3,}/g, "\n\n");
-  await vault.createNote(notePath, `${renderFrontmatter(template, vars)}\n${body.trimEnd()}\n`);
+  const body = render(template.noteContentFormat, vars, page).replace(/^\s+/, "").replace(/\n{3,}/g, "\n\n");
+  await vault.createNote(notePath, `${renderFrontmatter(template, vars, page)}\n${body.trimEnd()}\n`);
   index.set(notePath, url, job.id);
   return { kind: "written", path: notePath };
 }

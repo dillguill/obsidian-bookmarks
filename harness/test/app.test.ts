@@ -130,7 +130,9 @@ describe("http app", () => {
     const put = (body: unknown) =>
       fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
     const initial = (await (await fetch(`${base}/settings`, { headers: auth })).json()) as { settings: unknown };
-    expect(initial.settings).toEqual({ screenshotStyle: "full", bannerSites: [], noScreenshotSites: [], templates: [DEFAULT_TEMPLATE] });
+    expect(initial.settings).toEqual({ screenshotStyle: "full", bannerSites: [], noScreenshotSites: [], templates: [DEFAULT_TEMPLATE],
+      propertyTypes: DEFAULT_TEMPLATE.properties.map(({ name, type }) => ({ name, type })),
+    });
 
     expect((await put({ screenshotStyle: "huge" })).status).toBe(400);
     expect((await put({ bannerSites: "news.com" })).status).toBe(400);
@@ -165,6 +167,12 @@ describe("http app", () => {
     expect((await put({ templates: [] })).status).toBe(400);
     expect((await put({ templates: [{ name: "" }] })).status).toBe(400);
     expect((await put({ templates: [{ name: "X", properties: [{ name: "a", value: "b", type: "weird" }] }] })).status).toBe(400);
+    expect((await put({ propertyTypes: [{ name: "a", type: "weird" }] })).status).toBe(400);
+    const types = await put({ propertyTypes: [{ name: "rating", type: "number" }, { name: "rating", type: "text" }, { name: " read ", type: "checkbox" }] });
+    expect(((await types.json()) as { settings: { propertyTypes: unknown } }).settings.propertyTypes).toEqual([
+      { name: "rating", type: "number" },
+      { name: "read", type: "checkbox" },
+    ]);
 
     const clipperExport = {
       schemaVersion: "0.1.0",
@@ -190,6 +198,23 @@ describe("http app", () => {
       properties: [{ name: "repo", value: "{{title}}", type: "text" }],
       triggers: ["https://github.com/"],
     });
+    await put({});
+  });
+
+  it("records a template chosen at capture time and lists template names", async () => {
+    const put = (body: unknown) =>
+      fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
+    await put({ templates: [DEFAULT_TEMPLATE, { ...DEFAULT_TEMPLATE, name: "Video" }] });
+    const names = (await (await fetch(`${base}/templates`, { headers: auth })).json()) as { templates: string[] };
+    expect(names.templates).toEqual(["Bookmark", "Video"]);
+
+    const { job } = (await (await post("/capture", { url: "https://example.com/t", origin: "shortcut", template: "Video" })).json()) as { job: Job };
+    expect(job.template).toBe("Video");
+    const plain = (await (await post("/capture", { url: "https://example.com/u" })).json()) as { job: Job };
+    expect(plain.job.template).toBeNull();
+    const bad = await post("/capture", { url: "https://example.com/v", template: "Nope" });
+    expect(bad.status).toBe(422);
+    expect(((await bad.json()) as { error: string }).error).toBe("unknown_template");
     await put({});
   });
 

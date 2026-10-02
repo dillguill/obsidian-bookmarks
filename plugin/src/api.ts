@@ -23,6 +23,10 @@ export interface PageMeta {
   httpStatus: number | null;
   /** Screenshot was cut at the height cap. */
   truncated: boolean;
+  /** schema.org JSON-LD objects on the page (arrays and @graph flattened), for `{{schema:…}}`. */
+  schema?: unknown[];
+  /** `<meta>` values keyed "name:author" or "property:og:title", for `{{meta:…}}`. */
+  metaTags?: Record<string, string>;
 }
 
 export interface Job {
@@ -38,6 +42,8 @@ export interface Job {
   assets: AssetKind[];
   /** File extension of the screenshot asset, when there is one. */
   screenshotExt: "jpg" | "png" | null;
+  /** Template chosen at capture time by name; null means match by triggers. */
+  template?: string | null;
 }
 
 export type AssetKind = "screenshot" | "markdown";
@@ -57,6 +63,13 @@ export interface CaptureSettings {
   noScreenshotSites: string[];
   /** Note templates; the first is the default. */
   templates: ClipperTemplate[];
+  /** Property name -> type, shared by every template, like Web Clipper's Properties settings. */
+  propertyTypes: PropertyTypeEntry[];
+}
+
+export interface PropertyTypeEntry {
+  name: string;
+  type: PropertyType;
 }
 
 export type PropertyType = "text" | "multitext" | "number" | "checkbox" | "date" | "datetime";

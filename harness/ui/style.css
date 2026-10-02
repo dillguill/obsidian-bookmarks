@@ -84,7 +84,18 @@ button.danger { color: var(--danger); }
 button.add { align-self: flex-start; }
 .stack { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
 .properties { display: flex; flex-direction: column; gap: 6px; }
-.property { display: grid; grid-template-columns: 120px 1fr 2fr auto; gap: 6px; align-items: center; }
+.property { display: grid; grid-template-columns: auto 120px 1fr 2fr auto; gap: 6px; align-items: center; }
+.property.type-row { grid-template-columns: 1fr 160px auto; }
+.handle {
+  cursor: grab; color: var(--muted); user-select: none; touch-action: none; padding: 4px 2px;
+  background: none; border: 0; font-size: 16px; line-height: 1;
+}
+.handle:active { cursor: grabbing; }
+.dragging { opacity: .55; }
+.nav-row { display: flex; align-items: center; }
+.nav-row .handle { visibility: hidden; padding: 4px; }
+.nav-row:hover .handle, .nav-row .handle:focus { visibility: visible; }
+.nav-row .nav-item { flex: 1; min-width: 0; }
 .property select { min-width: 0; width: 100%; }
 .property input { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
 .status {
@@ -94,12 +105,22 @@ button.add { align-self: flex-start; }
 }
 .status.show { opacity: 1; }
 .status.error { color: var(--danger); }
-details summary { cursor: pointer; }
+h2 { font-size: 15px; margin: 24px 0 4px; }
+a { color: var(--accent); }
+.key { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.key td { border-top: 1px solid var(--border); padding: 7px 8px 7px 0; vertical-align: top; font-size: 13px; }
+.key td:first-child { width: 38%; white-space: nowrap; }
+code.copy { cursor: pointer; }
+code.copy:hover { outline: 1px solid var(--accent); }
 
 @media (max-width: 720px) {
   .layout { flex-direction: column; }
   .sidebar { width: auto; border-right: 0; border-bottom: 1px solid var(--border); }
   .content { padding: 20px 16px 48px; }
-  .property { grid-template-columns: 1fr 1fr auto; }
-  .property select { grid-column: 1 / -1; }
+  .property { grid-template-columns: auto 1fr 1fr auto; }
+  .property select { grid-column: 2 / -1; }
+  .property.type-row { grid-template-columns: 1fr 1fr auto; }
+  .property.type-row select { grid-column: auto; }
+  .nav-row .handle { visibility: visible; }
+  .key td:first-child { white-space: normal; word-break: break-all; }
 }

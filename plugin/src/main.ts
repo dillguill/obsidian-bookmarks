@@ -149,7 +149,10 @@ export default class BookmarksPlugin extends Plugin {
       const markdown = job.assets.includes("markdown") ? await client.assetText(job.id, "markdown") : "";
       // The server applies the shared screenshot settings, so a missing screenshot asset means "none".
       const screenshot = job.assets.includes("screenshot") ? await client.assetBinary(job.id, "screenshot") : null;
-      const template = chooseTemplate(this.templates, job.url);
+      // A failed job's metadata describes the block page, so schema triggers only see successful captures.
+      const template =
+        this.templates.find((t) => t.name === job.template) ??
+        chooseTemplate(this.templates, job.url, job.status === "done" ? (job.meta ?? undefined) : undefined);
       const result = await writeBookmark(
         { job, markdown, screenshot },
         {
@@ -176,7 +179,12 @@ export default class BookmarksPlugin extends Plugin {
     } catch {
       // clipboard unavailable or denied
     }
-    new CaptureModal(this.app, initial, (url) => void this.captureInteractive(url)).open();
+    new CaptureModal(
+      this.app,
+      initial,
+      this.templates.map((t) => t.name),
+      (url, template) => void this.captureInteractive(url, template),
+    ).open();
   }
 
   private openNote(path: string): void {
@@ -197,7 +205,7 @@ export default class BookmarksPlugin extends Plugin {
     );
   }
 
-  async captureInteractive(raw: string): Promise<void> {
+  async captureInteractive(raw: string, template: string | null = null): Promise<void> {
     if (!normalizeUrl(raw)) {
       new Notice("That doesn't look like a web address.");
       return;
@@ -213,7 +221,7 @@ export default class BookmarksPlugin extends Plugin {
       const problem = await this.checkServer();
       if (problem) throw new Error(problem);
       await this.syncShared().catch((err: unknown) => console.warn("bookmarks: couldn't fetch shared settings", err));
-      const job = await this.client().capture(raw, "plugin", true);
+      const job = await this.client().capture(raw, "plugin", true, template);
       if (job.status !== "done" && job.status !== "failed") {
         new Notice("Still capturing. The note will appear when it's done.");
         return;
