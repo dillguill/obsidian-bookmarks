@@ -77,8 +77,8 @@ async function readBody(req: IncomingMessage, limit = MAX_BODY): Promise<string>
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** Accepts JSON `{url, origin}`, a form body, or `?url=` so Shortcuts and curl stay simple. */
-async function captureRequest(req: IncomingMessage, query: URLSearchParams): Promise<{ url: string; origin: string }> {
+/** Accepts JSON `{url, origin, template}`, a form body, or `?url=` so Shortcuts and curl stay simple. */
+async function captureRequest(req: IncomingMessage, query: URLSearchParams): Promise<{ url: string; origin: string; template: string }> {
   const raw = await readBody(req);
   const type = req.headers["content-type"] ?? "";
   let fields: Record<string, unknown> = {};
@@ -90,6 +90,7 @@ async function captureRequest(req: IncomingMessage, query: URLSearchParams): Pro
   return {
     url: String(fields.url ?? query.get("url") ?? "").trim(),
     origin: String(fields.origin ?? query.get("origin") ?? "api"),
+    template: String(fields.template ?? query.get("template") ?? "").trim(),
   };
 }
 
@@ -111,6 +112,11 @@ export function createApp(deps: AppDeps): Server {
 
     if (path === "/settings" && method === "GET") return sendJson(res, 200, { settings: store.getSettings() });
 
+    // Template names in order, for a Shortcut's "Choose from List".
+    if (path === "/templates" && method === "GET") {
+      return sendJson(res, 200, { templates: store.getSettings().templates.map((t) => t.name) });
+    }
+
     if (path === "/settings" && method === "PUT") {
       let parsed: ReturnType<typeof parseCaptureSettings>;
       try {
@@ -124,7 +130,7 @@ export function createApp(deps: AppDeps): Server {
     }
 
     if (method === "POST" && path === "/capture") {
-      let body: { url: string; origin: string };
+      let body: { url: string; origin: string; template: string };
       try {
         body = await captureRequest(req, url.searchParams);
       } catch {
@@ -135,7 +141,10 @@ export function createApp(deps: AppDeps): Server {
       const rejection = await rejectUrl(body.url);
       if (rejection) return sendJson(res, 422, { error: "url_rejected", message: rejection });
 
-      const job = store.create(new URL(body.url).toString(), body.origin as CaptureOrigin);
+      if (body.template && !store.getSettings().templates.some((t) => t.name === body.template)) {
+        return sendJson(res, 422, { error: "unknown_template", message: `No template named "${body.template}".` });
+      }
+      const job = store.create(new URL(body.url).toString(), body.origin as CaptureOrigin, body.template || null);
       worker.kick();
       if (url.searchParams.get("wait") !== "1") return sendJson(res, 202, { job });
       const settled = await worker.waitFor(job.id, config.waitCapMs);

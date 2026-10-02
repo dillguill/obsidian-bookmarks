@@ -88,12 +88,13 @@ All endpoints need `Authorization: Bearer <token>`.
 
 | Endpoint | What |
 |---|---|
-| `POST /capture` | Enqueue `{url, origin}` (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
+| `POST /capture` | Enqueue `{url, origin, template?}` (`template` picks one by name; otherwise triggers decide) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
 | `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
 | `GET /jobs/:id` | One job. |
 | `GET /jobs/:id/asset/screenshot` / `markdown` | Capture output. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
 | `GET /settings` / `PUT /settings` | Shared settings `{screenshotStyle, bannerSites, noScreenshotSites, templates}`. |
+| `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |
 | `GET /ui/` | The settings page (static, no token needed to load it; it signs in with one). |
 | `GET /health` | `{status, apiVersion, version}`; the plugin warns when `apiVersion` doesn't match. |
 

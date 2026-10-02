@@ -201,6 +201,23 @@ describe("http app", () => {
     await put({});
   });
 
+  it("records a template chosen at capture time and lists template names", async () => {
+    const put = (body: unknown) =>
+      fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
+    await put({ templates: [DEFAULT_TEMPLATE, { ...DEFAULT_TEMPLATE, name: "Video" }] });
+    const names = (await (await fetch(`${base}/templates`, { headers: auth })).json()) as { templates: string[] };
+    expect(names.templates).toEqual(["Bookmark", "Video"]);
+
+    const { job } = (await (await post("/capture", { url: "https://example.com/t", origin: "shortcut", template: "Video" })).json()) as { job: Job };
+    expect(job.template).toBe("Video");
+    const plain = (await (await post("/capture", { url: "https://example.com/u" })).json()) as { job: Job };
+    expect(plain.job.template).toBeNull();
+    const bad = await post("/capture", { url: "https://example.com/v", template: "Nope" });
+    expect(bad.status).toBe(422);
+    expect(((await bad.json()) as { error: string }).error).toBe("unknown_template");
+    await put({});
+  });
+
   it("serves the settings page without a token", async () => {
     const root = await fetch(`${base}/`, { redirect: "manual" });
     expect(root.status).toBe(302);

@@ -43,6 +43,8 @@ export interface Job {
   assets: AssetKind[];
   /** File extension of the screenshot asset, when there is one. */
   screenshotExt: "jpg" | "png" | null;
+  /** Template chosen at capture time by name; null means match by triggers. */
+  template: string | null;
 }
 
 export type AssetKind = "screenshot" | "markdown";

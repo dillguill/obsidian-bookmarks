@@ -1,11 +1,12 @@
 import { App, Modal, Setting } from "obsidian";
 
-/** Asks for the URL to capture, prefilled from the clipboard when it holds one. */
+/** Asks for the URL to capture (prefilled from the clipboard) and which template to use. */
 export class CaptureModal extends Modal {
   constructor(
     app: App,
     private readonly initial: string,
-    private readonly onSubmit: (url: string) => void,
+    private readonly templates: readonly string[],
+    private readonly onSubmit: (url: string, template: string | null) => void,
   ) {
     super(app);
   }
@@ -13,10 +14,11 @@ export class CaptureModal extends Modal {
   override onOpen(): void {
     this.setTitle("Capture bookmark");
     let value = this.initial;
+    let template = "";
     const submit = () => {
       if (!value.trim()) return;
       this.close();
-      this.onSubmit(value.trim());
+      this.onSubmit(value.trim(), template || null);
     };
 
     new Setting(this.contentEl).setName("URL").addText((text) => {
@@ -30,6 +32,17 @@ export class CaptureModal extends Modal {
       });
       window.setTimeout(() => text.inputEl.select(), 0);
     });
+
+    if (this.templates.length > 1) {
+      new Setting(this.contentEl)
+        .setName("Template")
+        .setDesc("Automatic picks the first template whose trigger matches, else the default.")
+        .addDropdown((dropdown) => {
+          dropdown.addOption("", "Automatic");
+          for (const name of this.templates) dropdown.addOption(name, name);
+          dropdown.onChange((v) => (template = v));
+        });
+    }
 
     new Setting(this.contentEl).addButton((button) => button.setButtonText("Capture").setCta().onClick(submit));
   }
