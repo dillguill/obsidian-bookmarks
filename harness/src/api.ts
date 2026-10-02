@@ -56,4 +56,28 @@ export interface CaptureSettings {
   bannerSites: string[];
   /** Sites (and their subdomains) saved without a screenshot. */
   noScreenshotSites: string[];
+  /** Note templates; the first is the default. */
+  templates: ClipperTemplate[];
+}
+
+export type PropertyType = "text" | "multitext" | "number" | "checkbox" | "date" | "datetime";
+
+export interface TemplateProperty {
+  name: string;
+  value: string;
+  type: PropertyType;
+}
+
+/** A note template in Obsidian Web Clipper's JSON format (design §4). */
+export interface ClipperTemplate {
+  schemaVersion: string;
+  name: string;
+  behavior: "create";
+  noteNameFormat: string;
+  /** Vault folder for the note. */
+  path: string;
+  noteContentFormat: string;
+  properties: TemplateProperty[];
+  /** URL prefixes or `/regex/`; the first template whose trigger matches is used, else the first template. */
+  triggers?: string[];
 }

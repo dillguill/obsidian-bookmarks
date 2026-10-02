@@ -1,24 +1,11 @@
-// Templates use Obsidian Web Clipper's JSON format (design §4), so users can
-// later import their own. The MVP renders a subset: plain `{{variable}}` and
-// the filters below; anything else passes through unchanged.
+// Templates use Obsidian Web Clipper's JSON format (design §4) and are edited
+// on the server's settings page. The plugin renders a subset: plain
+// `{{variable}}` and the filters below; anything else passes through unchanged.
+// DEFAULT_TEMPLATE mirrors harness/src/template-default.ts.
 
-export type PropertyType = "text" | "multitext" | "number" | "checkbox" | "date" | "datetime";
+import type { ClipperTemplate } from "./api";
 
-export interface TemplateProperty {
-  name: string;
-  value: string;
-  type: PropertyType;
-}
-
-export interface ClipperTemplate {
-  schemaVersion: string;
-  name: string;
-  behavior: "create";
-  noteNameFormat: string;
-  path: string;
-  noteContentFormat: string;
-  properties: TemplateProperty[];
-}
+export type { ClipperTemplate, PropertyType, TemplateProperty } from "./api";
 
 export const URL_VARIABLE = "{{url}}";
 export const CAPTURE_ID_VARIABLE = "{{capture_id}}";
@@ -146,4 +133,23 @@ export function urlPropertyName(template: ClipperTemplate): string {
 
 export function captureIdPropertyName(template: ClipperTemplate): string {
   return template.properties.find((p) => p.value === CAPTURE_ID_VARIABLE)?.name ?? "capture_id";
+}
+
+function triggerMatches(trigger: string, url: string): boolean {
+  const t = trigger.trim();
+  if (!t || t.startsWith("schema:")) return false; // schema triggers need the page's JSON-LD; not supported yet
+  const regex = /^\/(.+)\/([a-z]*)$/.exec(t);
+  if (regex) {
+    try {
+      return new RegExp(regex[1]!, regex[2]).test(url);
+    } catch {
+      return false;
+    }
+  }
+  return url.startsWith(t);
+}
+
+/** The first template with a trigger matching `url`, else the first template (the default). */
+export function chooseTemplate(templates: readonly ClipperTemplate[], url: string): ClipperTemplate {
+  return templates.find((t) => t.triggers?.some((trigger) => triggerMatches(trigger, url))) ?? templates[0] ?? DEFAULT_TEMPLATE;
 }

@@ -1,4 +1,4 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { API_VERSION, type AssetKind, type CaptureOrigin, type JobStatus } from "./api.js";
@@ -20,6 +20,40 @@ export interface AppDeps {
 const ORIGINS: ReadonlySet<string> = new Set<CaptureOrigin>(["plugin", "api", "shortcut", "bookmarklet", "share"]);
 const STATUSES: ReadonlySet<string> = new Set<JobStatus>(["pending", "running", "done", "failed", "delivered"]);
 const MAX_BODY = 16 * 1024;
+const MAX_SETTINGS_BODY = 512 * 1024;
+
+// The settings page: static files with no secrets in them, so they're served
+// without a token; the page signs in and calls the API with a bearer token.
+const UI_DIR = new URL("../ui/", import.meta.url);
+const UI_FILES: Record<string, { file: string; type: string }> = {
+  "/ui/": { file: "index.html", type: "text/html; charset=utf-8" },
+  "/ui/app.js": { file: "app.js", type: "text/javascript; charset=utf-8" },
+  "/ui/style.css": { file: "style.css", type: "text/css; charset=utf-8" },
+};
+const UI_HEADERS = {
+  "content-security-policy": "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+  "cache-control": "no-cache",
+};
+
+function serveUi(res: ServerResponse, path: string): boolean {
+  if (path === "/favicon.ico") {
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+  if (path === "/" || path === "/ui") {
+    res.writeHead(302, { location: "/ui/" });
+    res.end();
+    return true;
+  }
+  const entry = UI_FILES[path];
+  if (!entry) return false;
+  res.writeHead(200, { "content-type": entry.type, ...UI_HEADERS });
+  res.end(readFileSync(new URL(entry.file, UI_DIR)));
+  return true;
+}
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json" });
@@ -32,12 +66,12 @@ function isAuthorized(req: IncomingMessage, tokens: ReadonlySet<string>): boolea
   return match?.[1] !== undefined && tokens.has(match[1]);
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
+async function readBody(req: IncomingMessage, limit = MAX_BODY): Promise<string> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new Error("body too large");
+    if (size > limit) throw new Error("body too large");
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -64,11 +98,12 @@ export function createApp(deps: AppDeps): Server {
   const rejectUrl = deps.rejectUrl ?? ((url: string) => urlRejection(url, config.allowPrivateNetworks));
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!isAuthorized(req, config.tokens)) return sendJson(res, 401, { error: "unauthorized" });
-
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname;
     const method = req.method ?? "GET";
+
+    if (method === "GET" && serveUi(res, path)) return;
+    if (!isAuthorized(req, config.tokens)) return sendJson(res, 401, { error: "unauthorized" });
 
     if (method === "GET" && path === "/health") {
       return sendJson(res, 200, { status: "ok", apiVersion: API_VERSION, version: deps.version });
@@ -79,7 +114,7 @@ export function createApp(deps: AppDeps): Server {
     if (path === "/settings" && method === "PUT") {
       let parsed: ReturnType<typeof parseCaptureSettings>;
       try {
-        parsed = parseCaptureSettings(JSON.parse(await readBody(req)));
+        parsed = parseCaptureSettings(JSON.parse(await readBody(req, MAX_SETTINGS_BODY)));
       } catch {
         return sendJson(res, 400, { error: "bad_request", message: "Body must be JSON capture settings." });
       }

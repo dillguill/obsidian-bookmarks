@@ -1,7 +1,6 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
-import type { CaptureSettings, ScreenshotStyle } from "./api";
+import type { ClipperTemplate } from "./api";
 import type BookmarksPlugin from "./main";
-import { siteEntry } from "./url";
 
 export interface BookmarksSettings {
   /** Base URL of the bookmarks-server container, e.g. https://bookmarks.tailnet.ts.net */
@@ -11,7 +10,8 @@ export interface BookmarksSettings {
    * never written to data.json (design §8).
    */
   tokenSecretName: string;
-  notesFolder: string;
+  /** Legacy: the notes folder is now each template's note location; migrated to the server once. */
+  notesFolder?: string;
   assetsFolder: string;
   /** Poll fallback interval for draining completed jobs (design §3). */
   pollIntervalSeconds: number;
@@ -20,23 +20,16 @@ export interface BookmarksSettings {
    * server; migrated there on the next successful sync, then removed.
    */
   noScreenshotSites?: string[];
+  /** Last templates fetched from the server, so the dedup index works offline. */
+  templatesCache?: ClipperTemplate[];
 }
 
 export const DEFAULT_SETTINGS: BookmarksSettings = {
   serverUrl: "",
   tokenSecretName: "",
-  notesFolder: "Bookmarks/notes",
   assetsFolder: "Bookmarks/assets",
   pollIntervalSeconds: 60,
 };
-
-const STYLE_LABELS: Record<ScreenshotStyle, string> = {
-  full: "Full page",
-  banner: "Banner (first screen)",
-  none: "No screenshot",
-};
-
-const parseSites = (value: string): string[] => [...new Set(value.split("\n").map(siteEntry).filter(Boolean))];
 
 export class BookmarksSettingTab extends PluginSettingTab {
   constructor(
@@ -90,11 +83,13 @@ export class BookmarksSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Bookmark notes folder")
-      .addText((text) =>
-        text.setValue(this.plugin.settings.notesFolder).onChange(async (value) => {
-          this.plugin.settings.notesFolder = value.trim();
-          await this.plugin.saveSettings();
+      .setName("Capture settings and templates")
+      .setDesc("Screenshot style, site lists and note templates are shared by every device, so they're edited on the server's settings page.")
+      .addButton((button) =>
+        button.setButtonText("Open settings page").onClick(() => {
+          const url = this.plugin.settingsPageUrl();
+          if (url) window.open(url);
+          else new Notice("Set the server URL first.");
         }),
       );
 
@@ -121,71 +116,6 @@ export class BookmarksSettingTab extends PluginSettingTab {
         }),
       );
 
-    void this.displayCaptureSettings(containerEl);
-  }
-
-  /**
-   * Capture settings live on the server so every device, and captures sent
-   * from a phone Shortcut, follow the same rules.
-   */
-  private async displayCaptureSettings(containerEl: HTMLElement): Promise<void> {
-    const section = containerEl.createDiv();
-    new Setting(section).setName("Capture").setHeading().setDesc("Shared by every device that uses this server.");
-    if (!this.plugin.settings.serverUrl) {
-      section.createEl("p", { text: "Set the server URL to change capture settings.", cls: "setting-item-description" });
-      return;
-    }
-    let settings: CaptureSettings;
-    try {
-      settings = await this.plugin.client().getSettings();
-    } catch (err) {
-      section.createEl("p", {
-        text: `Couldn't load capture settings: ${err instanceof Error ? err.message : String(err)}`,
-        cls: "setting-item-description",
-      });
-      return;
-    }
-
-    const save = async (change: Partial<CaptureSettings>) => {
-      try {
-        settings = await this.plugin.client().saveSettings({ ...settings, ...change });
-      } catch (err) {
-        new Notice(`Couldn't save capture settings: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    };
-
-    new Setting(section)
-      .setName("Screenshot style")
-      .setDesc("Full page scrolls the whole page, banner keeps the first screen, or save no screenshot at all.")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOptions(STYLE_LABELS)
-          .setValue(settings.screenshotStyle)
-          .onChange((value) => void save({ screenshotStyle: value as ScreenshotStyle })),
-      );
-
-    const siteList = (name: string, desc: string, key: "bannerSites" | "noScreenshotSites", placeholder: string) =>
-      new Setting(section)
-        .setName(name)
-        .setDesc(desc)
-        .addTextArea((area) => {
-          area.setPlaceholder(placeholder).setValue(settings[key].join("\n"));
-          area.inputEl.rows = 4;
-          // Save on blur, not per keystroke, so half-typed sites never reach the server.
-          area.inputEl.addEventListener("blur", () => void save({ [key]: parseSites(area.getValue()) }));
-        });
-    siteList(
-      "Sites with banner screenshots",
-      "One site per line. These sites and their subdomains get only the first screen, whatever the style above.",
-      "bannerSites",
-      "youtube.com",
-    );
-    siteList(
-      "Sites without screenshots",
-      "One site per line, e.g. nytimes.com. These sites and their subdomains keep the link and text but no screenshot. Blocked pages never get one.",
-      "noScreenshotSites",
-      "nytimes.com\nreddit.com",
-    );
   }
 
   private async testConnection(): Promise<boolean> {

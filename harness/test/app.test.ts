@@ -8,6 +8,7 @@ import type { Job, PageMeta } from "../src/api.js";
 import { createApp } from "../src/app.js";
 import { BlockedError, type CaptureEngine } from "../src/capture.js";
 import { JobStore } from "../src/db.js";
+import { DEFAULT_TEMPLATE } from "../src/template-default.js";
 import { Worker } from "../src/worker.js";
 
 const meta = (url: string): PageMeta => ({
@@ -129,7 +130,7 @@ describe("http app", () => {
     const put = (body: unknown) =>
       fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
     const initial = (await (await fetch(`${base}/settings`, { headers: auth })).json()) as { settings: unknown };
-    expect(initial.settings).toEqual({ screenshotStyle: "full", bannerSites: [], noScreenshotSites: [] });
+    expect(initial.settings).toEqual({ screenshotStyle: "full", bannerSites: [], noScreenshotSites: [], templates: [DEFAULT_TEMPLATE] });
 
     expect((await put({ screenshotStyle: "huge" })).status).toBe(400);
     expect((await put({ bannerSites: "news.com" })).status).toBe(400);
@@ -138,7 +139,7 @@ describe("http app", () => {
       bannerSites: [],
       noScreenshotSites: ["https://www.NoShot.example/path", "paywalled.example", ""],
     });
-    expect(((await saved.json()) as { settings: unknown }).settings).toEqual({
+    expect(((await saved.json()) as { settings: unknown }).settings).toMatchObject({
       screenshotStyle: "banner",
       bannerSites: [],
       noScreenshotSites: ["noshot.example", "paywalled.example"],
@@ -156,6 +157,53 @@ describe("http app", () => {
     expect(redirected).toMatchObject({ assets: ["markdown"], screenshotExt: null });
 
     await put({});
+  });
+
+  it("stores templates, accepting Web Clipper exports", async () => {
+    const put = (body: unknown) =>
+      fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await put({ templates: [] })).status).toBe(400);
+    expect((await put({ templates: [{ name: "" }] })).status).toBe(400);
+    expect((await put({ templates: [{ name: "X", properties: [{ name: "a", value: "b", type: "weird" }] }] })).status).toBe(400);
+
+    const clipperExport = {
+      schemaVersion: "0.1.0",
+      name: "GitHub",
+      behavior: "create",
+      noteContentFormat: "{{content}}",
+      properties: [{ name: "repo", value: "{{title}}", type: "text" }],
+      triggers: ["https://github.com/", " "],
+      noteNameFormat: "{{title}}",
+      path: "/Clippings/GitHub/",
+      context: "",
+    };
+    const res = await put({ templates: [DEFAULT_TEMPLATE, clipperExport] });
+    expect(res.status).toBe(200);
+    const { settings } = (await res.json()) as { settings: { templates: Array<Record<string, unknown>> } };
+    expect(settings.templates[1]).toEqual({
+      schemaVersion: "0.1.0",
+      name: "GitHub",
+      behavior: "create",
+      noteNameFormat: "{{title}}",
+      path: "Clippings/GitHub",
+      noteContentFormat: "{{content}}",
+      properties: [{ name: "repo", value: "{{title}}", type: "text" }],
+      triggers: ["https://github.com/"],
+    });
+    await put({});
+  });
+
+  it("serves the settings page without a token", async () => {
+    const root = await fetch(`${base}/`, { redirect: "manual" });
+    expect(root.status).toBe(302);
+    expect(root.headers.get("location")).toBe("/ui/");
+    const page = await fetch(`${base}/ui/`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(await page.text()).toContain("Bookmarks settings");
+    expect((await fetch(`${base}/ui/app.js`)).headers.get("content-type")).toContain("javascript");
+    expect((await fetch(`${base}/ui/../jobs`)).status).toBe(401);
+    expect((await fetch(`${base}/settings`)).status).toBe(401);
   });
 
   it("validates capture input", async () => {

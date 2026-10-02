@@ -64,15 +64,21 @@ Sites that block the capture (bot walls, hard paywalls) still get a note with th
 link and a "Capture failed" callout but no screenshot, so nothing sent from the phone
 is lost.
 
-**Capture settings** (in the plugin's settings under **Capture**) are stored on the
-server, so every device and every phone Shortcut uses the same ones:
+**Settings page.** Open the server in a browser (`http://127.0.0.1:8787/`, or your
+Tailscale address from a phone) and sign in with one of your API tokens. The plugin's
+settings have an **Open settings page** button too. Everything there is stored on the
+server, so every device and every phone Shortcut uses the same settings:
 
-- **Screenshot style**: full page (default), banner (first screen only), or none.
-- **Sites with banner screenshots** and **Sites without screenshots**: one site per
-  line, subdomains included; these override the style above.
+- **Capture**: screenshot style (full page, banner for the first screen only, or
+  none), plus **Sites with banner screenshots** and **Sites without screenshots**
+  (one site per line, subdomains included), which override the style.
+- **Templates**: note name, note location, properties and note content, in Obsidian
+  Web Clipper's template format. **Import template** takes Web Clipper JSON exports.
+  The first template whose trigger (a URL prefix or `/regex/`) matches a capture is
+  used; otherwise the default, top one.
 
-Other plugin settings (server URL, folders, poll interval) are per device; the API
-token stays in each device's secret storage.
+Server URL, API token, screenshot folder and poll interval are set per device in the
+plugin; the token stays in each device's secret storage.
 
 ### Server API
 
@@ -85,7 +91,8 @@ All endpoints need `Authorization: Bearer <token>`.
 | `GET /jobs/:id` | One job. |
 | `GET /jobs/:id/asset/screenshot` / `markdown` | Capture output. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
-| `GET /settings` / `PUT /settings` | Shared capture settings `{screenshotStyle, bannerSites, noScreenshotSites}`. |
+| `GET /settings` / `PUT /settings` | Shared settings `{screenshotStyle, bannerSites, noScreenshotSites, templates}`. |
+| `GET /ui/` | The settings page (static, no token needed to load it; it signs in with one). |
 | `GET /health` | `{status, apiVersion, version}`; the plugin warns when `apiVersion` doesn't match. |
 
 ## Development

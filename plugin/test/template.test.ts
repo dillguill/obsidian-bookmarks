@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TEMPLATE, render, renderFrontmatter, type ClipperTemplate } from "../src/template";
+import { DEFAULT_TEMPLATE as SERVER_DEFAULT_TEMPLATE } from "../../harness/src/template-default";
+import { DEFAULT_TEMPLATE, render, renderFrontmatter, type ClipperTemplate, chooseTemplate } from "../src/template";
 
 describe("render", () => {
   it("substitutes variables and applies filters", () => {
@@ -41,5 +42,25 @@ describe("renderFrontmatter", () => {
     const yaml = renderFrontmatter(bare, vars);
     expect(yaml).toContain('source: "https://example.com/a"');
     expect(yaml).toContain('capture_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV"');
+  });
+});
+
+describe("chooseTemplate", () => {
+  const named = (name: string, triggers?: string[]) => ({ ...DEFAULT_TEMPLATE, name, triggers });
+  const templates = [named("Default"), named("GitHub", ["https://github.com/"]), named("Video", ["/youtube\\.com\\/watch/i", "schema:@VideoObject"])];
+
+  it("picks the first template whose trigger matches", () => {
+    expect(chooseTemplate(templates, "https://github.com/dillguill/x").name).toBe("GitHub");
+    expect(chooseTemplate(templates, "https://www.YouTube.com/watch?v=1").name).toBe("Video");
+  });
+
+  it("falls back to the first template, then the built-in one", () => {
+    expect(chooseTemplate(templates, "https://example.com/").name).toBe("Default");
+    expect(chooseTemplate([], "https://example.com/")).toBe(DEFAULT_TEMPLATE);
+    expect(chooseTemplate([named("Bad", ["/(/"])], "https://example.com/").name).toBe("Bad");
+  });
+
+  it("matches the server's built-in template", () => {
+    expect(DEFAULT_TEMPLATE).toEqual(SERVER_DEFAULT_TEMPLATE);
   });
 });

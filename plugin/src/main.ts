@@ -1,17 +1,18 @@
 import { Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
-import { API_VERSION, type Job } from "./api";
+import { API_VERSION, type ClipperTemplate, type Job } from "./api";
 import { CaptureModal } from "./capture-modal";
 import { ServerClient } from "./client";
 import { DedupIndex } from "./dedup";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
-import { DEFAULT_TEMPLATE, captureIdPropertyName, urlPropertyName } from "./template";
+import { DEFAULT_TEMPLATE, captureIdPropertyName, chooseTemplate, urlPropertyName } from "./template";
 import { findUrl, normalizeUrl } from "./url";
 import { writeBookmark, type VaultPort, type WriteResult } from "./writer";
 
 export default class BookmarksPlugin extends Plugin {
   override settings: BookmarksSettings = DEFAULT_SETTINGS;
   readonly index = new DedupIndex();
-  private readonly template = DEFAULT_TEMPLATE;
+  /** Templates from the server's shared settings; cached in plugin data so the index works offline. */
+  private templates: ClipperTemplate[] = [DEFAULT_TEMPLATE];
   /** Job ids being written right now, so an interactive capture and a drain never both write one. */
   private readonly inFlight = new Set<string>();
   private draining = false;
@@ -51,20 +52,42 @@ export default class BookmarksPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<BookmarksSettings>) };
+    if (this.settings.templatesCache?.length) this.templates = this.settings.templatesCache;
+  }
+
+  /** The server's settings page, where capture settings and templates are edited. */
+  settingsPageUrl(): string | null {
+    try {
+      return new URL("/ui/", this.settings.serverUrl).toString();
+    } catch {
+      return null;
+    }
   }
 
   /**
-   * Older versions kept "Sites without screenshots" in this device's plugin
-   * data. Moves that list into the server's shared settings once.
+   * Fetches the shared settings: moves any settings older versions kept on
+   * this device to the server (once), then refreshes the template cache.
    */
-  private async migrateLocalSites(): Promise<void> {
-    const legacy = this.settings.noScreenshotSites;
-    if (!legacy?.length) return;
+  private async syncShared(): Promise<void> {
     const client = this.client();
-    const shared = await client.getSettings();
-    await client.saveSettings({ ...shared, noScreenshotSites: [...new Set([...shared.noScreenshotSites, ...legacy])] });
+    let shared = await client.getSettings();
+    const { noScreenshotSites: legacySites, notesFolder: legacyFolder } = this.settings;
+    const movedFolder = legacyFolder && legacyFolder !== DEFAULT_TEMPLATE.path ? legacyFolder : null;
+    if (legacySites?.length || movedFolder) {
+      shared = await client.saveSettings({
+        ...shared,
+        noScreenshotSites: [...new Set([...shared.noScreenshotSites, ...(legacySites ?? [])])],
+        templates: shared.templates.map((t) => (movedFolder && t.path === DEFAULT_TEMPLATE.path ? { ...t, path: movedFolder } : t)),
+      });
+    }
     delete this.settings.noScreenshotSites;
+    delete this.settings.notesFolder;
+    const names = (list: ClipperTemplate[]) => propertyNames(list).join("\n");
+    const changed = names(shared.templates) !== names(this.templates);
+    this.templates = shared.templates;
+    this.settings.templatesCache = shared.templates;
     await this.saveData(this.settings);
+    if (changed) this.buildIndex();
   }
 
   async saveSettings(): Promise<void> {
@@ -96,7 +119,9 @@ export default class BookmarksPlugin extends Plugin {
   private indexFile(file: TFile): void {
     const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
     if (!frontmatter) return this.index.remove(file.path);
-    this.index.set(file.path, frontmatter[urlPropertyName(this.template)], frontmatter[captureIdPropertyName(this.template)]);
+    // Templates can name the URL and capture id properties differently; take the first one present.
+    const first = (names: string[]) => names.map((name) => frontmatter[name]).find((value) => typeof value === "string" && value);
+    this.index.set(file.path, first(this.templates.map(urlPropertyName)), first(this.templates.map(captureIdPropertyName)));
   }
 
   // ---- writing ----
@@ -124,13 +149,14 @@ export default class BookmarksPlugin extends Plugin {
       const markdown = job.assets.includes("markdown") ? await client.assetText(job.id, "markdown") : "";
       // The server applies the shared screenshot settings, so a missing screenshot asset means "none".
       const screenshot = job.assets.includes("screenshot") ? await client.assetBinary(job.id, "screenshot") : null;
+      const template = chooseTemplate(this.templates, job.url);
       const result = await writeBookmark(
         { job, markdown, screenshot },
         {
           vault: this.vaultPort(),
           index: this.index,
-          template: this.template,
-          notesFolder: this.settings.notesFolder,
+          template,
+          notesFolder: template.path || DEFAULT_TEMPLATE.path,
           assetsFolder: this.settings.assetsFolder,
         },
       );
@@ -186,6 +212,7 @@ export default class BookmarksPlugin extends Plugin {
     try {
       const problem = await this.checkServer();
       if (problem) throw new Error(problem);
+      await this.syncShared().catch((err: unknown) => console.warn("bookmarks: couldn't fetch shared settings", err));
       const job = await this.client().capture(raw, "plugin", true);
       if (job.status !== "done" && job.status !== "failed") {
         new Notice("Still capturing. The note will appear when it's done.");
@@ -218,7 +245,7 @@ export default class BookmarksPlugin extends Plugin {
         this.versionWarned = true;
         return;
       }
-      await this.migrateLocalSites().catch((err: unknown) => console.warn("bookmarks: settings migration failed", err));
+      await this.syncShared().catch((err: unknown) => console.warn("bookmarks: couldn't fetch shared settings", err));
       for (const job of await this.client().finishedJobs()) {
         const result = await this.deliver(job);
         if (result?.kind === "written") written++;
@@ -235,4 +262,9 @@ export default class BookmarksPlugin extends Plugin {
       this.draining = false;
     }
   }
+}
+
+/** URL and capture id property names across templates, for noticing when the index must be rebuilt. */
+function propertyNames(templates: ClipperTemplate[]): string[] {
+  return templates.flatMap((t) => [urlPropertyName(t), captureIdPropertyName(t)]);
 }

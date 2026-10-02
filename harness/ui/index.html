@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bookmarks settings</title>
+  <link rel="stylesheet" href="/ui/style.css">
+  <script src="/ui/app.js" defer></script>
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar" aria-label="Settings sections">
+      <div class="brand">Bookmarks</div>
+      <button class="nav-item" data-section="general">General</button>
+      <button class="nav-item" data-section="capture">Capture</button>
+      <div class="nav-heading">
+        <span>Templates</span>
+        <button class="icon-button" id="new-template" title="New template" aria-label="New template">+</button>
+      </div>
+      <div id="template-list"></div>
+      <label class="nav-link">
+        Import template
+        <input type="file" id="import-file" accept="application/json,.json" multiple hidden>
+      </label>
+    </nav>
+
+    <main class="content">
+      <div class="status" id="status" role="status" aria-live="polite"></div>
+
+      <section id="signin" hidden>
+        <h1>Sign in</h1>
+        <p class="desc">Paste one of the API tokens from the server's <code>BOOKMARKS_TOKENS</code>. It's kept in this browser only.</p>
+        <form id="signin-form" class="stack">
+          <input type="password" id="token" autocomplete="current-password" placeholder="API token" required>
+          <button type="submit" class="primary">Sign in</button>
+        </form>
+      </section>
+
+      <section id="general" hidden>
+        <h1>General</h1>
+        <div class="setting">
+          <div class="setting-info"><div class="setting-name">Server</div><div class="desc" id="server-version"></div></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info">
+            <div class="setting-name">Shared settings</div>
+            <div class="desc">Everything on this page is stored on the server, so every device and every phone Shortcut uses it. Server URL, API token and the screenshot folder are set per device in the Obsidian plugin.</div>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><div class="setting-name">Sign out</div><div class="desc">Forget the API token in this browser.</div></div>
+          <button id="signout">Sign out</button>
+        </div>
+      </section>
+
+      <section id="capture" hidden>
+        <h1>Capture</h1>
+        <div class="setting">
+          <div class="setting-info">
+            <div class="setting-name">Screenshot style</div>
+            <div class="desc">Full page scrolls the whole page, banner keeps the first screen, or save no screenshot at all.</div>
+          </div>
+          <select id="screenshot-style">
+            <option value="full">Full page</option>
+            <option value="banner">Banner (first screen)</option>
+            <option value="none">No screenshot</option>
+          </select>
+        </div>
+        <div class="setting column">
+          <div class="setting-info">
+            <div class="setting-name">Sites with banner screenshots</div>
+            <div class="desc">One site per line. These sites and their subdomains get only the first screen, whatever the style above.</div>
+          </div>
+          <textarea id="banner-sites" rows="4" placeholder="youtube.com"></textarea>
+        </div>
+        <div class="setting column">
+          <div class="setting-info">
+            <div class="setting-name">Sites without screenshots</div>
+            <div class="desc">One site per line. These sites and their subdomains keep the link and text but no screenshot. Blocked pages never get one.</div>
+          </div>
+          <textarea id="no-screenshot-sites" rows="4" placeholder="nytimes.com&#10;reddit.com"></textarea>
+        </div>
+      </section>
+
+      <section id="template" hidden>
+        <div class="title-row">
+          <h1 id="template-title">Template</h1>
+          <div class="actions">
+            <button id="template-duplicate">Duplicate</button>
+            <button id="template-export">Export</button>
+            <button id="template-delete" class="danger">Delete</button>
+          </div>
+        </div>
+        <p class="desc" id="template-default-note"></p>
+
+        <div class="setting column">
+          <label class="setting-name" for="t-name">Template name</label>
+          <input id="t-name" type="text">
+        </div>
+        <div class="setting column">
+          <div class="setting-info">
+            <label class="setting-name" for="t-triggers">Template triggers</label>
+            <div class="desc">One per line: a URL prefix like <code>https://github.com/</code> or a regex like <code>/youtube\.com\/watch/</code>. The first template that matches is used; otherwise the default (top) template.</div>
+          </div>
+          <textarea id="t-triggers" rows="3"></textarea>
+        </div>
+        <div class="setting column">
+          <label class="setting-name" for="t-note-name">Note name</label>
+          <input id="t-note-name" type="text" spellcheck="false">
+        </div>
+        <div class="setting column">
+          <label class="setting-name" for="t-path">Note location</label>
+          <input id="t-path" type="text" spellcheck="false" placeholder="Bookmarks/notes">
+        </div>
+        <div class="setting column">
+          <div class="setting-info">
+            <div class="setting-name">Properties</div>
+            <div class="desc">The page URL and capture id are always saved, even if you remove them here.</div>
+          </div>
+          <div id="t-properties" class="properties"></div>
+          <button id="t-add-property" class="add">+ Add property</button>
+        </div>
+        <div class="setting column">
+          <label class="setting-name" for="t-content">Note content</label>
+          <textarea id="t-content" rows="8" spellcheck="false"></textarea>
+          <details class="desc">
+            <summary>Available variables</summary>
+            <p><code>{{url}}</code> <code>{{title}}</code> <code>{{description}}</code> <code>{{author}}</code> <code>{{domain}}</code> <code>{{site}}</code> <code>{{published}}</code> <code>{{image}}</code> <code>{{favicon}}</code> <code>{{date}}</code> <code>{{content}}</code> <code>{{screenshot}}</code> <code>{{screenshot_link}}</code> <code>{{screenshot_embed}}</code> <code>{{capture_id}}</code></p>
+            <p>Filters: <code>|kebab</code> <code>|safe_name</code> <code>|trim</code> <code>|lower</code> <code>|upper</code> <code>|date:"YYYY-MM-DD"</code></p>
+          </details>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
