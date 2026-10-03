@@ -1,65 +1,59 @@
-import type { CaptureSettings, ClipperTemplate, PropertyType, PropertyTypeEntry, ScreenshotStyle, TemplateProperty } from "./api.js";
+import type { CaptureSettings, ClipperTemplate, PropertyType, PropertyTypeEntry, TemplateProperty } from "./api.js";
 import { DEFAULT_TEMPLATE } from "./template-default.js";
 
 export const DEFAULT_CAPTURE_SETTINGS: CaptureSettings = {
-  screenshotStyle: "full",
-  bannerSites: [],
-  noScreenshotSites: [],
   templates: [DEFAULT_TEMPLATE],
   propertyTypes: DEFAULT_TEMPLATE.properties.map(({ name, type }) => ({ name, type })),
   hideCaptureId: false,
 };
 
-const STYLES: ReadonlySet<string> = new Set<ScreenshotStyle>(["full", "banner", "none"]);
 const PROPERTY_TYPES: ReadonlySet<string> = new Set<PropertyType>(["text", "multitext", "number", "checkbox", "date", "datetime"]);
-const MAX_SITES = 500;
 const MAX_TEMPLATES = 50;
 const MAX_TEXT = 20_000;
 
-/** "https://www.NYTimes.com/x" -> "nytimes.com"; mirrors plugin/src/url.ts. */
-export function siteEntry(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/^[a-z]+:\/\//, "")
-    .replace(/^\*\./, "")
-    .replace(/^www\./, "")
-    .replace(/[/?#:].*$/, "");
+/** Old screenshot variable names: `screenshot`, and `_link`/`_embed` forms of it and of screenshot_page/banner. */
+const OLD_SCREENSHOT = /\bscreenshot(_page|_banner)?(?:_(link|embed))?\b/g;
+const base = (kind: string | undefined) => `screenshot${kind ?? "_page"}`;
+
+/**
+ * Brings older screenshot variables up to date: {{screenshot}} becomes
+ * {{screenshot_page}}, and the {{…_link}}/{{…_embed}} shortcuts become
+ * [[{{screenshot_page}}]]/![[{{screenshot_page}}]]. Only text inside {{ }} and
+ * {% %} changes, so prose that says "screenshot" is left alone.
+ */
+export function renameScreenshotVariables(text: string): string {
+  return text.replace(/\{\{([\s\S]*?)\}\}|\{%[\s\S]*?%\}/g, (tag, inner: string | undefined) => {
+    const simple = inner === undefined ? null : /^\s*screenshot(_page|_banner)?_(link|embed)\s*$/.exec(inner);
+    if (simple) return `${simple[2] === "embed" ? "!" : ""}[[{{${base(simple[1])}}}]]`;
+    return tag.replace(OLD_SCREENSHOT, (name, kind: string | undefined, form: string | undefined) =>
+      kind && !form ? name : base(kind),
+    );
+  });
 }
 
-function matchesSite(url: string, sites: readonly string[]): boolean {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
-  } catch {
-    return false;
-  }
-  return sites.some((site) => host === site || host.endsWith(`.${site}`));
+function renameInTemplate(template: ClipperTemplate): ClipperTemplate {
+  return {
+    ...template,
+    noteNameFormat: renameScreenshotVariables(template.noteNameFormat),
+    path: renameScreenshotVariables(template.path),
+    noteContentFormat: renameScreenshotVariables(template.noteContentFormat),
+    properties: template.properties.map((p) => ({ ...p, value: renameScreenshotVariables(p.value) })),
+  };
 }
 
-/** Screenshot style for a URL: "no screenshot" sites win over banner sites, which win over the default. */
-export function screenshotStyleFor(url: string, settings: CaptureSettings): ScreenshotStyle {
-  if (matchesSite(url, settings.noScreenshotSites)) return "none";
-  if (matchesSite(url, settings.bannerSites)) return "banner";
-  return settings.screenshotStyle;
+/** Brings settings saved by older versions up to date: drops the screenshot style and site lists, renames old variables. */
+export function currentSettings(stored: Partial<CaptureSettings>): CaptureSettings {
+  return {
+    templates: (stored.templates ?? DEFAULT_CAPTURE_SETTINGS.templates).map(renameInTemplate),
+    propertyTypes: stored.propertyTypes ?? DEFAULT_CAPTURE_SETTINGS.propertyTypes,
+    hideCaptureId: stored.hideCaptureId ?? false,
+  };
 }
 
 /** Validates a settings body; returns the cleaned settings or an error message. */
 export function parseCaptureSettings(body: unknown): CaptureSettings | string {
   if (!body || typeof body !== "object") return "Body must be a JSON object.";
   const fields = body as Record<string, unknown>;
-  const style = fields.screenshotStyle ?? DEFAULT_CAPTURE_SETTINGS.screenshotStyle;
-  if (typeof style !== "string" || !STYLES.has(style)) return "screenshotStyle must be full, banner or none.";
-  const sites = (key: string): string[] | string => {
-    const value = fields[key] ?? [];
-    if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) return `${key} must be a list of sites.`;
-    if (value.length > MAX_SITES) return `${key} has more than ${MAX_SITES} sites.`;
-    return [...new Set((value as string[]).map(siteEntry).filter(Boolean))];
-  };
-  const bannerSites = sites("bannerSites");
-  if (typeof bannerSites === "string") return bannerSites;
-  const noScreenshotSites = sites("noScreenshotSites");
-  if (typeof noScreenshotSites === "string") return noScreenshotSites;
   const rawTemplates = fields.templates ?? DEFAULT_CAPTURE_SETTINGS.templates;
   if (!Array.isArray(rawTemplates) || rawTemplates.length === 0) return "templates must be a non-empty list.";
   if (rawTemplates.length > MAX_TEMPLATES) return `More than ${MAX_TEMPLATES} templates.`;
@@ -84,7 +78,7 @@ export function parseCaptureSettings(body: unknown): CaptureSettings | string {
   }
   const hideCaptureId = fields.hideCaptureId ?? false;
   if (typeof hideCaptureId !== "boolean") return "hideCaptureId must be true or false.";
-  return { screenshotStyle: style as ScreenshotStyle, bannerSites, noScreenshotSites, templates, propertyTypes, hideCaptureId };
+  return { templates, propertyTypes, hideCaptureId };
 }
 
 const text = (value: unknown, fallback = ""): string | null =>
@@ -118,7 +112,7 @@ export function parseTemplate(raw: unknown): ClipperTemplate | string {
   const rawTriggers = t.triggers ?? [];
   if (!Array.isArray(rawTriggers) || rawTriggers.some((x) => typeof x !== "string")) return "triggers must be a list of text.";
   const triggers = (rawTriggers as string[]).map((x) => x.trim()).filter(Boolean);
-  return {
+  return renameInTemplate({
     schemaVersion: typeof t.schemaVersion === "string" ? t.schemaVersion : "0.1.0",
     name: name.trim(),
     behavior: "create",
@@ -127,5 +121,5 @@ export function parseTemplate(raw: unknown): ClipperTemplate | string {
     noteContentFormat,
     properties,
     triggers,
-  };
+  });
 }

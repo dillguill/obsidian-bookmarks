@@ -1,7 +1,7 @@
 // Wire types for the HTTP API. plugin/src/api.ts mirrors these; bump
 // API_VERSION on any breaking change so a mismatched pair says which side to
 // update (design §5.3).
-export const API_VERSION = 2;
+export const API_VERSION = 3;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -41,19 +41,41 @@ export interface Job {
   meta: PageMeta | null;
   /** Asset kinds available from `GET /jobs/:id/asset/:kind`. */
   assets: AssetKind[];
-  /** File extension of the screenshot asset, when there is one. */
+  /** File extension of the screenshot assets, when there are any (the PDF is always .pdf). */
   screenshotExt: "jpg" | "png" | null;
   /** Template chosen at capture time by name; null means match by triggers. */
   template: string | null;
 }
 
-/** `note` is the note rendered with Web Clipper's engine ({@link RenderedNote}, JSON). */
-export type AssetKind = "screenshot" | "markdown" | "note";
+/**
+ * Files a template can ask for, each named after its template variable, which
+ * holds the file's vault path: full page, first screen, first screen at phone
+ * width, the main content block and a small first screen, each also in the
+ * site's dark mode (`_dark`), and a PDF of the page. The server makes only the
+ * ones the rendered note uses.
+ */
+export const CAPTURE_FILES = [
+  "screenshot_page",
+  "screenshot_banner",
+  "screenshot_mobile",
+  "screenshot_article",
+  "screenshot_thumbnail",
+  "screenshot_page_dark",
+  "screenshot_banner_dark",
+  "screenshot_mobile_dark",
+  "screenshot_article_dark",
+  "screenshot_thumbnail_dark",
+  "pdf_page",
+] as const;
+export type CaptureFile = (typeof CAPTURE_FILES)[number];
+
+/** A capture file, the readable `markdown`, or the `note` rendered with Web Clipper's engine ({@link RenderedNote}, JSON). */
+export type AssetKind = CaptureFile | "markdown" | "note";
 
 /**
  * A note rendered on the server by Obsidian Web Clipper's template engine.
- * The plugin only picks a free file name, saves the screenshot and swaps
- * SCREENSHOT_MARKER for its vault path (or removes it when there is none).
+ * The plugin only picks a free file name, saves the capture files and swaps
+ * each {@link fileMarker} for its vault path.
  */
 export interface RenderedNote {
   /** Name of the template used. */
@@ -67,22 +89,20 @@ export interface RenderedNote {
   content: string;
 }
 
-/** Stands in for the screenshot's vault path in a RenderedNote: `{{screenshot}}` is the marker, `{{screenshot_link}}` is `[[marker]]`, `{{screenshot_embed}}` is `![[marker]]`. */
-export const SCREENSHOT_MARKER = "bookmarks-screenshot-path-5f2c9e";
-
-/** How much of the page the screenshot covers. */
-export type ScreenshotStyle = "full" | "banner" | "none";
+/**
+ * Stands in for a capture file's vault path in a RenderedNote until the plugin
+ * saves the file, which then replaces it (or removes it, with any [[ ]] or ![[ ]]
+ * around it, when there is no file).
+ */
+export function fileMarker(kind: CaptureFile): string {
+  return `bookmarks-${kind}-5f2c9e`;
+}
 
 /**
  * Capture settings shared by every device, stored on the server so captures
  * from a phone Shortcut follow the same rules as the plugin.
  */
 export interface CaptureSettings {
-  screenshotStyle: ScreenshotStyle;
-  /** Sites (and their subdomains) that get only the first screen. */
-  bannerSites: string[];
-  /** Sites (and their subdomains) saved without a screenshot. */
-  noScreenshotSites: string[];
   /** Note templates; the first is the default. */
   templates: ClipperTemplate[];
   /** Property name -> type, shared by every template, like Web Clipper's Properties settings. */

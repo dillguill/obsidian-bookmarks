@@ -1,5 +1,5 @@
 import { Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
-import { API_VERSION, type ClipperTemplate, type Job, type RenderedNote } from "./api";
+import { API_VERSION, CAPTURE_FILES, type CaptureFile, type ClipperTemplate, type Job, type RenderedNote } from "./api";
 import { CaptureModal } from "./capture-modal";
 import { ServerClient } from "./client";
 import { DedupIndex } from "./dedup";
@@ -89,12 +89,11 @@ export default class BookmarksPlugin extends Plugin {
   private async syncShared(): Promise<void> {
     const client = this.client();
     let shared = await client.getSettings();
-    const { noScreenshotSites: legacySites, notesFolder: legacyFolder } = this.settings;
+    const legacyFolder = this.settings.notesFolder;
     const movedFolder = legacyFolder && legacyFolder !== DEFAULT_TEMPLATE.path ? legacyFolder : null;
-    if (legacySites?.length || movedFolder) {
+    if (movedFolder) {
       shared = await client.saveSettings({
         ...shared,
-        noScreenshotSites: [...new Set([...shared.noScreenshotSites, ...(legacySites ?? [])])],
         templates: shared.templates.map((t) => (movedFolder && t.path === DEFAULT_TEMPLATE.path ? { ...t, path: movedFolder } : t)),
       });
     }
@@ -171,8 +170,9 @@ export default class BookmarksPlugin extends Plugin {
     try {
       const client = this.client();
       const markdown = job.assets.includes("markdown") ? await client.assetText(job.id, "markdown") : "";
-      // The server applies the shared screenshot settings, so a missing screenshot asset means "none".
-      const screenshot = job.assets.includes("screenshot") ? await client.assetBinary(job.id, "screenshot") : null;
+      // The server takes only the shots the template's variables use.
+      const files: Partial<Record<CaptureFile, ArrayBuffer>> = {};
+      for (const kind of CAPTURE_FILES) if (job.assets.includes(kind)) files[kind] = await client.assetBinary(job.id, kind);
       // A failed job's metadata describes the block page, so schema triggers only see successful captures.
       const template =
         this.templates.find((t) => t.name === job.template) ??
@@ -180,7 +180,7 @@ export default class BookmarksPlugin extends Plugin {
       // Rendered on the server with Web Clipper's engine; older servers and failed captures use the plugin's renderer.
       const note = job.assets.includes("note") ? (JSON.parse(await client.assetText(job.id, "note")) as RenderedNote) : null;
       const result = await writeBookmark(
-        { job, markdown, screenshot, note },
+        { job, markdown, files, note },
         {
           vault: this.vaultPort(),
           index: this.index,

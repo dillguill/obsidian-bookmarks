@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { AssetKind, CaptureOrigin, CaptureSettings, Job, JobStatus, PageMeta } from "./api.js";
-import { DEFAULT_CAPTURE_SETTINGS } from "./settings.js";
+import { currentSettings } from "./settings.js";
 import { ulid } from "./ulid.js";
 
 interface Row {
@@ -135,7 +135,7 @@ export class JobStore {
 
   getSettings(): CaptureSettings {
     const row = this.db.prepare("SELECT value FROM settings WHERE key = 'capture'").get() as { value: string } | undefined;
-    return { ...DEFAULT_CAPTURE_SETTINGS, ...(row ? (JSON.parse(row.value) as Partial<CaptureSettings>) : {}) };
+    return currentSettings(row ? (JSON.parse(row.value) as Partial<CaptureSettings>) : {});
   }
 
   saveSettings(settings: CaptureSettings): void {

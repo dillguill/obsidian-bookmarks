@@ -7,7 +7,7 @@ export const DEFAULT_TEMPLATE: ClipperTemplate = {
   behavior: "create",
   noteNameFormat: '{{domain|kebab}}-{{title|kebab}}-{{date|date:"YYYY-MM-DD"}}',
   path: "Bookmarks/notes",
-  noteContentFormat: "{{screenshot_embed}}\n\n{{content}}",
+  noteContentFormat: "![[{{screenshot_page}}]]\n\n{{content}}",
   properties: [
     { name: "source", value: "{{url}}", type: "text" },
     { name: "title", value: "{{title}}", type: "text" },
@@ -16,7 +16,7 @@ export const DEFAULT_TEMPLATE: ClipperTemplate = {
     { name: "domain", value: "{{domain}}", type: "text" },
     { name: "created", value: '{{date|date:"YYYY-MM-DDTHH:mm:ss"}}', type: "datetime" },
     { name: "tags", value: "", type: "multitext" },
-    { name: "screenshot", value: "{{screenshot_link}}", type: "text" },
+    { name: "screenshot", value: "[[{{screenshot_page}}]]", type: "text" },
     { name: "capture_id", value: "{{capture_id}}", type: "text" },
   ],
 };

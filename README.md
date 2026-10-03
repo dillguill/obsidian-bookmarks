@@ -28,18 +28,21 @@ your vault as deduplicated bookmark notes. See the
    ```
 
    Check it: `curl -H "Authorization: Bearer desktop-token" http://127.0.0.1:8787/health`
-   should return `{"status":"ok","apiVersion":1,...}`.
+   should return `{"status":"ok","apiVersion":3,...}`.
 
-2. **Install the plugin** into a test vault:
+2. **Install the plugin** with [BRAT](https://github.com/TfTHacker/obsidian42-brat):
+   in BRAT's settings choose **Add beta plugin** and enter `dillguill/obsidian-bookmarks`.
+   BRAT installs the latest release and keeps it updated. To try a local build
+   instead:
 
    ```sh
    npm install
    npm run build -w plugin
-   mkdir -p <vault>/.obsidian/plugins/bookmarks
-   cp plugin/main.js plugin/manifest.json <vault>/.obsidian/plugins/bookmarks/
+   mkdir -p <vault>/.obsidian/plugins/obsidian-bookmarker
+   cp plugin/main.js plugin/manifest.json <vault>/.obsidian/plugins/obsidian-bookmarker/
    ```
 
-   Enable **Bookmarks** under Settings → Community plugins, then in its settings set
+   Enable **Bookmarker** under Settings → Community plugins, then in its settings set
    the server URL (`http://127.0.0.1:8787`), add the API token, and press **Test**.
 
 3. **Capture from Obsidian**: copy a URL, run **Bookmarks: Capture URL** from the
@@ -74,11 +77,9 @@ Tailscale address from a phone) and sign in with one of your API tokens. The plu
 settings have an **Open settings page** button too. Everything there is stored on the
 server, so every device and every phone Shortcut uses the same settings:
 
-- **Capture**: screenshot style (full page, banner for the first screen only, or
-  none), plus **Sites with banner screenshots** and **Sites without screenshots**
-  (one site per line, subdomains included), which override the style.
-  **Hide capture ID** leaves `capture_id` out of new notes; the plugin then remembers
-  which captures it wrote, and URL dedup still skips a page that's already saved.
+- **General**: **Hide capture ID** leaves `capture_id` out of new notes; the plugin
+  then remembers which captures it wrote, and URL dedup still skips a page that's
+  already saved. The browser bookmarklets are here too.
 - **Templates**: note name, note location, properties and note content, in Obsidian
   Web Clipper's template format. **Import template** takes a Web Clipper template export or Web Clipper's full
   settings export (only the templates are read). Notes are rendered by
@@ -89,6 +90,16 @@ server, so every device and every phone Shortcut uses the same settings:
   time wins; otherwise the first template whose trigger (a URL prefix, `/regex/` or
   `schema:@Type`) matches, else the default, top one. Set `TZ` in `.env` so
   `{{date}}` uses your time zone.
+- **Screenshots and PDF** are template variables holding the file's vault path:
+  `{{screenshot_page}}` (whole page), `{{screenshot_banner}}` (first screen),
+  `{{screenshot_mobile}}` (first screen at phone width), `{{screenshot_article}}`
+  (main content block only), `{{screenshot_thumbnail}}` (small first screen), each
+  also as `_dark` for the site's dark mode (`{{screenshot_page_dark}}`…), and
+  `{{pdf_page}}`. Write
+  `![[{{screenshot_page}}]]` to show one or `[[{{screenshot_page}}]]` to link it, in
+  the note content or a property. A capture makes only the files its template
+  uses. Older templates' `{{screenshot}}`, `{{screenshot_link}}` and
+  `{{screenshot_embed}}` are rewritten when loaded or imported.
 
 Server URL, API token, screenshot folder and poll interval are set per device in the
 plugin; the token stays in each device's secret storage.
@@ -102,9 +113,9 @@ All endpoints need `Authorization: Bearer <token>`.
 | `POST /capture` | Enqueue `{url, origin, template?}` (`template` picks one by name; otherwise triggers decide) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
 | `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
 | `GET /jobs/:id` | One job. |
-| `GET /jobs/:id/asset/screenshot` / `markdown` | Capture output. |
+| `GET /jobs/:id/asset/:kind` | Capture output: a screenshot or `pdf_page` named after its variable (only those the template uses), `markdown`, or the rendered `note`. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
-| `GET /settings` / `PUT /settings` | Shared settings `{screenshotStyle, bannerSites, noScreenshotSites, templates}`. |
+| `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId}`. |
 | `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |
 | `GET /ui/` | The settings page (static, no token needed to load it; it signs in with one). |
 | `GET /health` | `{status, apiVersion, version}`; the plugin warns when `apiVersion` doesn't match. |
@@ -127,7 +138,8 @@ if Playwright's browser isn't installed).
 
 Releasing: `node scripts/set-version.mjs x.y.z`, commit, then push tag `x.y.z`
 (no `v`). The release workflow publishes `ghcr.io/dillguill/bookmarks-server:x.y.z`
-and a GitHub release with `main.js`, `manifest.json` and a compose file.
+and a GitHub release with `main.js`, `manifest.json` and a compose file, which BRAT
+picks up.
 
 Plugin: `npm run dev -w plugin` rebuilds `plugin/main.js` on change. Symlink or
 copy `plugin/` (`main.js`, `manifest.json`) into `<vault>/.obsidian/plugins/bookmarks/`.

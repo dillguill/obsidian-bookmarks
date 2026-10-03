@@ -1,5 +1,5 @@
 // Sets one lockstep version on the plugin, the server and the root manifest
-// Obsidian's community directory reads (design §5.3).
+// that BRAT (and later Obsidian's community directory) reads (design §5.3).
 // Usage: node scripts/set-version.mjs 0.1.0
 import { readFileSync, writeFileSync } from "node:fs";
 

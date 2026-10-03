@@ -16,8 +16,8 @@ export interface BookmarksSettings {
   /** Poll fallback interval for draining completed jobs (design §3). */
   pollIntervalSeconds: number;
   /**
-   * Legacy per-device site list from before capture settings moved to the
-   * server; migrated there on the next successful sync, then removed.
+   * Legacy per-device "no screenshot" sites; screenshots are template
+   * variables now, so this is dropped on the next successful sync.
    */
   noScreenshotSites?: string[];
   /** Last templates fetched from the server, so the dedup index works offline. */
