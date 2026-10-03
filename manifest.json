@@ -1,7 +1,7 @@
 {
-  "id": "bookmarks",
+  "id": "obsidian-bookmarker",
   "name": "Bookmarks",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.11.4",
   "description": "Capture bookmarks with full-page screenshots and readable content via a self-hosted capture server.",
   "author": "Dillon",
