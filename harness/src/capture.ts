@@ -29,11 +29,12 @@ const IMAGE_MAX_WIDTH = 2000;
 /**
  * Capture files are template variables: make only the ones the rendered note uses.
  * Without a rendered note the plugin falls back to its default template, which shows the page shot.
+ * `extra` are asked for by name (enriching an existing note offers them as choices).
  */
-export function filesWanted(note: RenderedNote | null): Set<CaptureFile> {
-  if (!note) return new Set(["screenshot_page"]);
+export function filesWanted(note: RenderedNote | null, extra: readonly CaptureFile[] = []): Set<CaptureFile> {
+  if (!note) return new Set(["screenshot_page", ...extra]);
   const text = [note.noteName, note.path, note.frontmatter, note.content].join("\n");
-  return new Set(CAPTURE_FILES.filter((kind) => text.includes(fileMarker(kind))));
+  return new Set(CAPTURE_FILES.filter((kind) => text.includes(fileMarker(kind)) || extra.includes(kind)));
 }
 
 export interface CaptureResult {
@@ -528,7 +529,7 @@ export class PlaywrightEngine implements CaptureEngine {
     const note = render
       ? await renderNote(page, { ...render, extra: { ...render.extra, ...(tiktok?.variables ?? noTikTokVariables()) } }, bookmarkUrl(meta))
       : null;
-    const wanted = filesWanted(note);
+    const wanted = filesWanted(note, render?.files);
     const files: Partial<Record<CaptureFile, Buffer>> = {};
     if (wanted.size === 0) return { meta, markdown, files, screenshotExt: null, note };
 

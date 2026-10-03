@@ -98,10 +98,10 @@ export function fileVariables(paths: Partial<Record<CaptureFile, string | null>>
   return Object.fromEntries(CAPTURE_FILES.map((kind) => [kind, paths[kind] ?? ""]));
 }
 
-type SavedFiles = Partial<Record<CaptureFile, string>>;
+export type SavedFiles = Partial<Record<CaptureFile, string>>;
 
 /** Swaps each capture file's marker for its vault path, or drops it (with any [[ ]] or ![[ ]] around it) when there's no file. */
-function fillFiles(text: string, saved: SavedFiles): string {
+export function fillFiles(text: string, saved: SavedFiles): string {
   return CAPTURE_FILES.reduce((out, kind) => {
     const marker = fileMarker(kind);
     const path = saved[kind];
@@ -111,18 +111,24 @@ function fillFiles(text: string, saved: SavedFiles): string {
 }
 
 /** Saves capture files in the assets folder: <note>.jpg for the page, <note>-banner.jpg, <note>-banner-dark.jpg and so on, <note>.pdf, <note>-image.jpg. */
-async function saveFiles(input: CapturedBookmark, options: WriteOptions, noteBase: string): Promise<SavedFiles> {
+export async function saveCaptureFiles(
+  vault: VaultPort,
+  assetsFolder: string,
+  files: Partial<Record<CaptureFile, ArrayBuffer | null>> | undefined,
+  screenshotExt: Job["screenshotExt"],
+  noteBase: string,
+): Promise<SavedFiles> {
   const saved: SavedFiles = {};
   for (const kind of CAPTURE_FILES) {
-    const data = input.files?.[kind];
-    const ext = kind === "pdf_page" ? "pdf" : input.job.screenshotExt;
+    const data = files?.[kind];
+    const ext = kind === "pdf_page" ? "pdf" : screenshotExt;
     if (!data || !ext) continue;
     // screenshot_page -> note, screenshot_banner_dark -> note-banner-dark, screenshot_page_dark -> note-dark, image_local -> note-image.
     const suffix = kind.replace(/^(screenshot|pdf)_/, "").replace(/^page_?/, "").replace(/_local$/, "").replace(/_/g, "-");
     const base = suffix ? `${noteBase}-${suffix}` : noteBase;
-    await options.vault.ensureFolder(options.assetsFolder);
-    const path = await freePath(options.vault, options.assetsFolder, base, ext);
-    await options.vault.writeBinary(path, data);
+    await vault.ensureFolder(assetsFolder);
+    const path = await freePath(vault, assetsFolder, base, ext);
+    await vault.writeBinary(path, data);
     saved[kind] = path;
   }
   return saved;
@@ -186,7 +192,7 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
     const folder = note.path.replace(/^\/+|\/+$/g, "") || options.notesFolder;
     const base = cleanName(note.noteName) || `bookmark-${formatDate((options.now ?? new Date()).toISOString(), "YYYY-MM-DD")}`;
     const notePath = await targetPath(folder, base);
-    const saved = await saveFiles(input, options, notePath.slice(notePath.lastIndexOf("/") + 1, -3));
+    const saved = await saveCaptureFiles(vault, options.assetsFolder, input.files, job.screenshotExt, notePath.slice(notePath.lastIndexOf("/") + 1, -3));
     const body = fillFiles(note.content, saved).replace(/^\s+/, "").trimEnd();
     await save(notePath, `${fillFiles(note.frontmatter, saved)}${body ? `${body}\n` : ""}`);
     index.set(notePath, url, job.id);
@@ -216,7 +222,7 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   const notePath = await targetPath(options.notesFolder, base);
   const noteBase = notePath.slice(notePath.lastIndexOf("/") + 1, -3);
 
-  const saved = await saveFiles(input, options, noteBase);
+  const saved = await saveCaptureFiles(vault, options.assetsFolder, input.files, job.screenshotExt, noteBase);
 
   let content = input.markdown.trim();
   if (job.status === "failed") {

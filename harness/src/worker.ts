@@ -46,7 +46,7 @@ export class Worker extends EventEmitter {
   private async run(job: Job): Promise<void> {
     try {
       const settings = this.store.getSettings();
-      const result = await this.engine.capture(job.url, renderRequest(settings, job.template, job.id));
+      const result = await this.engine.capture(job.url, renderRequest(settings, job.template, job.id, job.files));
       await mkdir(join(this.dataDir, "jobs", job.id), { recursive: true });
       const assets: AssetKind[] = [];
       for (const kind of CAPTURE_FILES) {

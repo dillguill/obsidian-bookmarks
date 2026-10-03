@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { AssetKind, CaptureOrigin, CaptureSettings, Job, JobStatus, PageMeta } from "./api.js";
+import type { AssetKind, CaptureFile, CaptureOrigin, CaptureSettings, Job, JobStatus, PageMeta } from "./api.js";
 import { currentSettings } from "./settings.js";
 import { ulid } from "./ulid.js";
 
@@ -15,6 +15,7 @@ interface Row {
   assets: string;
   screenshot_ext: string | null;
   template: string | null;
+  files: string | null;
   created_at: string;
   updated_at: string;
   delivered_at: string | null;
@@ -33,6 +34,7 @@ function toJob(row: Row): Job {
     assets: JSON.parse(row.assets) as AssetKind[],
     screenshotExt: row.screenshot_ext as Job["screenshotExt"],
     template: row.template ?? null,
+    files: row.files ? (JSON.parse(row.files) as CaptureFile[]) : [],
   };
 }
 
@@ -64,16 +66,17 @@ export class JobStore {
     // Databases from before the template column existed.
     const columns = this.db.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>;
     if (!columns.some((c) => c.name === "template")) this.db.exec("ALTER TABLE jobs ADD COLUMN template TEXT");
+    if (!columns.some((c) => c.name === "files")) this.db.exec("ALTER TABLE jobs ADD COLUMN files TEXT");
     // A crash mid-capture leaves rows running; retry them.
     this.db.prepare("UPDATE jobs SET status = 'pending' WHERE status = 'running'").run();
   }
 
-  create(url: string, origin: CaptureOrigin, template: string | null = null): Job {
+  create(url: string, origin: CaptureOrigin, template: string | null = null, files: CaptureFile[] = []): Job {
     const now = new Date().toISOString();
     const id = ulid();
     this.db
-      .prepare("INSERT INTO jobs (id, url, origin, status, template, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?)")
-      .run(id, url, origin, template, now, now);
+      .prepare("INSERT INTO jobs (id, url, origin, status, template, files, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)")
+      .run(id, url, origin, template, files.length ? JSON.stringify(files) : null, now, now);
     return this.get(id)!;
   }
 
@@ -82,10 +85,11 @@ export class JobStore {
     return row ? toJob(row) : null;
   }
 
+  /** Jobs waiting for delivery; enrich jobs are read by the plugin that asked for them, so they're left out. */
   list(statuses: JobStatus[], limit: number): Job[] {
     const placeholders = statuses.map(() => "?").join(",");
     const rows = this.db
-      .prepare(`SELECT * FROM jobs WHERE status IN (${placeholders}) ORDER BY id LIMIT ?`)
+      .prepare(`SELECT * FROM jobs WHERE status IN (${placeholders}) AND origin != 'enrich' ORDER BY id LIMIT ?`)
       .all(...statuses, limit) as unknown as Row[];
     return rows.map(toJob);
   }
@@ -125,11 +129,15 @@ export class JobStore {
     return result.changes > 0;
   }
 
-  /** Delivered jobs whose blobs are older than `cutoff`; clears their asset list. */
+  /** Delivered jobs whose blobs are older than `cutoff`, and enrich jobs nobody collected; clears their asset list. */
   takePrunable(cutoff: Date): string[] {
     const rows = this.db
-      .prepare("UPDATE jobs SET assets = '[]' WHERE status = 'delivered' AND delivered_at < ? AND assets != '[]' RETURNING id")
-      .all(cutoff.toISOString()) as unknown as Array<{ id: string }>;
+      .prepare(
+        `UPDATE jobs SET assets = '[]'
+         WHERE assets != '[]' AND ((status = 'delivered' AND delivered_at < ?) OR (origin = 'enrich' AND status IN ('done', 'failed') AND updated_at < ?))
+         RETURNING id`,
+      )
+      .all(cutoff.toISOString(), cutoff.toISOString()) as unknown as Array<{ id: string }>;
     return rows.map((row) => row.id);
   }
 

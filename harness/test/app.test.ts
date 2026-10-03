@@ -224,6 +224,20 @@ describe("http app", () => {
     await put({});
   });
 
+  it("passes asked-for capture files to the engine and keeps enrich jobs out of the delivery list", async () => {
+    const { job } = (await (
+      await post("/capture?wait=1", { url: "https://example.com/enrich", origin: "enrich", files: ["image_local", "screenshot_banner"] })
+    ).json()) as { job: Job };
+    expect(job.status).toBe("done");
+    expect(job.files).toEqual(["image_local", "screenshot_banner"]);
+    expect(renders.at(-1)!.files).toEqual(["image_local", "screenshot_banner"]);
+    const { jobs } = (await (await fetch(`${base}/jobs?status=done,failed,delivered&limit=200`, { headers: auth })).json()) as { jobs: Job[] };
+    expect(jobs.some((j) => j.id === job.id)).toBe(false);
+    // Still readable by id, for the plugin that asked.
+    expect((await fetch(`${base}/jobs/${job.id}`, { headers: auth })).status).toBe(200);
+    expect((await post("/capture", { url: "https://example.com/x", files: ["screenshot_huge"] })).status).toBe(400);
+  });
+
   it("renders notes with the shared templates and serves them as the note asset", async () => {
     const custom = { ...DEFAULT_TEMPLATE, name: "Bare", properties: [{ name: "title", value: "{{title}}", type: "text" as const }] };
     await fetch(`${base}/settings`, {

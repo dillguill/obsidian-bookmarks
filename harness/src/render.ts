@@ -12,6 +12,8 @@ export interface RenderRequest {
   templateName: string | null;
   propertyTypes: Record<string, string>;
   extra: Record<string, string>;
+  /** Capture files to make even when the rendered note doesn't use them. */
+  files?: CaptureFile[];
 }
 
 const URL_VARIABLE = "{{url}}";
@@ -33,8 +35,9 @@ export function fileVariables(paths: Partial<Record<CaptureFile, string | null>>
   return Object.fromEntries(CAPTURE_FILES.map((kind) => [kind, paths[kind] ?? ""])) as Record<CaptureFile, string>;
 }
 
-export function renderRequest(settings: CaptureSettings, templateName: string | null, captureId: string): RenderRequest {
+export function renderRequest(settings: CaptureSettings, templateName: string | null, captureId: string, files: CaptureFile[] = []): RenderRequest {
   return {
+    files,
     templates: settings.templates.map((t) => withRequiredProperties(t, settings.hideCaptureId)),
     templateName,
     propertyTypes: Object.fromEntries(settings.propertyTypes.map((p) => [p.name, p.type])),
