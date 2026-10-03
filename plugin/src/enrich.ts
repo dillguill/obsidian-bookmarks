@@ -10,9 +10,16 @@ import { fillFiles, type SavedFiles } from "./writer";
  * Images an enrich capture asks for on top of the ones the template uses, so
  * there's something to pick from even when the template has no screenshot.
  */
-export const ENRICH_FILES: readonly CaptureFile[] = ["image_local", "tiktok_thumbnail", "screenshot_banner", "screenshot_thumbnail", "screenshot_page"];
+export const ENRICH_FILES: readonly CaptureFile[] = [
+  "image_local",
+  "tiktok_thumbnail",
+  ...CAPTURE_FILES.filter((kind) => kind.startsWith("tiktok_image_")),
+  "screenshot_banner",
+  "screenshot_thumbnail",
+  "screenshot_page",
+];
 
-const FILE_LABELS: Record<CaptureFile, string> = {
+const FILE_LABELS: Partial<Record<CaptureFile, string>> = {
   screenshot_page: "Full page screenshot",
   screenshot_banner: "First screen screenshot",
   screenshot_mobile: "Phone screenshot",
@@ -29,7 +36,8 @@ const FILE_LABELS: Record<CaptureFile, string> = {
 };
 
 export function fileLabel(kind: CaptureFile): string {
-  return FILE_LABELS[kind];
+  const photo = /^tiktok_image_(\d+)$/.exec(kind);
+  return FILE_LABELS[kind] ?? (photo ? `TikTok photo ${photo[1]}` : kind);
 }
 
 export interface PropertyChoice {
