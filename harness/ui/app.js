@@ -28,6 +28,35 @@ function writeToken(value) {
   }
 }
 
+// The bookmarklet carries a random key kept in this browser, so the save popup
+// can save straight away for it but asks first when another site opens it.
+function bookmarkletKey() {
+  try {
+    let key = localStorage.getItem("bookmarks-bookmarklet-key");
+    if (!key) {
+      key = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      localStorage.setItem("bookmarks-bookmarklet-key", key);
+    }
+    return key;
+  } catch {
+    return "";
+  }
+}
+
+function renderBookmarklets() {
+  const base = `${location.origin}/ui/save?k=${bookmarkletKey()}`;
+  const code = (extra) =>
+    `javascript:(()=>{window.open(${JSON.stringify(base + extra)}+"&url="+encodeURIComponent(location.href),"bookmarks","width=460,height=300")})()`;
+  $("bookmarklet").href = code("");
+  $("bookmarklet-pick").href = code("&pick=1");
+  for (const link of [$("bookmarklet"), $("bookmarklet-pick")]) {
+    link.onclick = (e) => {
+      e.preventDefault();
+      status("Drag it to your bookmarks bar.");
+    };
+  }
+}
+
 async function api(method, path, body) {
   const res = await fetch(path, {
     method,
@@ -619,6 +648,7 @@ async function load() {
   try {
     const [health, current] = await Promise.all([api("GET", "/health"), api("GET", "/settings")]);
     $("server-version").textContent = `bookmarks-server ${health.version}, API version ${health.apiVersion}`;
+    renderBookmarklets();
     settings = current.settings;
     render();
     return true;

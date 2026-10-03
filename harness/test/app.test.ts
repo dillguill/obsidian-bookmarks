@@ -264,6 +264,7 @@ describe("http app", () => {
     expect(page.headers.get("content-security-policy")).toContain("default-src 'self'");
     expect(await page.text()).toContain("Bookmarks settings");
     expect((await fetch(`${base}/ui/app.js`)).headers.get("content-type")).toContain("javascript");
+    expect(await (await fetch(`${base}/ui/save?url=https://example.com/`)).text()).toContain("Save bookmark");
     expect((await fetch(`${base}/ui/../jobs`)).status).toBe(401);
     expect((await fetch(`${base}/settings`)).status).toBe(401);
   });

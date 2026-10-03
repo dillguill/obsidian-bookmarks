@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Save bookmark</title>
+  <link rel="stylesheet" href="/ui/style.css">
+  <script src="/ui/save.js" defer></script>
+</head>
+<body class="save-page">
+  <main class="save">
+    <h1>Save bookmark</h1>
+    <p class="save-url" id="save-url"></p>
+    <form id="save-form" class="stack" hidden>
+      <label id="template-row" hidden>Template
+        <select id="save-template"><option value="">Automatic</option></select>
+      </label>
+      <button type="submit" class="primary" id="save-button">Save</button>
+    </form>
+    <p class="desc" id="save-status" role="status" aria-live="polite"></p>
+  </main>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { SCREENSHOT_MARKER, type CaptureSettings, type ClipperTemplate, type PageMeta } from "./api.js";
+import { cleanUrl } from "./clean-url.js";
 
 const require = createRequire(import.meta.url);
 /** Web Clipper's template engine, bundled by scripts/build-clipper.mjs. */
@@ -50,7 +51,11 @@ function sameSite(a: string, b: string): boolean {
   }
 }
 
-/** The URL stored in the note: the canonical link when it stays on the same site, so dedup lookups agree (audit #4). Mirrors bookmarkUrl in plugin/src/writer.ts. */
+/**
+ * The URL stored in the note: the canonical link when it stays on the same
+ * site, so dedup lookups agree (audit #4), without tracking or bot-wall params.
+ * Mirrors bookmarkUrl in plugin/src/writer.ts.
+ */
 export function bookmarkUrl(meta: Pick<PageMeta, "finalUrl" | "canonical">): string {
-  return meta.canonical && sameSite(meta.canonical, meta.finalUrl) ? meta.canonical : meta.finalUrl;
+  return cleanUrl(meta.canonical && sameSite(meta.canonical, meta.finalUrl) ? meta.canonical : meta.finalUrl);
 }

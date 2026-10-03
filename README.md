@@ -45,7 +45,9 @@ your vault as deduplicated bookmark notes. See the
 3. **Capture from Obsidian**: copy a URL, run **Bookmarks: Capture URL** from the
    command palette (or the ribbon icon). The note opens when the capture finishes,
    with the screenshot embedded at the top. Capturing the same URL again shows
-   "Already saved" with a link to the existing note.
+   "Already saved" with **Open existing**, **Replace** (capture again into the
+   same note) and **Save as new**. **Bookmarks: Capture current bookmark again**
+   refreshes the open note the same way.
 
 4. **Capture from elsewhere** (the phone path): with Obsidian closed, enqueue a URL
 
@@ -58,11 +60,14 @@ your vault as deduplicated bookmark notes. See the
    interval (60s by default), or straight away with **Bookmarks: Fetch finished
    captures now**. To share from a phone, see
    [Saving bookmarks from your phone](docs/phone-capture.md) (Tailscale plus an
-   iOS Shortcut).
+   iOS Shortcut). In a desktop browser, drag **Save to Bookmarks** from the settings
+   page (General) to your bookmarks bar and click it on any page.
 
 Sites that block the capture (bot walls, hard paywalls) still get a note with the
 link and a "Capture failed" callout but no screenshot, so nothing sent from the phone
-is lost.
+is lost. The callout's **Retry capture** link captures the page again into the same
+note. Saved links drop tracking params (`utm_*`, `fbclid`…) and the ones bot walls
+add (`js_challenge`, `__cf_chl_*`…).
 
 **Settings page.** Open the server in a browser (`http://127.0.0.1:8787/`, or your
 Tailscale address from a phone) and sign in with one of your API tokens. The plugin's
