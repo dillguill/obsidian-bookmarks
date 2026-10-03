@@ -1,7 +1,7 @@
 // Wire types for the HTTP API. plugin/src/api.ts mirrors these; bump
 // API_VERSION on any breaking change so a mismatched pair says which side to
 // update (design §5.3).
-export const API_VERSION = 2;
+export const API_VERSION = 3;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -47,8 +47,8 @@ export interface Job {
   template: string | null;
 }
 
-/** `note` is the note rendered with Web Clipper's engine ({@link RenderedNote}, JSON). */
-export type AssetKind = "screenshot" | "markdown" | "note";
+/** `screenshot` is the full page, `banner` the first screen; `note` is the note rendered with Web Clipper's engine ({@link RenderedNote}, JSON). */
+export type AssetKind = "screenshot" | "banner" | "markdown" | "note";
 
 /**
  * A note rendered on the server by Obsidian Web Clipper's template engine.
@@ -67,22 +67,21 @@ export interface RenderedNote {
   content: string;
 }
 
-/** Stands in for the screenshot's vault path in a RenderedNote: `{{screenshot}}` is the marker, `{{screenshot_link}}` is `[[marker]]`, `{{screenshot_embed}}` is `![[marker]]`. */
+/**
+ * Stand in for screenshot vault paths in a RenderedNote until the plugin saves
+ * the files. `{{screenshot_page}}` (and the older `{{screenshot}}`) is the
+ * full-page marker, `{{screenshot_banner}}` the first-screen one;
+ * `{{screenshot_link}}` and `{{screenshot_embed}}` are `[[page]]` and `![[page]]`.
+ * The server takes only the screenshots whose marker the rendered note uses.
+ */
 export const SCREENSHOT_MARKER = "bookmarks-screenshot-path-5f2c9e";
-
-/** How much of the page the screenshot covers. */
-export type ScreenshotStyle = "full" | "banner" | "none";
+export const BANNER_MARKER = "bookmarks-banner-path-8d41a7";
 
 /**
  * Capture settings shared by every device, stored on the server so captures
  * from a phone Shortcut follow the same rules as the plugin.
  */
 export interface CaptureSettings {
-  screenshotStyle: ScreenshotStyle;
-  /** Sites (and their subdomains) that get only the first screen. */
-  bannerSites: string[];
-  /** Sites (and their subdomains) saved without a screenshot. */
-  noScreenshotSites: string[];
   /** Note templates; the first is the default. */
   templates: ClipperTemplate[];
   /** Property name -> type, shared by every template, like Web Clipper's Properties settings. */

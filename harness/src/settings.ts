@@ -1,65 +1,29 @@
-import type { CaptureSettings, ClipperTemplate, PropertyType, PropertyTypeEntry, ScreenshotStyle, TemplateProperty } from "./api.js";
+import type { CaptureSettings, ClipperTemplate, PropertyType, PropertyTypeEntry, TemplateProperty } from "./api.js";
 import { DEFAULT_TEMPLATE } from "./template-default.js";
 
 export const DEFAULT_CAPTURE_SETTINGS: CaptureSettings = {
-  screenshotStyle: "full",
-  bannerSites: [],
-  noScreenshotSites: [],
   templates: [DEFAULT_TEMPLATE],
   propertyTypes: DEFAULT_TEMPLATE.properties.map(({ name, type }) => ({ name, type })),
   hideCaptureId: false,
 };
 
-const STYLES: ReadonlySet<string> = new Set<ScreenshotStyle>(["full", "banner", "none"]);
 const PROPERTY_TYPES: ReadonlySet<string> = new Set<PropertyType>(["text", "multitext", "number", "checkbox", "date", "datetime"]);
-const MAX_SITES = 500;
 const MAX_TEMPLATES = 50;
 const MAX_TEXT = 20_000;
 
-/** "https://www.NYTimes.com/x" -> "nytimes.com"; mirrors plugin/src/url.ts. */
-export function siteEntry(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/^[a-z]+:\/\//, "")
-    .replace(/^\*\./, "")
-    .replace(/^www\./, "")
-    .replace(/[/?#:].*$/, "");
-}
-
-function matchesSite(url: string, sites: readonly string[]): boolean {
-  let host: string;
-  try {
-    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
-  } catch {
-    return false;
-  }
-  return sites.some((site) => host === site || host.endsWith(`.${site}`));
-}
-
-/** Screenshot style for a URL: "no screenshot" sites win over banner sites, which win over the default. */
-export function screenshotStyleFor(url: string, settings: CaptureSettings): ScreenshotStyle {
-  if (matchesSite(url, settings.noScreenshotSites)) return "none";
-  if (matchesSite(url, settings.bannerSites)) return "banner";
-  return settings.screenshotStyle;
+/** Keeps only current fields, so settings saved by older versions (screenshot style, site lists) drop out. */
+export function currentSettings(stored: Partial<CaptureSettings>): CaptureSettings {
+  return {
+    templates: stored.templates ?? DEFAULT_CAPTURE_SETTINGS.templates,
+    propertyTypes: stored.propertyTypes ?? DEFAULT_CAPTURE_SETTINGS.propertyTypes,
+    hideCaptureId: stored.hideCaptureId ?? false,
+  };
 }
 
 /** Validates a settings body; returns the cleaned settings or an error message. */
 export function parseCaptureSettings(body: unknown): CaptureSettings | string {
   if (!body || typeof body !== "object") return "Body must be a JSON object.";
   const fields = body as Record<string, unknown>;
-  const style = fields.screenshotStyle ?? DEFAULT_CAPTURE_SETTINGS.screenshotStyle;
-  if (typeof style !== "string" || !STYLES.has(style)) return "screenshotStyle must be full, banner or none.";
-  const sites = (key: string): string[] | string => {
-    const value = fields[key] ?? [];
-    if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) return `${key} must be a list of sites.`;
-    if (value.length > MAX_SITES) return `${key} has more than ${MAX_SITES} sites.`;
-    return [...new Set((value as string[]).map(siteEntry).filter(Boolean))];
-  };
-  const bannerSites = sites("bannerSites");
-  if (typeof bannerSites === "string") return bannerSites;
-  const noScreenshotSites = sites("noScreenshotSites");
-  if (typeof noScreenshotSites === "string") return noScreenshotSites;
   const rawTemplates = fields.templates ?? DEFAULT_CAPTURE_SETTINGS.templates;
   if (!Array.isArray(rawTemplates) || rawTemplates.length === 0) return "templates must be a non-empty list.";
   if (rawTemplates.length > MAX_TEMPLATES) return `More than ${MAX_TEMPLATES} templates.`;
@@ -84,7 +48,7 @@ export function parseCaptureSettings(body: unknown): CaptureSettings | string {
   }
   const hideCaptureId = fields.hideCaptureId ?? false;
   if (typeof hideCaptureId !== "boolean") return "hideCaptureId must be true or false.";
-  return { screenshotStyle: style as ScreenshotStyle, bannerSites, noScreenshotSites, templates, propertyTypes, hideCaptureId };
+  return { templates, propertyTypes, hideCaptureId };
 }
 
 const text = (value: unknown, fallback = ""): string | null =>

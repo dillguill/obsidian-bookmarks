@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SCREENSHOT_MARKER } from "../src/api.js";
+import { BANNER_MARKER, SCREENSHOT_MARKER } from "../src/api.js";
 import { blockReason, PlaywrightEngine } from "../src/capture.js";
 import { renderRequest } from "../src/render.js";
 import { DEFAULT_CAPTURE_SETTINGS } from "../src/settings.js";
@@ -66,7 +66,7 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
   });
 
   it("extracts markdown despite a strict CSP and resolves the favicon", async () => {
-    const result = await engine.capture(`${base}/`, "full");
+    const result = await engine.capture(`${base}/`);
     expect(result.meta.title).toBe("Article");
     expect(result.meta.favicon).toBe(`${base}/fav.ico`);
     expect(result.markdown).toContain("Some readable words");
@@ -87,7 +87,7 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
       properties: [{ name: "crumbs", value: "{{schema:@BreadcrumbList:itemListElement[*].name|join}}", type: "multitext" as const }],
     };
     const settings = { ...DEFAULT_CAPTURE_SETTINGS, templates: [DEFAULT_CAPTURE_SETTINGS.templates[0]!, template] };
-    const result = await engine.capture(`${base}/`, "none", renderRequest(settings, null, "01JOB"));
+    const result = await engine.capture(`${base}/`, renderRequest(settings, null, "01JOB"));
     const note = result.note!;
     expect(note.template).toBe("Docs");
     expect(note.noteName).toBe("article by Grace");
@@ -96,25 +96,41 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
     expect(note.frontmatter).toContain('crumbs:\n  - "Home"\n  - "Docs"');
     expect(note.frontmatter).toContain(`capture_id: "01JOB"`);
     expect(note.frontmatter).toContain(`source: "${base}/"`);
+    expect(result.screenshot).not.toBeNull();
+    expect(result.banner).toBeNull();
   });
 
   it("captures inner-scroll layouts at full height", async () => {
-    const result = await engine.capture(`${base}/inner`, "full");
+    const result = await engine.capture(`${base}/inner`);
     // JPEG height lives in the SOF0 marker; just check it's well past one viewport.
     const sof = result.screenshot!.indexOf(Buffer.from([0xff, 0xc0]));
     expect(result.screenshot!.readUInt16BE(sof + 5)).toBeGreaterThan(2000);
   });
 
-  it("captures only the first screen for the banner style", async () => {
-    const result = await engine.capture(`${base}/inner`, "banner");
-    const sof = result.screenshot!.indexOf(Buffer.from([0xff, 0xc0]));
-    expect(result.screenshot!.readUInt16BE(sof + 5)).toBe(800);
-    expect(result.screenshot!.readUInt16BE(sof + 7)).toBe(1280);
+  /** A render request whose only template has this content and no properties. */
+  const withContent = (noteContentFormat: string) =>
+    renderRequest({ ...DEFAULT_CAPTURE_SETTINGS, templates: [{ ...DEFAULT_CAPTURE_SETTINGS.templates[0]!, noteContentFormat, properties: [] }] }, null, "01JOB");
+
+  it("captures only the first screen for {{screenshot_banner}}", async () => {
+    const result = await engine.capture(`${base}/inner`, withContent("{{screenshot_banner_embed}}"));
+    expect(result.screenshot).toBeNull();
+    const sof = result.banner!.indexOf(Buffer.from([0xff, 0xc0]));
+    expect(result.banner!.readUInt16BE(sof + 5)).toBe(800);
+    expect(result.banner!.readUInt16BE(sof + 7)).toBe(1280);
+    expect(result.note!.content).toBe(`![[${BANNER_MARKER}]]`);
   });
 
-  it("skips the screenshot for the none style but keeps the text", async () => {
-    const result = await engine.capture(`${base}/`, "none");
+  it("takes both shots when the template uses both", async () => {
+    const result = await engine.capture(`${base}/inner`, withContent("{{screenshot_banner}} {{screenshot_page_link}}"));
+    expect(result.banner).not.toBeNull();
+    expect(result.screenshot).not.toBeNull();
+    expect(result.note!.content).toBe(`${BANNER_MARKER} [[${SCREENSHOT_MARKER}]]`);
+  });
+
+  it("skips screenshots the template doesn't use but keeps the text", async () => {
+    const result = await engine.capture(`${base}/`, withContent("{{content}}"));
     expect(result.screenshot).toBeNull();
+    expect(result.banner).toBeNull();
     expect(result.screenshotExt).toBeNull();
     expect(result.markdown).toContain("Some readable words");
   });

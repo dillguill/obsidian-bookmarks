@@ -161,7 +161,7 @@ export function createApp(deps: AppDeps): Server {
       return sendJson(res, 200, { jobs: store.list(statuses, limit) });
     }
 
-    const jobMatch = /^\/jobs\/([0-9A-Z]{26})(?:\/(delivered|asset\/(screenshot|markdown|note)))?$/.exec(path);
+    const jobMatch = /^\/jobs\/([0-9A-Z]{26})(?:\/(delivered|asset\/(screenshot|banner|markdown|note)))?$/.exec(path);
     if (jobMatch) {
       const [, id, action, kind] = jobMatch as unknown as [string, string, string | undefined, AssetKind | undefined];
       const job = store.get(id);

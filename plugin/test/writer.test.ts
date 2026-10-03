@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { SCREENSHOT_MARKER, type Job, type RenderedNote } from "../src/api";
+import { BANNER_MARKER, SCREENSHOT_MARKER, type Job, type RenderedNote } from "../src/api";
 import { DedupIndex } from "../src/dedup";
 import { DEFAULT_TEMPLATE } from "../src/template";
 import { writeBookmark, type VaultPort } from "../src/writer";
@@ -108,6 +108,19 @@ describe("writeBookmark", () => {
     // Without a screenshot the marker disappears.
     const second = await writeBookmark({ job: job({ id: "01JABCDEFGHJKMNPQRSTVWXYZ1", url: "https://example.com/other", meta: null, screenshotExt: null }), markdown: "", screenshot: null, note }, options());
     expect(vault.files.get(second.path)).toBe(`---\nsource: "https://example.com/post"\ncover: ""\ncapture_id: "${job().id}"\n---\n# Body\n`);
+  });
+
+  it("saves the banner shot next to the note and fills {{screenshot_banner}}", async () => {
+    const note: RenderedNote = {
+      template: "Clips",
+      noteName: "Banner",
+      path: "Clips",
+      frontmatter: `---\nbanner: "[[${BANNER_MARKER}]]"\npage: "${SCREENSHOT_MARKER}"\n---\n`,
+      content: `![[${BANNER_MARKER}]]`,
+    };
+    const result = await writeBookmark({ job: job(), markdown: "", screenshot: null, banner: new ArrayBuffer(3), note }, options());
+    expect(vault.files.has("Bookmarks/assets/Banner-banner.jpg")).toBe(true);
+    expect(vault.files.get(result.path)).toBe(`---\nbanner: "[[Bookmarks/assets/Banner-banner.jpg]]"\npage: ""\n---\n![[Bookmarks/assets/Banner-banner.jpg]]\n`);
   });
 
   it("leaves capture_id out when hidden and still skips a capture it already wrote", async () => {

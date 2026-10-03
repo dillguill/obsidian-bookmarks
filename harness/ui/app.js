@@ -8,7 +8,7 @@ const $ = (id) => document.getElementById(id);
 
 let token = readToken();
 let settings = null;
-let view = { section: "capture", template: 0 };
+let view = { section: "general", template: 0 };
 let saveTimer = null;
 
 function readToken() {
@@ -240,10 +240,8 @@ async function save() {
       ...settings,
       templates: settings.templates.map((t) => ({ ...t, properties: t.properties.filter((p) => p.name.trim()) })),
     };
-    const { settings: saved } = await api("PUT", "/settings", payload);
-    // Keep what's on screen (the server only cleans values), but adopt cleaned site lists.
-    settings.bannerSites = saved.bannerSites;
-    settings.noScreenshotSites = saved.noScreenshotSites;
+    // Keep what's on screen; the server only cleans values.
+    await api("PUT", "/settings", payload);
     status("Saved");
   } catch (err) {
     if (err.message !== "unauthorized") status(`Not saved: ${err.message}`, true);
@@ -260,7 +258,7 @@ window.addEventListener("beforeunload", (event) => {
 // ---- sections ----
 
 function show(section) {
-  for (const id of ["signin", "general", "capture", "properties", "variables", "template"]) $(id).hidden = id !== section;
+  for (const id of ["signin", "general", "properties", "variables", "template"]) $(id).hidden = id !== section;
 }
 
 function showSignIn(message) {
@@ -278,7 +276,7 @@ function render() {
   renderTemplateList();
   renderPropertyNames();
   if (view.section === "template") renderTemplate();
-  else if (view.section === "capture") renderCapture();
+  else if (view.section === "general") renderGeneral();
   else if (view.section === "properties") renderPropertyTypes();
   show(view.section);
 }
@@ -311,33 +309,18 @@ function renderTemplateList() {
   );
 }
 
-function renderCapture() {
-  $("screenshot-style").value = settings.screenshotStyle;
-  $("banner-sites").value = settings.bannerSites.join("\n");
-  $("no-screenshot-sites").value = settings.noScreenshotSites.join("\n");
+function renderGeneral() {
   $("hide-capture-id").checked = Boolean(settings.hideCaptureId);
 }
-
-const lines = (value) => value.split("\n").map((s) => s.trim()).filter(Boolean);
 
 $("hide-capture-id").addEventListener("change", (e) => {
   settings.hideCaptureId = e.target.checked;
   scheduleSave();
 });
-$("screenshot-style").addEventListener("change", (e) => {
-  settings.screenshotStyle = e.target.value;
-  scheduleSave();
-});
-$("banner-sites").addEventListener("input", (e) => {
-  settings.bannerSites = lines(e.target.value);
-  scheduleSave();
-});
-$("no-screenshot-sites").addEventListener("input", (e) => {
-  settings.noScreenshotSites = lines(e.target.value);
-  scheduleSave();
-});
 
 // ---- template editor ----
+
+const lines = (value) => value.split("\n").map((s) => s.trim()).filter(Boolean);
 
 const current = () => settings.templates[view.template];
 

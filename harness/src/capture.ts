@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import TurndownService from "turndown";
-import type { PageMeta, RenderedNote, ScreenshotStyle } from "./api.js";
+import { BANNER_MARKER, SCREENSHOT_MARKER, type PageMeta, type RenderedNote } from "./api.js";
 import type { Config } from "./config.js";
 import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
 import { urlRejection } from "./ssrf.js";
@@ -10,11 +10,23 @@ const require = createRequire(import.meta.url);
 const DEFUDDLE_PATH = require.resolve("defuddle/full");
 const VIEWPORT = { width: 1280, height: 800 };
 
+/**
+ * Screenshots are template variables: take only the ones the rendered note uses.
+ * Without a rendered note the plugin falls back to its default template, which shows the page shot.
+ */
+export function shotsWanted(note: RenderedNote | null): { page: boolean; banner: boolean } {
+  if (!note) return { page: true, banner: false };
+  const text = [note.noteName, note.path, note.frontmatter, note.content].join("\n");
+  return { page: text.includes(SCREENSHOT_MARKER), banner: text.includes(BANNER_MARKER) };
+}
+
 export interface CaptureResult {
   meta: PageMeta;
   markdown: string;
-  /** Null when the screenshot style is "none". */
+  /** Full-page shot; null when the rendered note doesn't use {{screenshot_page}}. */
   screenshot: Buffer | null;
+  /** First-screen shot; null when the rendered note doesn't use {{screenshot_banner}}. */
+  banner: Buffer | null;
   screenshotExt: "jpg" | "png" | null;
   /** Null when no render was requested or Web Clipper's engine failed on the page. */
   note: RenderedNote | null;
@@ -31,7 +43,7 @@ export class BlockedError extends Error {
 }
 
 export interface CaptureEngine {
-  capture(url: string, style: ScreenshotStyle, render?: RenderRequest | null): Promise<CaptureResult>;
+  capture(url: string, render?: RenderRequest | null): Promise<CaptureResult>;
   close(): Promise<void>;
 }
 
@@ -213,7 +225,7 @@ export class PlaywrightEngine implements CaptureEngine {
     return this.browser;
   }
 
-  async capture(url: string, style: ScreenshotStyle, render: RenderRequest | null = null): Promise<CaptureResult> {
+  async capture(url: string, render: RenderRequest | null = null): Promise<CaptureResult> {
     const browser = await this.getBrowser();
     const context = await browser.newContext({
       viewport: VIEWPORT,
@@ -232,13 +244,13 @@ export class PlaywrightEngine implements CaptureEngine {
     try {
       // A timed-out page can leave Chromium wedged for every later context, so
       // restart the browser rather than just closing this context.
-      return await withTimeout(this.run(context, url, style, render), this.options.captureTimeoutMs, () => void this.restart());
+      return await withTimeout(this.run(context, url, render), this.options.captureTimeoutMs, () => void this.restart());
     } finally {
       await context.close().catch(() => {});
     }
   }
 
-  private async run(context: BrowserContext, url: string, style: ScreenshotStyle, render: RenderRequest | null): Promise<CaptureResult> {
+  private async run(context: BrowserContext, url: string, render: RenderRequest | null): Promise<CaptureResult> {
     const { allowPrivateNetworks, maxHeight, scrollBudgetMs, screenshotFormat } = this.options;
     // Re-check every document the page loads (redirects, iframes), so a public
     // URL can't bounce the browser into the private network (design §8).
@@ -356,28 +368,30 @@ export class PlaywrightEngine implements CaptureEngine {
 
     const markdown = this.turndown.turndown(parsed.content);
     const note = render ? await renderNote(page, render, bookmarkUrl(meta)) : null;
-    if (style === "none") return { meta, markdown, screenshot: null, screenshotExt: null, note };
+    const wanted = shotsWanted(note);
+    if (!wanted.page && !wanted.banner) return { meta, markdown, screenshot: null, banner: null, screenshotExt: null, note };
 
     await hideOverlays(page);
     const type = screenshotFormat;
     const format = type === "jpeg" ? { type, quality: 80 } : { type };
     const ext = type === "jpeg" ? "jpg" : "png";
-    if (style === "banner") {
+    let banner: Buffer | null = null;
+    if (wanted.banner) {
       // First screen only, at the original viewport size even if it was grown for an inner scroller.
       await page.evaluate(() => window.scrollTo(0, 0));
-      const screenshot = await page.screenshot({ ...format, clip: { x: 0, y: 0, ...VIEWPORT } });
-      return { meta, markdown, screenshot, screenshotExt: ext, note };
+      banner = await page.screenshot({ ...format, clip: { x: 0, y: 0, ...VIEWPORT } });
     }
-
-    const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0));
-    meta.truncated = height > maxHeight || VIEWPORT.height + extra > maxHeight;
-    const screenshot = await page.screenshot({
-      fullPage: true,
-      ...format,
-      ...(meta.truncated ? { clip: { x: 0, y: 0, width: VIEWPORT.width, height: maxHeight } } : {}),
-    });
-
-    return { meta, markdown, screenshot, screenshotExt: ext, note };
+    let screenshot: Buffer | null = null;
+    if (wanted.page) {
+      const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0));
+      meta.truncated = height > maxHeight || VIEWPORT.height + extra > maxHeight;
+      screenshot = await page.screenshot({
+        fullPage: true,
+        ...format,
+        ...(meta.truncated ? { clip: { x: 0, y: 0, width: VIEWPORT.width, height: maxHeight } } : {}),
+      });
+    }
+    return { meta, markdown, screenshot, banner, screenshotExt: ext, note };
   }
 
   private restart(): void {

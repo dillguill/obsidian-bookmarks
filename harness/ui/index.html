@@ -12,7 +12,6 @@
     <nav class="sidebar" aria-label="Settings sections">
       <div class="brand">Bookmarks</div>
       <button class="nav-item" data-section="general">General</button>
-      <button class="nav-item" data-section="capture">Capture</button>
       <button class="nav-item" data-section="properties">Properties</button>
       <button class="nav-item" data-section="variables">Variables</button>
       <div class="nav-heading">
@@ -50,6 +49,13 @@
             <div class="desc">Everything on this page is stored on the server, so every device and every phone Shortcut uses it. Server URL, API token and the screenshot folder are set per device in the Obsidian plugin.</div>
           </div>
         </div>
+        <div class="setting">
+          <div class="setting-info">
+            <div class="setting-name">Hide capture ID</div>
+            <div class="desc">Leave the <code>capture_id</code> property out of new notes. Obsidian then remembers which captures it already wrote, and a capture of a page that's already saved is still skipped.</div>
+          </div>
+          <input type="checkbox" class="toggle" id="hide-capture-id">
+        </div>
         <div class="setting column">
           <div class="setting-info">
             <div class="setting-name">Save from your browser</div>
@@ -63,42 +69,6 @@
         <div class="setting">
           <div class="setting-info"><div class="setting-name">Sign out</div><div class="desc">Forget the API token in this browser.</div></div>
           <button id="signout">Sign out</button>
-        </div>
-      </section>
-
-      <section id="capture" hidden>
-        <h1>Capture</h1>
-        <div class="setting">
-          <div class="setting-info">
-            <div class="setting-name">Screenshot style</div>
-            <div class="desc">Full page scrolls the whole page, banner keeps the first screen, or save no screenshot at all.</div>
-          </div>
-          <select id="screenshot-style">
-            <option value="full">Full page</option>
-            <option value="banner">Banner (first screen)</option>
-            <option value="none">No screenshot</option>
-          </select>
-        </div>
-        <div class="setting column">
-          <div class="setting-info">
-            <div class="setting-name">Sites with banner screenshots</div>
-            <div class="desc">One site per line. These sites and their subdomains get only the first screen, whatever the style above.</div>
-          </div>
-          <textarea id="banner-sites" rows="4" placeholder="youtube.com"></textarea>
-        </div>
-        <div class="setting column">
-          <div class="setting-info">
-            <div class="setting-name">Sites without screenshots</div>
-            <div class="desc">One site per line. These sites and their subdomains keep the link and text but no screenshot. Blocked pages never get one.</div>
-          </div>
-          <textarea id="no-screenshot-sites" rows="4" placeholder="nytimes.com&#10;reddit.com"></textarea>
-        </div>
-        <div class="setting">
-          <div class="setting-info">
-            <div class="setting-name">Hide capture ID</div>
-            <div class="desc">Leave the <code>capture_id</code> property out of new notes. Obsidian then remembers which captures it already wrote, and a capture of a page that's already saved is still skipped.</div>
-          </div>
-          <input type="checkbox" class="toggle" id="hide-capture-id">
         </div>
       </section>
 
@@ -135,12 +105,16 @@
             <tr><td><code class="copy">{{capture_id}}</code></td><td>The capture's id; always saved so a capture is never written twice.</td></tr>
         </table>
         <h2>Screenshot</h2>
-        <p class="desc">Empty when there's no screenshot (style none, a no-screenshot site, or a blocked page).</p>
+        <p class="desc">A screenshot is taken only when a template uses it, so leave these out for no screenshot. Each is empty for a blocked page. Use them in the note content or as a property value.</p>
         <table class="key">
-            <tr><td><code class="copy">{{screenshot_embed}}</code></td><td>Shows the image in the note: <code>![[path]]</code>.</td></tr>
-            <tr><td><code class="copy">{{screenshot_link}}</code></td><td>Link to the image: <code>[[path]]</code>.</td></tr>
-            <tr><td><code class="copy">{{screenshot}}</code></td><td>The image's vault path, e.g. <code>Bookmarks/assets/note.jpg</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_page_embed}}</code></td><td>Shows the full-page screenshot in the note: <code>![[path]]</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_page_link}}</code></td><td>Link to the full-page screenshot: <code>[[path]]</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_page}}</code></td><td>The full-page screenshot's vault path, e.g. <code>Bookmarks/assets/note.jpg</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_banner_embed}}</code></td><td>Shows the first screen of the page: <code>![[path]]</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_banner_link}}</code></td><td>Link to the first-screen screenshot: <code>[[path]]</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_banner}}</code></td><td>The first-screen screenshot's vault path, e.g. <code>Bookmarks/assets/note-banner.jpg</code>.</td></tr>
         </table>
+        <p class="desc">Older templates' <code>{{screenshot}}</code>, <code>{{screenshot_link}}</code> and <code>{{screenshot_embed}}</code> still work and mean the full-page screenshot.</p>
         <h2>Schema and meta</h2>
         <p class="desc">Read from the page's schema.org data and meta tags, as in Web Clipper.</p>
         <table class="key">
