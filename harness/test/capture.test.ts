@@ -161,7 +161,8 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
   it("makes every capture file the template uses, light and dark", async () => {
     const content = CAPTURE_FILES.map((kind) => `{{${kind}}}`).join(" ");
     const { files } = await engine.capture(`${base}/layout`, withContent(content));
-    expect(Object.keys(files).sort()).toEqual([...CAPTURE_FILES].sort());
+    // Everything but tiktok_thumbnail, which only TikTok posts have.
+    expect(Object.keys(files).sort()).toEqual(CAPTURE_FILES.filter((kind) => kind !== "tiktok_thumbnail").sort());
     expect(jpegSize(files.screenshot_mobile!)).toEqual({ width: 390, height: 844 });
     expect(jpegSize(files.screenshot_thumbnail!)).toEqual({ width: 480, height: 300 });
     expect(jpegSize(files.screenshot_article!).width).toBe(600);

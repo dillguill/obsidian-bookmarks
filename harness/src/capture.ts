@@ -5,7 +5,7 @@ import { CAPTURE_FILES, fileMarker, type CaptureFile, type PageMeta, type Render
 import type { Config } from "./config.js";
 import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
 import { urlRejection } from "./ssrf.js";
-import { readTikTokItem, SITE_VARIABLES, tiktokData, tiktokPost, type SiteData } from "./tiktok.js";
+import { noTikTokVariables, readTikTokItem, tiktokData, tiktokPost } from "./tiktok.js";
 
 const require = createRequire(import.meta.url);
 const DEFUDDLE_PATH = require.resolve("defuddle/full");
@@ -293,8 +293,8 @@ async function articleShot(page: Page, format: { type: "jpeg" | "png"; quality?:
 }
 
 /**
- * The page's {{image}} as a file, so the note keeps it after the link expires
- * (TikTok's cover links last days). Drawn in a blank page and screenshotted,
+ * An image as a file, so the note keeps it after the link expires (TikTok's
+ * cover links last days). Drawn in a blank page and screenshotted,
  * so it comes out in the screenshot format whatever the source format was.
  * Null when it doesn't load.
  */
@@ -321,17 +321,6 @@ async function imageFile(context: BrowserContext, src: string, format: { type: "
   } finally {
     await page.close().catch(() => {});
   }
-}
-
-/** Variables a site extractor found, for the render: site-only ones (empty elsewhere) and replaced generic ones. */
-function siteVariables(site: SiteData | null): Record<string, string> {
-  const variables: Record<string, string> = Object.fromEntries(SITE_VARIABLES.map((name) => [name, site?.variables[name] ?? ""]));
-  if (!site) return variables;
-  for (const name of ["title", "description", "author", "published", "image", "content"] as const) {
-    const value = site[name];
-    if (value !== undefined) variables[name] = value;
-  }
-  return variables;
 }
 
 export class PlaywrightEngine implements CaptureEngine {
@@ -473,17 +462,17 @@ export class PlaywrightEngine implements CaptureEngine {
 
     const finalUrl = page.url();
     const post = tiktokPost(finalUrl);
-    const siteData = post ? tiktokData(post, await page.evaluate(readTikTokItem, post.id)) : null;
+    const tiktok = post ? tiktokData(post, await page.evaluate(readTikTokItem, post.id)) : null;
     const meta: PageMeta = {
       finalUrl,
       canonical: parsed.canonical ? absolute(parsed.canonical, finalUrl) || null : null,
-      title: siteData?.title ?? parsed.title,
-      description: siteData?.description ?? parsed.description,
-      author: siteData?.author ?? parsed.author,
+      title: parsed.title,
+      description: parsed.description,
+      author: parsed.author,
       site: parsed.site,
       domain: parsed.domain || new URL(finalUrl).hostname.replace(/^www\./, ""),
-      published: siteData?.published ?? parsed.published,
-      image: absolute(siteData?.image ?? parsed.image, finalUrl),
+      published: parsed.published,
+      image: absolute(parsed.image, finalUrl),
       favicon: absolute(parsed.favicon, finalUrl),
       wordCount: parsed.wordCount,
       httpStatus: response?.status() ?? null,
@@ -495,9 +484,9 @@ export class PlaywrightEngine implements CaptureEngine {
     const blocked = blockReason(meta, parsed.bodyText);
     if (blocked) throw new BlockedError(`Blocked by site: ${blocked}`, meta);
 
-    const markdown = siteData?.content ?? this.turndown.turndown(parsed.content);
+    const markdown = this.turndown.turndown(parsed.content);
     const note = render
-      ? await renderNote(page, { ...render, extra: { ...render.extra, ...siteVariables(siteData) } }, bookmarkUrl(meta))
+      ? await renderNote(page, { ...render, extra: { ...render.extra, ...(tiktok?.variables ?? noTikTokVariables()) } }, bookmarkUrl(meta))
       : null;
     const wanted = filesWanted(note);
     const files: Partial<Record<CaptureFile, Buffer>> = {};
@@ -562,9 +551,10 @@ export class PlaywrightEngine implements CaptureEngine {
         await mobileShot("");
       }
     }
-    if (wanted.has("image_local") && meta.image) {
-      const image = await imageFile(page.context(), meta.image, format, maxHeight);
-      if (image) files.image_local = image;
+    for (const [kind, src] of [["image_local", meta.image], ["tiktok_thumbnail", tiktok?.cover]] as const) {
+      if (!wanted.has(kind) || !src) continue;
+      const image = await imageFile(page.context(), src, format, maxHeight);
+      if (image) files[kind] = image;
     }
     const hasImage = CAPTURE_FILES.some((kind) => kind !== "pdf_page" && files[kind]);
     return { meta, markdown, files, screenshotExt: hasImage ? ext : null, note };

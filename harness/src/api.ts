@@ -51,9 +51,9 @@ export interface Job {
  * Files a template can ask for, each named after its template variable, which
  * holds the file's vault path: full page, first screen, first screen at phone
  * width, the main content block and a small first screen, each also in the
- * site's dark mode (`_dark`), a PDF of the page, and the page's {{image}}
- * saved locally (`image_local`, since image links like TikTok's expire). The
- * server makes only the ones the rendered note uses.
+ * site's dark mode (`_dark`), a PDF of the page, the page's {{image}} saved
+ * locally (`image_local`), and a TikTok post's cover (`tiktok_thumbnail`,
+ * whose link expires). The server makes only the ones the rendered note uses.
  */
 export const CAPTURE_FILES = [
   "screenshot_page",
@@ -68,6 +68,7 @@ export const CAPTURE_FILES = [
   "screenshot_thumbnail_dark",
   "pdf_page",
   "image_local",
+  "tiktok_thumbnail",
 ] as const;
 export type CaptureFile = (typeof CAPTURE_FILES)[number];
 

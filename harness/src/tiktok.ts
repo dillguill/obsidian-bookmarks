@@ -1,24 +1,25 @@
 // TikTok video pages carry little useful metadata in their HTML: no
 // published date, a generic "<creator> on TikTok" title and an image-less
 // body, so Defuddle (and Web Clipper) see almost nothing. The video's details
-// are in the JSON TikTok embeds for hydration; this reads them into the usual
-// variables ({{title}}, {{description}}, {{published}}, {{image}},
-// {{author}}, {{content}}) plus {{video_id}} and {{video_embed}}.
+// are in the JSON TikTok embeds for hydration; this reads them into
+// tiktok_* variables, leaving Web Clipper's own variables as they are.
 
-/** Variables only some sites fill; empty everywhere else so templates can use them freely. */
-export const SITE_VARIABLES = ["video_id", "video_embed"] as const;
-export type SiteVariable = (typeof SITE_VARIABLES)[number];
+/** TikTok's variables; empty on other sites so templates can use them freely. */
+export const TIKTOK_VARIABLES = [
+  "tiktok_id",
+  "tiktok_title",
+  "tiktok_description",
+  "tiktok_published",
+  "tiktok_author",
+  "tiktok_author_handle",
+  "tiktok_embed",
+] as const;
+export type TikTokVariable = (typeof TIKTOK_VARIABLES)[number];
 
-/** What a site extractor found; each field replaces the generic one. */
-export interface SiteData {
-  title?: string;
-  description?: string;
-  author?: string;
-  published?: string;
-  image?: string;
-  /** Markdown for {{content}}. */
-  content?: string;
-  variables: Partial<Record<SiteVariable, string>>;
+export interface TikTokData {
+  variables: Record<TikTokVariable, string>;
+  /** Cover image URL, saved as the tiktok_thumbnail file since it expires; empty when unknown. */
+  cover: string;
 }
 
 /** The parts of TikTok's item JSON used here. */
@@ -70,30 +71,31 @@ export function captionTitle(caption: string): string {
   return `${(space > TITLE_MAX / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
+/** TikTok's variables, all empty, for pages that aren't TikTok posts. */
+export function noTikTokVariables(): Record<TikTokVariable, string> {
+  return Object.fromEntries(TIKTOK_VARIABLES.map((name) => [name, ""])) as Record<TikTokVariable, string>;
+}
+
 /**
  * TikTok's variables for a post. `item` is null when the page had no item
  * JSON; the id in the URL still gives the date and the embed.
  */
-export function tiktokData(post: { id: string; kind: "video" | "photo" }, item: TikTokItem | null): SiteData {
+export function tiktokData(post: { id: string; kind: "video" | "photo" }, item: TikTokItem | null): TikTokData {
   const caption = (item?.desc ?? "").trim();
   const created = Number(item?.createTime);
   const date = Number.isFinite(created) && created > 0 ? new Date(created * 1000) : idTime(post.id);
-  const nickname = item?.author?.nickname?.trim() ?? "";
-  const handle = item?.author?.uniqueId?.trim() ?? "";
-  const embed = post.kind === "video" ? videoEmbed(post.id) : "";
-  const image = item?.video?.cover || item?.video?.originCover || item?.imagePost?.cover?.imageURL?.urlList?.[0] || "";
-  const data: SiteData = {
-    variables: { video_id: post.id, video_embed: embed },
-    content: [embed, caption].filter(Boolean).join("\n\n"),
+  return {
+    variables: {
+      tiktok_id: post.id,
+      tiktok_title: captionTitle(caption),
+      tiktok_description: caption,
+      tiktok_published: date?.toISOString() ?? "",
+      tiktok_author: item?.author?.nickname?.trim() ?? "",
+      tiktok_author_handle: item?.author?.uniqueId?.trim() ?? "",
+      tiktok_embed: post.kind === "video" ? videoEmbed(post.id) : "",
+    },
+    cover: item?.video?.cover || item?.video?.originCover || item?.imagePost?.cover?.imageURL?.urlList?.[0] || "",
   };
-  if (date) data.published = date.toISOString();
-  if (caption) {
-    data.title = captionTitle(caption) || undefined;
-    data.description = caption;
-  }
-  if (nickname || handle) data.author = nickname || `@${handle}`;
-  if (image) data.image = image;
-  return data;
 }
 
 /**

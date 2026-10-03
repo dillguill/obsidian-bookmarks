@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captionTitle, idTime, tiktokData, tiktokPost, videoEmbed } from "../src/tiktok.js";
+import { captionTitle, idTime, noTikTokVariables, TIKTOK_VARIABLES, tiktokData, tiktokPost, videoEmbed } from "../src/tiktok.js";
 
 describe("tiktokPost", () => {
   it("finds video and photo posts", () => {
@@ -45,25 +45,35 @@ describe("tiktokData", () => {
       video: { cover: "https://p16.tiktokcdn-us.com/cover.image", originCover: "https://p16.tiktokcdn-us.com/origin.image" },
     });
     expect(data).toEqual({
-      title: "Scramble up ur name",
-      description: "Scramble up ur name #foryoupage",
-      author: "Scout, Suki & Stella",
-      published: "2019-07-27T13:32:38.000Z",
-      image: "https://p16.tiktokcdn-us.com/cover.image",
-      content: `${videoEmbed(post.id)}\n\nScramble up ur name #foryoupage`,
-      variables: { video_id: post.id, video_embed: videoEmbed(post.id) },
+      variables: {
+        tiktok_id: post.id,
+        tiktok_title: "Scramble up ur name",
+        tiktok_description: "Scramble up ur name #foryoupage",
+        tiktok_published: "2019-07-27T13:32:38.000Z",
+        tiktok_author: "Scout, Suki & Stella",
+        tiktok_author_handle: "scout2015",
+        tiktok_embed: videoEmbed(post.id),
+      },
+      cover: "https://p16.tiktokcdn-us.com/cover.image",
     });
   });
 
   it("still has the date and embed without item JSON", () => {
-    const data = tiktokData(post, null);
-    expect(data.published).toBe("2019-07-27T13:32:33.000Z");
-    expect(data.content).toBe(videoEmbed(post.id));
-    expect(data.title).toBeUndefined();
+    const { variables, cover } = tiktokData(post, null);
+    expect(variables.tiktok_published).toBe("2019-07-27T13:32:33.000Z");
+    expect(variables.tiktok_embed).toBe(videoEmbed(post.id));
+    expect(variables.tiktok_title).toBe("");
+    expect(cover).toBe("");
   });
 
   it("has no embed for photo posts", () => {
-    expect(tiktokData({ ...post, kind: "photo" }, null).variables.video_embed).toBe("");
+    expect(tiktokData({ ...post, kind: "photo" }, null).variables.tiktok_embed).toBe("");
+  });
+});
+
+describe("noTikTokVariables", () => {
+  it("has every TikTok variable, empty", () => {
+    expect(noTikTokVariables()).toEqual(Object.fromEntries(TIKTOK_VARIABLES.map((name) => [name, ""])));
   });
 });
 
