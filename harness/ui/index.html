@@ -125,8 +125,11 @@
             <tr><td><code class="copy">{{tiktok_published}}</code></td><td>When it was posted. Format it with <code>|date:"YYYY-MM-DD"</code>.</td></tr>
             <tr><td><code class="copy">{{tiktok_author}}</code></td><td>The creator's display name.</td></tr>
             <tr><td><code class="copy">{{tiktok_author_handle}}</code></td><td>The creator's handle, without the @.</td></tr>
-            <tr><td><code class="copy">{{tiktok_embed}}</code></td><td>A player that plays in the note: an <code>&lt;iframe&gt;</code> for the note content. Empty for photo posts.</td></tr>
+            <tr><td><code class="copy">{{tiktok_embed}}</code></td><td>A player that plays in the note, or swipes through a photo carousel: an <code>&lt;iframe&gt;</code> for the note content.</td></tr>
             <tr><td><code class="copy">{{tiktok_id}}</code></td><td>The post's id, e.g. <code>7382225350710824222</code>.</td></tr>
+            <tr><td><code class="copy">{{tiktok_images}}</code></td><td>A photo carousel's photos, saved in the vault and embedded one per line (<code>![[note-tiktok-image-1.jpg]]</code>…). Empty for videos.</td></tr>
+            <tr><td><code class="copy">{{tiktok_image_count}}</code></td><td>How many photos the carousel has. Empty for videos.</td></tr>
+            <tr><td><code class="copy">{{tiktok_image_1}}</code></td><td>One carousel photo's vault path, up to <code>{{tiktok_image_35}}</code>; wrap it like a screenshot.</td></tr>
             <tr><td><code class="copy">{{tiktok_thumbnail}}</code></td><td>The cover image saved in the vault, <code>note-tiktok-thumbnail.jpg</code>; wrap it like a screenshot. Saved because TikTok's cover links expire within days.</td></tr>
         </table>
         <h2>Schema and meta</h2>

@@ -5,7 +5,19 @@ import { CAPTURE_FILES, fileMarker, type CaptureFile, type PageMeta, type Render
 import type { Config } from "./config.js";
 import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
 import { urlRejection } from "./ssrf.js";
-import { noTikTokVariables, readTikTokItem, tiktokData, tiktokPost } from "./tiktok.js";
+import {
+  itemFromScripts,
+  noTikTokVariables,
+  oembedItem,
+  oembedUrl,
+  readTikTokScripts,
+  scriptsFromHtml,
+  tiktokData,
+  tiktokPost,
+  videoUrl,
+  type TikTokItem,
+  type TikTokPost,
+} from "./tiktok.js";
 
 const require = createRequire(import.meta.url);
 const DEFUDDLE_PATH = require.resolve("defuddle/full");
@@ -296,23 +308,28 @@ async function articleShot(page: Page, format: { type: "jpeg" | "png"; quality?:
  * An image as a file, so the note keeps it after the link expires (TikTok's
  * cover links last days). Drawn in a blank page and screenshotted,
  * so it comes out in the screenshot format whatever the source format was.
- * Null when it doesn't load.
+ * Each of `sources` (mirrors of one image) is tried in turn; null when none
+ * loads.
  */
-async function imageFile(context: BrowserContext, src: string, format: { type: "jpeg" | "png"; quality?: number }, maxHeight: number): Promise<Buffer | null> {
+async function imageFile(context: BrowserContext, sources: readonly string[], format: { type: "jpeg" | "png"; quality?: number }, maxHeight: number): Promise<Buffer | null> {
   const page = await context.newPage();
   try {
     await page.setContent(`<body style="margin:0"><img style="display:block;width:100%;height:auto"></body>`);
-    const size = await page.evaluate(
-      (url) =>
-        new Promise<{ width: number; height: number } | null>((resolve) => {
-          const img = document.querySelector("img")!;
-          const done = () => resolve(img.naturalWidth > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : null);
-          img.onload = img.onerror = done;
-          setTimeout(done, 10_000);
-          img.src = url;
-        }),
-      src,
-    );
+    let size: { width: number; height: number } | null = null;
+    for (const src of sources) {
+      size = await page.evaluate(
+        (url) =>
+          new Promise<{ width: number; height: number } | null>((resolve) => {
+            const img = document.querySelector("img")!;
+            const done = () => resolve(img.naturalWidth > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : null);
+            img.onload = img.onerror = done;
+            setTimeout(done, 10_000);
+            img.src = url;
+          }),
+        src,
+      );
+      if (size) break;
+    }
     if (!size) return null;
     const width = Math.min(size.width, IMAGE_MAX_WIDTH);
     const height = Math.min(Math.round((size.height * width) / size.width), maxHeight);
@@ -321,6 +338,29 @@ async function imageFile(context: BrowserContext, src: string, format: { type: "
   } finally {
     await page.close().catch(() => {});
   }
+}
+
+/**
+ * A TikTok post's item JSON: from the page, else from its /video/ page (where
+ * photo posts keep theirs), else the few fields TikTok's oEmbed API gives
+ * (for pages that came back as a login wall). Null when all three fail.
+ */
+async function tiktokItem(page: Page, post: TikTokPost): Promise<TikTokItem | null> {
+  const fromPage = itemFromScripts(await page.evaluate(readTikTokScripts), post.id);
+  if (fromPage) return fromPage;
+  const get = async (url: string) => {
+    try {
+      const response = await page.context().request.get(url, { timeout: 10_000 });
+      return response.ok() ? response : null;
+    } catch {
+      return null;
+    }
+  };
+  const videoPage = await get(videoUrl(post));
+  const fromVideoPage = videoPage ? itemFromScripts(scriptsFromHtml(await videoPage.text()), post.id) : null;
+  if (fromVideoPage) return fromVideoPage;
+  const oembed = await get(oembedUrl(videoUrl(post)));
+  return oembed ? oembedItem(await oembed.json().catch(() => null)) : null;
 }
 
 export class PlaywrightEngine implements CaptureEngine {
@@ -462,7 +502,7 @@ export class PlaywrightEngine implements CaptureEngine {
 
     const finalUrl = page.url();
     const post = tiktokPost(finalUrl);
-    const tiktok = post ? tiktokData(post, await page.evaluate(readTikTokItem, post.id)) : null;
+    const tiktok = post ? tiktokData(post, await tiktokItem(page, post)) : null;
     const meta: PageMeta = {
       finalUrl,
       canonical: parsed.canonical ? absolute(parsed.canonical, finalUrl) || null : null,
@@ -551,9 +591,14 @@ export class PlaywrightEngine implements CaptureEngine {
         await mobileShot("");
       }
     }
-    for (const [kind, src] of [["image_local", meta.image], ["tiktok_thumbnail", tiktok?.cover]] as const) {
-      if (!wanted.has(kind) || !src) continue;
-      const image = await imageFile(page.context(), src, format, maxHeight);
+    const images: [CaptureFile, string[]][] = [
+      ["image_local", meta.image ? [meta.image] : []],
+      ["tiktok_thumbnail", tiktok?.cover ?? []],
+      ...(tiktok?.images ?? []).map((sources, i): [CaptureFile, string[]] => [`tiktok_image_${i + 1}`, sources]),
+    ];
+    for (const [kind, sources] of images) {
+      if (!wanted.has(kind) || !sources.length) continue;
+      const image = await imageFile(page.context(), sources, format, maxHeight);
       if (image) files[kind] = image;
     }
     const hasImage = CAPTURE_FILES.some((kind) => kind !== "pdf_page" && files[kind]);
