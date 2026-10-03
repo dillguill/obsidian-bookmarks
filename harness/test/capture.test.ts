@@ -83,7 +83,7 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
       triggers: ["schema:@BreadcrumbList"],
       noteNameFormat: "{{title|lower}} by {{meta:name:author}}",
       path: "Clips/{{domain}}",
-      noteContentFormat: '{% if schema:@BreadcrumbList:itemListElement[1].name == "Docs" %}In docs{% endif %}\n{{selector:h1}}\n{{screenshot_embed}}',
+      noteContentFormat: '{% if schema:@BreadcrumbList:itemListElement[1].name == "Docs" %}In docs{% endif %}\n{{selector:h1}}\n{{screenshot_page_embed}}',
       properties: [{ name: "crumbs", value: "{{schema:@BreadcrumbList:itemListElement[*].name|join}}", type: "multitext" as const }],
     };
     const settings = { ...DEFAULT_CAPTURE_SETTINGS, templates: [DEFAULT_CAPTURE_SETTINGS.templates[0]!, template] };

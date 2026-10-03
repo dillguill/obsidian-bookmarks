@@ -31,13 +31,12 @@ export function withRequiredProperties(template: ClipperTemplate, hideCaptureId 
 /**
  * {{screenshot_page}} is the full-page shot's vault path and {{screenshot_banner}}
  * the first screen's, each with _link ([[path]]) and _embed (![[path]]) forms.
- * {{screenshot}}, {{screenshot_link}} and {{screenshot_embed}} are older names for the page shot.
  * Mirrors screenshotVariables in plugin/src/writer.ts.
  */
 export function screenshotVariables(page: string, banner: string): Record<string, string> {
   const forms = (name: string, path: string) =>
     path ? { [name]: path, [`${name}_link`]: `[[${path}]]`, [`${name}_embed`]: `![[${path}]]` } : { [name]: "", [`${name}_link`]: "", [`${name}_embed`]: "" };
-  return { ...forms("screenshot_page", page), ...forms("screenshot_banner", banner), ...forms("screenshot", page) };
+  return { ...forms("screenshot_page", page), ...forms("screenshot_banner", banner) };
 }
 
 export function renderRequest(settings: CaptureSettings, templateName: string | null, captureId: string): RenderRequest {

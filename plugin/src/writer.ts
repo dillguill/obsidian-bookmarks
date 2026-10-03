@@ -97,13 +97,12 @@ function noteBaseName(template: ClipperTemplate, vars: Variables, page: PageData
 
 /**
  * Template variables for the saved shots' vault paths: {{screenshot_page}} and
- * {{screenshot_banner}}, each with _link and _embed forms; {{screenshot}} and its
- * forms are older names for the page shot. Mirrors harness/src/render.ts.
+ * {{screenshot_banner}}, each with _link and _embed forms. Mirrors harness/src/render.ts.
  */
 export function screenshotVariables(page: string, banner: string): Variables {
   const forms = (name: string, path: string) =>
     path ? { [name]: path, [`${name}_link`]: `[[${path}]]`, [`${name}_embed`]: `![[${path}]]` } : { [name]: "", [`${name}_link`]: "", [`${name}_embed`]: "" };
-  return { ...forms("screenshot_page", page), ...forms("screenshot_banner", banner), ...forms("screenshot", page) };
+  return { ...forms("screenshot_page", page), ...forms("screenshot_banner", banner) };
 }
 
 /** Swaps a server screenshot marker for the saved file's vault path, or drops it when that shot is missing. */

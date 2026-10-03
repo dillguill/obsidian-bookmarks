@@ -94,8 +94,9 @@ server, so every device and every phone Shortcut uses the same settings:
   value: `{{screenshot_page}}` for the full page and `{{screenshot_banner}}` for the
   first screen, each with `_link` (`[[path]]`) and `_embed` (`![[path]]`) forms. A
   capture takes only the screenshots its template uses, so a template without them
-  saves none. The older `{{screenshot}}`, `{{screenshot_link}}` and
-  `{{screenshot_embed}}` mean the full page.
+  saves none. Templates with the older `{{screenshot}}`, `{{screenshot_link}}` and
+  `{{screenshot_embed}}` are renamed to the `screenshot_page` forms when loaded or
+  imported.
 
 Server URL, API token, screenshot folder and poll interval are set per device in the
 plugin; the token stays in each device's secret storage.

@@ -69,9 +69,9 @@ export interface RenderedNote {
 
 /**
  * Stand in for screenshot vault paths in a RenderedNote until the plugin saves
- * the files. `{{screenshot_page}}` (and the older `{{screenshot}}`) is the
- * full-page marker, `{{screenshot_banner}}` the first-screen one;
- * `{{screenshot_link}}` and `{{screenshot_embed}}` are `[[page]]` and `![[page]]`.
+ * the files: `{{screenshot_page}}` is the full-page marker and
+ * `{{screenshot_banner}}` the first-screen one, with `_link` ([[marker]]) and
+ * `_embed` (![[marker]]) forms.
  * The server takes only the screenshots whose marker the rendered note uses.
  */
 export const SCREENSHOT_MARKER = "bookmarks-screenshot-path-5f2c9e";

@@ -11,10 +11,29 @@ const PROPERTY_TYPES: ReadonlySet<string> = new Set<PropertyType>(["text", "mult
 const MAX_TEMPLATES = 50;
 const MAX_TEXT = 20_000;
 
-/** Keeps only current fields, so settings saved by older versions (screenshot style, site lists) drop out. */
+/**
+ * Older templates used {{screenshot}}, {{screenshot_link}} and {{screenshot_embed}}
+ * for the full-page shot; rename them to the screenshot_page forms inside
+ * {{ }} and {% %} so plain text is left alone.
+ */
+export function renameScreenshotVariables(text: string): string {
+  return text.replace(/\{\{[\s\S]*?\}\}|\{%[\s\S]*?%\}/g, (tag) => tag.replace(/\bscreenshot(_link|_embed)?\b/g, "screenshot_page$1"));
+}
+
+function renameInTemplate(template: ClipperTemplate): ClipperTemplate {
+  return {
+    ...template,
+    noteNameFormat: renameScreenshotVariables(template.noteNameFormat),
+    path: renameScreenshotVariables(template.path),
+    noteContentFormat: renameScreenshotVariables(template.noteContentFormat),
+    properties: template.properties.map((p) => ({ ...p, value: renameScreenshotVariables(p.value) })),
+  };
+}
+
+/** Brings settings saved by older versions up to date: drops the screenshot style and site lists, renames old variables. */
 export function currentSettings(stored: Partial<CaptureSettings>): CaptureSettings {
   return {
-    templates: stored.templates ?? DEFAULT_CAPTURE_SETTINGS.templates,
+    templates: (stored.templates ?? DEFAULT_CAPTURE_SETTINGS.templates).map(renameInTemplate),
     propertyTypes: stored.propertyTypes ?? DEFAULT_CAPTURE_SETTINGS.propertyTypes,
     hideCaptureId: stored.hideCaptureId ?? false,
   };
@@ -82,7 +101,7 @@ export function parseTemplate(raw: unknown): ClipperTemplate | string {
   const rawTriggers = t.triggers ?? [];
   if (!Array.isArray(rawTriggers) || rawTriggers.some((x) => typeof x !== "string")) return "triggers must be a list of text.";
   const triggers = (rawTriggers as string[]).map((x) => x.trim()).filter(Boolean);
-  return {
+  return renameInTemplate({
     schemaVersion: typeof t.schemaVersion === "string" ? t.schemaVersion : "0.1.0",
     name: name.trim(),
     behavior: "create",
@@ -91,5 +110,5 @@ export function parseTemplate(raw: unknown): ClipperTemplate | string {
     noteContentFormat,
     properties,
     triggers,
-  };
+  });
 }
