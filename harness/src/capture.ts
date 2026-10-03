@@ -208,6 +208,39 @@ function absolute(value: string | null | undefined, base: string): string {
   }
 }
 
+/**
+ * The page as an A4 PDF. Lazy images are loaded first (Chromium doesn't load
+ * them for print), and fixed or sticky headers become static so they don't
+ * cover text on every page; both only affect print, not later screenshots.
+ */
+async function pagePdf(page: Page): Promise<Buffer> {
+  await page.evaluate(() =>
+    Promise.all(
+      [...document.images].map((img) => {
+        img.loading = "eager";
+        return img.complete
+          ? null
+          : new Promise((resolve) => {
+              img.onload = img.onerror = resolve;
+              setTimeout(resolve, 3000);
+            });
+      }),
+    ),
+  );
+  await page.emulateMedia({ media: "print" });
+  await page.evaluate(() => {
+    for (const el of document.querySelectorAll<HTMLElement>("body *")) {
+      const position = getComputedStyle(el).position;
+      if (position === "fixed" || position === "sticky") el.setAttribute("data-bookmarks-pinned", "");
+    }
+    const style = document.createElement("style");
+    style.textContent = "@media print { [data-bookmarks-pinned] { position: static !important; } }";
+    document.head.append(style);
+  });
+  await page.emulateMedia({ media: null });
+  return page.pdf({ format: "A4", printBackground: true });
+}
+
 /** The first screen scaled down to THUMBNAIL_WIDTH, through CDP since Playwright can't scale a screenshot. */
 async function thumbnail(page: Page, type: "jpeg" | "png"): Promise<Buffer> {
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -465,7 +498,7 @@ export class PlaywrightEngine implements CaptureEngine {
     const anyDark = [...wanted].some((kind) => kind.endsWith("_dark"));
 
     await desktopShots("");
-    if (wanted.has("pdf_page")) files.pdf_page = await page.pdf({ format: "A4", printBackground: true });
+    if (wanted.has("pdf_page")) files.pdf_page = await pagePdf(page);
     if (anyDark) {
       await darkMode(true);
       await desktopShots("_dark");

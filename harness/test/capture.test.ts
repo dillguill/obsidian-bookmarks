@@ -37,18 +37,33 @@ const chromiumPath = process.env.BOOKMARKS_CHROMIUM_PATH;
 describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
   let server: Server;
   let base: string;
-  const engine = new PlaywrightEngine({
+  const options = {
     captureTimeoutMs: 30_000,
     scrollBudgetMs: 5000,
     maxHeight: 20_000,
     userAgent: "test-agent",
-    screenshotFormat: "jpeg",
+    screenshotFormat: "jpeg" as const,
     allowPrivateNetworks: true,
     chromiumPath,
-  });
+  };
+  const engine = new PlaywrightEngine(options);
+
+  const requested: string[] = [];
 
   beforeAll(async () => {
     server = createServer((req, res) => {
+      requested.push(req.url ?? "");
+      if (req.url === "/far.png") {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      if (req.url === "/print") {
+        res.writeHead(200, { "content-type": "text/html" });
+        res.end(`<html><head><title>Print</title></head><body><article>${"<p>Words to print on the page.</p>".repeat(40)}</article>
+          <img loading="lazy" src="/far.png" style="display:block;width:10px;height:10px;margin-top:20000px"></body></html>`);
+        return;
+      }
       res.writeHead(200, { "content-type": "text/html", "content-security-policy": "script-src 'none'" });
       if (req.url === "/layout") {
         res.end(`<html><head><title>Layout</title><style>body{margin:0;background:#fff}@media (prefers-color-scheme: dark){body{background:#000;color:#fff}}</style></head>
@@ -146,6 +161,18 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
     }
     expect(files.pdf_page!.subarray(0, 4).toString()).toBe("%PDF");
   });
+
+  it("loads lazy images before printing the PDF", async () => {
+    // maxHeight stops the scroll before the image, so only the PDF step loads it.
+    const short = new PlaywrightEngine({ ...options, maxHeight: 2000 });
+    try {
+      const { files } = await short.capture(`${base}/print`, withContent("{{pdf_page}}"));
+      expect(files.pdf_page!.subarray(0, 4).toString()).toBe("%PDF");
+      expect(requested).toContain("/far.png");
+    } finally {
+      await short.close();
+    }
+  }, 30_000);
 
   it("leaves out the article shot when the page has no main content block", async () => {
     const result = await engine.capture(`${base}/bare`, withContent("![[{{screenshot_article}}]]"));
