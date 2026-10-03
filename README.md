@@ -93,8 +93,9 @@ server, so every device and every phone Shortcut uses the same settings:
 - **Screenshots and PDF** are template variables holding the file's vault path:
   `{{screenshot_page}}` (whole page), `{{screenshot_banner}}` (first screen),
   `{{screenshot_mobile}}` (first screen at phone width), `{{screenshot_article}}`
-  (main content block only), `{{screenshot_thumbnail}}` (small first screen),
-  `{{screenshot_dark}}` (first screen in dark mode) and `{{pdf_page}}`. Write
+  (main content block only), `{{screenshot_thumbnail}}` (small first screen), each
+  also as `_dark` for the site's dark mode (`{{screenshot_page_dark}}`…), and
+  `{{pdf_page}}`. Write
   `![[{{screenshot_page}}]]` to show one or `[[{{screenshot_page}}]]` to link it, in
   the note content or a property. A capture makes only the files its template
   uses. Older templates' `{{screenshot}}`, `{{screenshot_link}}` and

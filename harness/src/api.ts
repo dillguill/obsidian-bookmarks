@@ -50,8 +50,9 @@ export interface Job {
 /**
  * Files a template can ask for, each named after its template variable, which
  * holds the file's vault path: full page, first screen, first screen at phone
- * width, the main content block, a small first screen, the first screen in dark
- * mode, and a PDF of the page. The server makes only the ones the rendered note uses.
+ * width, the main content block and a small first screen, each also in the
+ * site's dark mode (`_dark`), and a PDF of the page. The server makes only the
+ * ones the rendered note uses.
  */
 export const CAPTURE_FILES = [
   "screenshot_page",
@@ -59,7 +60,11 @@ export const CAPTURE_FILES = [
   "screenshot_mobile",
   "screenshot_article",
   "screenshot_thumbnail",
-  "screenshot_dark",
+  "screenshot_page_dark",
+  "screenshot_banner_dark",
+  "screenshot_mobile_dark",
+  "screenshot_article_dark",
+  "screenshot_thumbnail_dark",
   "pdf_page",
 ] as const;
 export type CaptureFile = (typeof CAPTURE_FILES)[number];

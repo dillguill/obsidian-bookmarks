@@ -89,12 +89,12 @@ describe("writeBookmark", () => {
       noteName: "All",
       path: "Clips",
       frontmatter: "---\n---\n",
-      content: ["screenshot_mobile", "screenshot_dark", "pdf_page"].map((k) => `![[${fileMarker(k as "pdf_page")}]]`).join("\n"),
+      content: ["screenshot_mobile", "screenshot_page_dark", "screenshot_banner_dark", "pdf_page"].map((k) => `![[${fileMarker(k as "pdf_page")}]]`).join("\n"),
     };
-    const files = { screenshot_mobile: new ArrayBuffer(1), screenshot_dark: new ArrayBuffer(1), pdf_page: new ArrayBuffer(1) };
+    const files = { screenshot_mobile: new ArrayBuffer(1), screenshot_page_dark: new ArrayBuffer(1), screenshot_banner_dark: new ArrayBuffer(1), pdf_page: new ArrayBuffer(1) };
     const result = await writeBookmark({ job: job(), markdown: "", files, note }, options());
     expect(vault.files.get(result.path)).toBe(
-      "---\n---\n![[Bookmarks/assets/All-mobile.jpg]]\n![[Bookmarks/assets/All-dark.jpg]]\n![[Bookmarks/assets/All.pdf]]\n",
+      "---\n---\n![[Bookmarks/assets/All-mobile.jpg]]\n![[Bookmarks/assets/All-dark.jpg]]\n![[Bookmarks/assets/All-banner-dark.jpg]]\n![[Bookmarks/assets/All.pdf]]\n",
     );
   });
 

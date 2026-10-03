@@ -431,34 +431,55 @@ export class PlaywrightEngine implements CaptureEngine {
       await page.evaluate(() => window.scrollTo(0, 0));
       return page.screenshot({ ...format, clip: { x: 0, y: 0, ...VIEWPORT } });
     };
-    if (wanted.has("screenshot_banner")) files.screenshot_banner = await firstScreen();
-    if (wanted.has("screenshot_thumbnail")) files.screenshot_thumbnail = await thumbnail(page, type);
-    if (wanted.has("screenshot_article")) {
-      const shot = await articleShot(page, format, maxHeight);
-      if (shot) files.screenshot_article = shot;
-    }
-    if (wanted.has("screenshot_page")) {
-      const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0));
-      meta.truncated = height > maxHeight || VIEWPORT.height + extra > maxHeight;
-      files.screenshot_page = await page.screenshot({
-        fullPage: true,
-        ...format,
-        ...(meta.truncated ? { clip: { x: 0, y: 0, width: VIEWPORT.width, height: maxHeight } } : {}),
-      });
-    }
-    if (wanted.has("screenshot_dark")) {
-      await page.emulateMedia({ colorScheme: "dark" });
+    /** Desktop shots in one color scheme; `suffix` is "" or "_dark". */
+    const desktopShots = async (suffix: "" | "_dark") => {
+      const want = (type: string) => wanted.has(`screenshot_${type}${suffix}` as CaptureFile);
+      const put = (type: string, data: Buffer | null) => {
+        if (data) files[`screenshot_${type}${suffix}` as CaptureFile] = data;
+      };
+      if (want("banner")) put("banner", await firstScreen());
+      if (want("thumbnail")) put("thumbnail", await thumbnail(page, type));
+      if (want("article")) put("article", await articleShot(page, format, maxHeight));
+      if (want("page")) {
+        const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0));
+        meta.truncated = height > maxHeight || VIEWPORT.height + extra > maxHeight;
+        put(
+          "page",
+          await page.screenshot({
+            fullPage: true,
+            ...format,
+            ...(meta.truncated ? { clip: { x: 0, y: 0, width: VIEWPORT.width, height: maxHeight } } : {}),
+          }),
+        );
+      }
+    };
+    const mobileShot = async (suffix: "" | "_dark") => {
+      if (!wanted.has(`screenshot_mobile${suffix}`)) return;
+      await page.evaluate(() => window.scrollTo(0, 0));
+      files[`screenshot_mobile${suffix}`] = await page.screenshot({ ...format, clip: { x: 0, y: 0, ...MOBILE_VIEWPORT } });
+    };
+    const darkMode = async (on: boolean) => {
+      await page.emulateMedia({ colorScheme: on ? "dark" : "light" });
       await waitForDomQuiet(page, 300, 2000);
-      files.screenshot_dark = await firstScreen();
-      await page.emulateMedia({ colorScheme: "light" });
-    }
+    };
+    const anyDark = [...wanted].some((kind) => kind.endsWith("_dark"));
+
+    await desktopShots("");
     if (wanted.has("pdf_page")) files.pdf_page = await page.pdf({ format: "A4", printBackground: true });
+    if (anyDark) {
+      await darkMode(true);
+      await desktopShots("_dark");
+    }
     // Last: the layout reflows at phone width.
-    if (wanted.has("screenshot_mobile")) {
+    if (wanted.has("screenshot_mobile") || wanted.has("screenshot_mobile_dark")) {
       await page.setViewportSize(MOBILE_VIEWPORT);
       await waitForDomQuiet(page, 300, 2000);
-      await page.evaluate(() => window.scrollTo(0, 0));
-      files.screenshot_mobile = await page.screenshot({ ...format, clip: { x: 0, y: 0, ...MOBILE_VIEWPORT } });
+      // Still in dark mode if any dark shot was wanted, so take that one first.
+      if (anyDark) await mobileShot("_dark");
+      if (wanted.has("screenshot_mobile")) {
+        if (anyDark) await darkMode(false);
+        await mobileShot("");
+      }
     }
     const hasImage = CAPTURE_FILES.some((kind) => kind !== "pdf_page" && files[kind]);
     return { meta, markdown, files, screenshotExt: hasImage ? ext : null, note };

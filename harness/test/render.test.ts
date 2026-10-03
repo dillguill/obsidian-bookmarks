@@ -20,7 +20,11 @@ describe("fileVariables", () => {
       screenshot_mobile: "",
       screenshot_article: "",
       screenshot_thumbnail: "",
-      screenshot_dark: "",
+      screenshot_page_dark: "",
+      screenshot_banner_dark: "",
+      screenshot_mobile_dark: "",
+      screenshot_article_dark: "",
+      screenshot_thumbnail_dark: "",
       pdf_page: "",
     });
   });

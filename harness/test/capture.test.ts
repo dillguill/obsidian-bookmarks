@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fileMarker } from "../src/api.js";
+import { CAPTURE_FILES, fileMarker } from "../src/api.js";
 import { blockReason, PlaywrightEngine } from "../src/capture.js";
 import { renderRequest } from "../src/render.js";
 import { DEFAULT_CAPTURE_SETTINGS } from "../src/settings.js";
@@ -132,14 +132,18 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
     expect(result.note!.content).toBe(`![[${fileMarker("screenshot_banner")}]]`);
   });
 
-  it("makes every capture file the template uses", async () => {
-    const content = "{{screenshot_banner}} {{screenshot_mobile}} {{screenshot_article}} {{screenshot_thumbnail}} {{screenshot_dark}} {{pdf_page}}";
+  it("makes every capture file the template uses, light and dark", async () => {
+    const content = CAPTURE_FILES.map((kind) => `{{${kind}}}`).join(" ");
     const { files } = await engine.capture(`${base}/layout`, withContent(content));
-    expect(Object.keys(files).sort()).toEqual(["pdf_page", "screenshot_article", "screenshot_banner", "screenshot_dark", "screenshot_mobile", "screenshot_thumbnail"]);
+    expect(Object.keys(files).sort()).toEqual([...CAPTURE_FILES].sort());
     expect(jpegSize(files.screenshot_mobile!)).toEqual({ width: 390, height: 844 });
     expect(jpegSize(files.screenshot_thumbnail!)).toEqual({ width: 480, height: 300 });
     expect(jpegSize(files.screenshot_article!).width).toBe(600);
-    expect(files.screenshot_dark!.equals(files.screenshot_banner!)).toBe(false);
+    for (const type of ["page", "banner", "mobile", "article", "thumbnail"] as const) {
+      const [light, dark] = [files[`screenshot_${type}`]!, files[`screenshot_${type}_dark`]!];
+      expect(jpegSize(dark)).toEqual(jpegSize(light));
+      expect(dark.equals(light)).toBe(false);
+    }
     expect(files.pdf_page!.subarray(0, 4).toString()).toBe("%PDF");
   });
 
