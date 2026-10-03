@@ -98,6 +98,28 @@ export function tiktokData(post: { id: string; kind: "video" | "photo" }, item: 
   };
 }
 
+/** TikTok's oEmbed endpoint for a post URL. */
+export function oembedUrl(postUrl: string): string {
+  return `https://www.tiktok.com/oembed?url=${encodeURIComponent(postUrl)}`;
+}
+
+/**
+ * The item fields TikTok's oEmbed reply carries: caption, creator and cover,
+ * but no post time (tiktokData then takes it from the id). For pages that
+ * came back as a login wall without the item JSON.
+ */
+export function oembedItem(reply: unknown): TikTokItem | null {
+  if (!reply || typeof reply !== "object") return null;
+  const r = reply as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+  const item: TikTokItem = {
+    desc: text(r.title),
+    author: { nickname: text(r.author_name), uniqueId: text(r.author_unique_id) },
+    video: { cover: text(r.thumbnail_url) },
+  };
+  return item.desc || item.author?.nickname || item.video?.cover ? item : null;
+}
+
 /**
  * Runs in the page: the post's item JSON from TikTok's hydration data, or
  * null. Self-contained for page.evaluate.

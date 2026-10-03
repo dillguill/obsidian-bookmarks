@@ -5,7 +5,7 @@ import { CAPTURE_FILES, fileMarker, type CaptureFile, type PageMeta, type Render
 import type { Config } from "./config.js";
 import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
 import { urlRejection } from "./ssrf.js";
-import { noTikTokVariables, readTikTokItem, tiktokData, tiktokPost } from "./tiktok.js";
+import { noTikTokVariables, oembedItem, oembedUrl, readTikTokItem, tiktokData, tiktokPost, type TikTokItem } from "./tiktok.js";
 
 const require = createRequire(import.meta.url);
 const DEFUDDLE_PATH = require.resolve("defuddle/full");
@@ -323,6 +323,20 @@ async function imageFile(context: BrowserContext, src: string, format: { type: "
   }
 }
 
+/**
+ * A TikTok post's item from TikTok's oEmbed API, for when the page came back
+ * without its item JSON (TikTok serves some visitors a login wall). Null on
+ * any failure.
+ */
+async function tiktokOembed(page: Page, postUrl: string): Promise<TikTokItem | null> {
+  try {
+    const response = await page.context().request.get(oembedUrl(postUrl), { timeout: 10_000 });
+    return response.ok() ? oembedItem(await response.json()) : null;
+  } catch {
+    return null;
+  }
+}
+
 export class PlaywrightEngine implements CaptureEngine {
   private browser: Promise<Browser> | null = null;
   private readonly turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
@@ -462,7 +476,7 @@ export class PlaywrightEngine implements CaptureEngine {
 
     const finalUrl = page.url();
     const post = tiktokPost(finalUrl);
-    const tiktok = post ? tiktokData(post, await page.evaluate(readTikTokItem, post.id)) : null;
+    const tiktok = post ? tiktokData(post, (await page.evaluate(readTikTokItem, post.id)) ?? (await tiktokOembed(page, finalUrl))) : null;
     const meta: PageMeta = {
       finalUrl,
       canonical: parsed.canonical ? absolute(parsed.canonical, finalUrl) || null : null,

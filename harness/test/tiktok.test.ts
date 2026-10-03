@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captionTitle, idTime, noTikTokVariables, TIKTOK_VARIABLES, tiktokData, tiktokPost, videoEmbed } from "../src/tiktok.js";
+import { captionTitle, idTime, noTikTokVariables, oembedItem, TIKTOK_VARIABLES, tiktokData, tiktokPost, videoEmbed } from "../src/tiktok.js";
 
 describe("tiktokPost", () => {
   it("finds video and photo posts", () => {
@@ -82,5 +82,29 @@ describe("videoEmbed", () => {
     expect(videoEmbed("7382225350710824222")).toBe(
       '<iframe\nsrc="https://www.tiktok.com/player/v1/7382225350710824222?autoplay=0"\nallow="fullscreen"\nstyle="width:100%;height:50vh;"\n/>',
     );
+  });
+});
+
+describe("oembedItem", () => {
+  it("reads caption, creator and cover", () => {
+    const item = oembedItem({
+      title: "Get notified of price drops #iphonetips ",
+      author_name: "Stephen Robles",
+      author_unique_id: "beardedteacher",
+      thumbnail_url: "https://p16.tiktokcdn-us.com/cover.image",
+    });
+    const { variables, cover } = tiktokData({ id: "7690631809217940767", kind: "video" }, item);
+    expect(variables).toMatchObject({
+      tiktok_title: "Get notified of price drops",
+      tiktok_description: "Get notified of price drops #iphonetips",
+      tiktok_author: "Stephen Robles",
+      tiktok_author_handle: "beardedteacher",
+    });
+    expect(variables.tiktok_published).toMatch(/^2026-09-28T/);
+    expect(cover).toBe("https://p16.tiktokcdn-us.com/cover.image");
+  });
+  it("is null for an empty or bad reply", () => {
+    expect(oembedItem({})).toBeNull();
+    expect(oembedItem("nope")).toBeNull();
   });
 });
