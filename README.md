@@ -28,7 +28,7 @@ your vault as deduplicated bookmark notes. See the
    ```
 
    Check it: `curl -H "Authorization: Bearer desktop-token" http://127.0.0.1:8787/health`
-   should return `{"status":"ok","apiVersion":4,...}`.
+   should return `{"status":"ok","apiVersion":5,...}`.
 
 2. **Install the plugin** with [BRAT](https://github.com/TfTHacker/obsidian42-brat):
    in BRAT's settings choose **Add beta plugin** and enter `dillguill/obsidian-bookmarks`.
@@ -106,9 +106,11 @@ server, so every device and every phone Shortcut uses the same settings:
   page's title, description and image say little: `{{tiktok_title}}` (caption's
   first line), `{{tiktok_description}}` (whole caption), `{{tiktok_published}}`,
   `{{tiktok_author}}`, `{{tiktok_author_handle}}`, `{{tiktok_id}}`,
-  `{{tiktok_embed}}` (a player that plays in the note) and `{{tiktok_thumbnail}}`
-  (the cover saved in the vault, since its link expires). They're empty on other
-  sites. [docs/templates/tiktok.json](docs/templates/tiktok.json) is a template to import.
+  `{{tiktok_embed}}` (a player that plays in the note, or swipes through a photo
+  carousel) and `{{tiktok_thumbnail}}` (the cover saved in the vault, since its link
+  expires). Photo carousels also save each photo: `{{tiktok_images}}` embeds them
+  all, `{{tiktok_image_1}}`… are their paths and `{{tiktok_image_count}}` counts
+  them. They're empty on other sites. [docs/templates/tiktok.json](docs/templates/tiktok.json) is a template to import.
 
 Server URL, API token, screenshot folder and poll interval are set per device in the
 plugin; the token stays in each device's secret storage.
@@ -122,7 +124,7 @@ All endpoints need `Authorization: Bearer <token>`.
 | `POST /capture` | Enqueue `{url, origin, template?}` (`template` picks one by name; otherwise triggers decide) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
 | `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
 | `GET /jobs/:id` | One job. |
-| `GET /jobs/:id/asset/:kind` | Capture output: a screenshot, `pdf_page`, `image_local` or `tiktok_thumbnail` named after its variable (only those the template uses), `markdown`, or the rendered `note`. |
+| `GET /jobs/:id/asset/:kind` | Capture output: a screenshot, `pdf_page`, `image_local`, `tiktok_thumbnail` or `tiktok_image_N` named after its variable (only those the template uses), `markdown`, or the rendered `note`. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
 | `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId}`. |
 | `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |

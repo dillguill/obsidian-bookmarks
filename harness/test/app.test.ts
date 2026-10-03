@@ -86,7 +86,7 @@ describe("http app", () => {
   it("reports health and API version", async () => {
     const res = await fetch(`${base}/health`, { headers: auth });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ok", apiVersion: 4, version: "0.0.0-test" });
+    expect(await res.json()).toEqual({ status: "ok", apiVersion: 5, version: "0.0.0-test" });
   });
 
   it("captures synchronously with ?wait=1 and serves assets", async () => {

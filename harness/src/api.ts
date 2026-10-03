@@ -1,7 +1,7 @@
 // Wire types for the HTTP API. plugin/src/api.ts mirrors these; bump
 // API_VERSION on any breaking change so a mismatched pair says which side to
 // update (design §5.3).
-export const API_VERSION = 4;
+export const API_VERSION = 5;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -47,13 +47,17 @@ export interface Job {
   template: string | null;
 }
 
+/** Most photos a TikTok carousel can hold; each is its own capture file. */
+export const TIKTOK_IMAGE_MAX = 35;
+
 /**
  * Files a template can ask for, each named after its template variable, which
  * holds the file's vault path: full page, first screen, first screen at phone
  * width, the main content block and a small first screen, each also in the
  * site's dark mode (`_dark`), a PDF of the page, the page's {{image}} saved
- * locally (`image_local`), and a TikTok post's cover (`tiktok_thumbnail`,
- * whose link expires). The server makes only the ones the rendered note uses.
+ * locally (`image_local`), and a TikTok post's cover (`tiktok_thumbnail`) and
+ * carousel photos (`tiktok_image_1`…), whose links expire. The server makes
+ * only the ones the rendered note uses.
  */
 export const CAPTURE_FILES = [
   "screenshot_page",
@@ -69,6 +73,7 @@ export const CAPTURE_FILES = [
   "pdf_page",
   "image_local",
   "tiktok_thumbnail",
+  ...Array.from({ length: TIKTOK_IMAGE_MAX }, (_, i) => `tiktok_image_${i + 1}` as const),
 ] as const;
 export type CaptureFile = (typeof CAPTURE_FILES)[number];
 

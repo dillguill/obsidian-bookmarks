@@ -4,7 +4,7 @@
   "behavior": "create",
   "noteNameFormat": "{{domain|kebab}}-{{tiktok_title|kebab}}-{{date|date:\"YYYY-MM-DD\"}}",
   "path": "Bookmarks/notes",
-  "noteContentFormat": "{{tiktok_embed}}\n\n{{tiktok_description}}",
+  "noteContentFormat": "{{tiktok_embed}}\n\n{{tiktok_description}}\n\n{{tiktok_images}}",
   "properties": [
     {
       "name": "source",
