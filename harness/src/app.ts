@@ -1,7 +1,7 @@
 import { createReadStream, readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { API_VERSION, type AssetKind, type CaptureOrigin, type JobStatus } from "./api.js";
+import { API_VERSION, CAPTURE_FILES, type AssetKind, type CaptureOrigin, type JobStatus } from "./api.js";
 import type { Config } from "./config.js";
 import type { JobStore } from "./db.js";
 import { parseCaptureSettings } from "./settings.js";
@@ -21,6 +21,7 @@ const ORIGINS: ReadonlySet<string> = new Set<CaptureOrigin>(["plugin", "api", "s
 const STATUSES: ReadonlySet<string> = new Set<JobStatus>(["pending", "running", "done", "failed", "delivered"]);
 const MAX_BODY = 16 * 1024;
 const MAX_SETTINGS_BODY = 512 * 1024;
+const JOB_PATH = new RegExp(`^/jobs/([0-9A-Z]{26})(?:/(delivered|asset/(${[...CAPTURE_FILES, "markdown", "note"].join("|")})))?$`);
 
 // The settings page: static files with no secrets in them, so they're served
 // without a token; the page signs in and calls the API with a bearer token.
@@ -161,7 +162,7 @@ export function createApp(deps: AppDeps): Server {
       return sendJson(res, 200, { jobs: store.list(statuses, limit) });
     }
 
-    const jobMatch = /^\/jobs\/([0-9A-Z]{26})(?:\/(delivered|asset\/(screenshot_[a-z]+|pdf_page|markdown|note)))?$/.exec(path);
+    const jobMatch = JOB_PATH.exec(path);
     if (jobMatch) {
       const [, id, action, kind] = jobMatch as unknown as [string, string, string | undefined, AssetKind | undefined];
       const job = store.get(id);

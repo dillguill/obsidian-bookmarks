@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "0.1.0",
+  "name": "TikTok",
+  "behavior": "create",
+  "noteNameFormat": "{{domain|kebab}}-{{tiktok_title|kebab}}-{{date|date:\"YYYY-MM-DD\"}}",
+  "path": "Bookmarks/notes",
+  "noteContentFormat": "{{tiktok_embed}}\n\n{{tiktok_description}}",
+  "properties": [
+    {
+      "name": "source",
+      "value": "{{url}}",
+      "type": "text"
+    },
+    {
+      "name": "title",
+      "value": "{{tiktok_title}}",
+      "type": "text"
+    },
+    {
+      "name": "author",
+      "value": "{{tiktok_author}}",
+      "type": "text"
+    },
+    {
+      "name": "published",
+      "value": "{{tiktok_published|date:\"YYYY-MM-DDTHH:mm:ss\"}}",
+      "type": "datetime"
+    },
+    {
+      "name": "description",
+      "value": "{{tiktok_description}}",
+      "type": "text"
+    },
+    {
+      "name": "thumbnail",
+      "value": "[[{{tiktok_thumbnail}}]]",
+      "type": "text"
+    },
+    {
+      "name": "created",
+      "value": "{{date|date:\"YYYY-MM-DDTHH:mm:ss\"}}",
+      "type": "datetime"
+    },
+    {
+      "name": "tags",
+      "value": "",
+      "type": "multitext"
+    },
+    {
+      "name": "capture_id",
+      "value": "{{capture_id}}",
+      "type": "text"
+    }
+  ],
+  "triggers": [
+    "/^https:\\/\\/(www\\.|m\\.)?tiktok\\.com\\/@[^/]+\\/(video|photo)\\//"
+  ]
+}

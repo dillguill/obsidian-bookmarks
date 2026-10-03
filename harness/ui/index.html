@@ -113,9 +113,22 @@
             <tr><td><code class="copy">{{screenshot_article}}</code></td><td>Just the main content block, without navigation or sidebars, <code>note-article.jpg</code>. Empty when the page has no article or main element.</td></tr>
             <tr><td><code class="copy">{{screenshot_thumbnail}}</code></td><td>A small first screen (480×300) for covers in Bases or card views, <code>note-thumbnail.jpg</code>.</td></tr>
             <tr><td><code class="copy">{{pdf_page}}</code></td><td>A PDF of the page with selectable text, <code>note.pdf</code>.</td></tr>
+            <tr><td><code class="copy">{{image_local}}</code></td><td>The page's main image (<code>{{image}}</code>) saved in the vault, <code>note-image.jpg</code>, for images whose links may not last. Empty when the page has no image.</td></tr>
         </table>
         <p class="desc">Add <code>_dark</code> to any screenshot for the site's dark mode, e.g. <code class="copy">{{screenshot_page_dark}}</code> (<code>note-dark.jpg</code>) or <code class="copy">{{screenshot_mobile_dark}}</code> (<code>note-mobile-dark.jpg</code>). Sites without a dark mode look the same.</p>
         <p class="desc">Templates saved or imported with the older <code>{{screenshot}}</code>, <code>{{screenshot_link}}</code> and <code>{{screenshot_embed}}</code> are rewritten to these.</p>
+        <h2>TikTok</h2>
+        <p class="desc">Read from the post's own data on TikTok video and photo pages, where the page's title, description and image say little. Empty on other sites.</p>
+        <table class="key">
+            <tr><td><code class="copy">{{tiktok_title}}</code></td><td>The caption's first line, without trailing hashtags.</td></tr>
+            <tr><td><code class="copy">{{tiktok_description}}</code></td><td>The whole caption.</td></tr>
+            <tr><td><code class="copy">{{tiktok_published}}</code></td><td>When it was posted. Format it with <code>|date:"YYYY-MM-DD"</code>.</td></tr>
+            <tr><td><code class="copy">{{tiktok_author}}</code></td><td>The creator's display name.</td></tr>
+            <tr><td><code class="copy">{{tiktok_author_handle}}</code></td><td>The creator's handle, without the @.</td></tr>
+            <tr><td><code class="copy">{{tiktok_embed}}</code></td><td>A player that plays in the note: an <code>&lt;iframe&gt;</code> for the note content. Empty for photo posts.</td></tr>
+            <tr><td><code class="copy">{{tiktok_id}}</code></td><td>The post's id, e.g. <code>7382225350710824222</code>.</td></tr>
+            <tr><td><code class="copy">{{tiktok_thumbnail}}</code></td><td>The cover image saved in the vault, <code>note-tiktok-thumbnail.jpg</code>; wrap it like a screenshot. Saved because TikTok's cover links expire within days.</td></tr>
+        </table>
         <h2>Schema and meta</h2>
         <p class="desc">Read from the page's schema.org data and meta tags, as in Web Clipper.</p>
         <table class="key">

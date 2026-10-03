@@ -1,7 +1,7 @@
 // Wire types for the HTTP API. plugin/src/api.ts mirrors these; bump
 // API_VERSION on any breaking change so a mismatched pair says which side to
 // update (design §5.3).
-export const API_VERSION = 3;
+export const API_VERSION = 4;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -41,7 +41,7 @@ export interface Job {
   meta: PageMeta | null;
   /** Asset kinds available from `GET /jobs/:id/asset/:kind`. */
   assets: AssetKind[];
-  /** File extension of the screenshot assets, when there are any (the PDF is always .pdf). */
+  /** File extension of the screenshot and image assets, when there are any (the PDF is always .pdf). */
   screenshotExt: "jpg" | "png" | null;
   /** Template chosen at capture time by name; null means match by triggers. */
   template: string | null;
@@ -51,8 +51,9 @@ export interface Job {
  * Files a template can ask for, each named after its template variable, which
  * holds the file's vault path: full page, first screen, first screen at phone
  * width, the main content block and a small first screen, each also in the
- * site's dark mode (`_dark`), and a PDF of the page. The server makes only the
- * ones the rendered note uses.
+ * site's dark mode (`_dark`), a PDF of the page, the page's {{image}} saved
+ * locally (`image_local`), and a TikTok post's cover (`tiktok_thumbnail`,
+ * whose link expires). The server makes only the ones the rendered note uses.
  */
 export const CAPTURE_FILES = [
   "screenshot_page",
@@ -66,6 +67,8 @@ export const CAPTURE_FILES = [
   "screenshot_article_dark",
   "screenshot_thumbnail_dark",
   "pdf_page",
+  "image_local",
+  "tiktok_thumbnail",
 ] as const;
 export type CaptureFile = (typeof CAPTURE_FILES)[number];
 
