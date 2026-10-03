@@ -28,7 +28,7 @@ your vault as deduplicated bookmark notes. See the
    ```
 
    Check it: `curl -H "Authorization: Bearer desktop-token" http://127.0.0.1:8787/health`
-   should return `{"status":"ok","apiVersion":4,...}`.
+   should return `{"status":"ok","apiVersion":5,...}`.
 
 2. **Install the plugin** with [BRAT](https://github.com/TfTHacker/obsidian42-brat):
    in BRAT's settings choose **Add beta plugin** and enter `dillguill/obsidian-bookmarks`.
@@ -50,7 +50,11 @@ your vault as deduplicated bookmark notes. See the
    with the screenshot embedded at the top. Capturing the same URL again shows
    "Already saved" with **Open existing**, **Replace** (capture again into the
    same note) and **Save as new**. **Bookmarks: Capture current bookmark again**
-   refreshes the open note the same way.
+   refreshes the open note the same way. **Bookmarks: Pull metadata and images
+   into current note** fetches the open note's page again (any note with a URL
+   property, even one this plugin didn't make) and lets you pick which
+   properties to add, replace or add to a list, whether to add the page content,
+   and which images to save, before or after the note's body.
 
 4. **Capture from elsewhere** (the phone path): with Obsidian closed, enqueue a URL
 
@@ -119,7 +123,7 @@ All endpoints need `Authorization: Bearer <token>`.
 
 | Endpoint | What |
 |---|---|
-| `POST /capture` | Enqueue `{url, origin, template?}` (`template` picks one by name; otherwise triggers decide) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
+| `POST /capture` | Enqueue `{url, origin, template?, files?}` (`template` picks one by name; otherwise triggers decide; `files` lists capture files to make even if the template doesn't use them) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. Jobs with origin `enrich` are read by id and never listed for delivery. |
 | `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
 | `GET /jobs/:id` | One job. |
 | `GET /jobs/:id/asset/:kind` | Capture output: a screenshot, `pdf_page`, `image_local` or `tiktok_thumbnail` named after its variable (only those the template uses), `markdown`, or the rendered `note`. |

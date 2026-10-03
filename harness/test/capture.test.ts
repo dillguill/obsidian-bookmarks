@@ -2,9 +2,22 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CAPTURE_FILES, fileMarker } from "../src/api.js";
-import { blockReason, PlaywrightEngine } from "../src/capture.js";
+import { blockReason, filesWanted, PlaywrightEngine } from "../src/capture.js";
 import { renderRequest } from "../src/render.js";
 import { DEFAULT_CAPTURE_SETTINGS } from "../src/settings.js";
+
+describe("filesWanted", () => {
+  const note = (content: string) => ({ template: "T", noteName: "n", path: "", frontmatter: "", content });
+
+  it("adds files asked for by name to the ones the note uses", () => {
+    expect([...filesWanted(note(`![[${fileMarker("screenshot_banner")}]]`))]).toEqual(["screenshot_banner"]);
+    expect([...filesWanted(note(`![[${fileMarker("screenshot_banner")}]]`), ["image_local", "screenshot_page"])].sort()).toEqual([
+      "image_local",
+      "screenshot_banner",
+      "screenshot_page",
+    ]);
+  });
+});
 
 describe("blockReason", () => {
   const page = (title: string, wordCount: number, httpStatus: number | null = 200) => ({ title, wordCount, httpStatus });
@@ -199,5 +212,11 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
     expect(result.files).toEqual({});
     expect(result.screenshotExt).toBeNull();
     expect(result.markdown).toContain("Some readable words");
+  });
+
+  it("also makes capture files asked for by name", async () => {
+    const result = await engine.capture(`${base}/`, { ...withContent("{{content}}"), files: ["screenshot_banner", "screenshot_thumbnail"] });
+    expect(Object.keys(result.files).sort()).toEqual(["screenshot_banner", "screenshot_thumbnail"]);
+    expect(result.screenshotExt).toBe("jpg");
   });
 });

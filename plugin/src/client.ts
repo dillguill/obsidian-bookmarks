@@ -1,5 +1,5 @@
 import { requestUrl, type RequestUrlResponse } from "obsidian";
-import type { AssetKind, CaptureOrigin, CaptureSettings, Job } from "./api";
+import type { AssetKind, CaptureFile, CaptureOrigin, CaptureSettings, Job } from "./api";
 
 export class ServerError extends Error {
   constructor(
@@ -51,10 +51,22 @@ export class ServerClient {
     return (await this.request("GET", "/health")).json as Health;
   }
 
-  /** With `wait`, the server holds the request until the job settles or its wait cap passes. */
-  async capture(url: string, origin: CaptureOrigin, wait: boolean, template: string | null = null): Promise<Job> {
-    const response = await this.request("POST", `/capture${wait ? "?wait=1" : ""}`, { url, origin, ...(template ? { template } : {}) });
+  /**
+   * With `wait`, the server holds the request until the job settles or its wait cap passes.
+   * `files` are capture files to make even if the rendered note doesn't use them.
+   */
+  async capture(url: string, origin: CaptureOrigin, wait: boolean, template: string | null = null, files: readonly CaptureFile[] = []): Promise<Job> {
+    const response = await this.request("POST", `/capture${wait ? "?wait=1" : ""}`, {
+      url,
+      origin,
+      ...(template ? { template } : {}),
+      ...(files.length ? { files } : {}),
+    });
     return (response.json as { job: Job }).job;
+  }
+
+  async job(id: string): Promise<Job> {
+    return ((await this.request("GET", `/jobs/${id}`)).json as { job: Job }).job;
   }
 
   async finishedJobs(): Promise<Job[]> {

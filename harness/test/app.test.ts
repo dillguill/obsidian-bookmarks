@@ -86,7 +86,7 @@ describe("http app", () => {
   it("reports health and API version", async () => {
     const res = await fetch(`${base}/health`, { headers: auth });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ok", apiVersion: 4, version: "0.0.0-test" });
+    expect(await res.json()).toEqual({ status: "ok", apiVersion: 5, version: "0.0.0-test" });
   });
 
   it("captures synchronously with ?wait=1 and serves assets", async () => {
@@ -222,6 +222,20 @@ describe("http app", () => {
     expect(bad.status).toBe(422);
     expect(((await bad.json()) as { error: string }).error).toBe("unknown_template");
     await put({});
+  });
+
+  it("passes asked-for capture files to the engine and keeps enrich jobs out of the delivery list", async () => {
+    const { job } = (await (
+      await post("/capture?wait=1", { url: "https://example.com/enrich", origin: "enrich", files: ["image_local", "screenshot_banner"] })
+    ).json()) as { job: Job };
+    expect(job.status).toBe("done");
+    expect(job.files).toEqual(["image_local", "screenshot_banner"]);
+    expect(renders.at(-1)!.files).toEqual(["image_local", "screenshot_banner"]);
+    const { jobs } = (await (await fetch(`${base}/jobs?status=done,failed,delivered&limit=200`, { headers: auth })).json()) as { jobs: Job[] };
+    expect(jobs.some((j) => j.id === job.id)).toBe(false);
+    // Still readable by id, for the plugin that asked.
+    expect((await fetch(`${base}/jobs/${job.id}`, { headers: auth })).status).toBe(200);
+    expect((await post("/capture", { url: "https://example.com/x", files: ["screenshot_huge"] })).status).toBe(400);
   });
 
   it("renders notes with the shared templates and serves them as the note asset", async () => {

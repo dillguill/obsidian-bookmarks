@@ -1,7 +1,7 @@
 import { createReadStream, readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { API_VERSION, CAPTURE_FILES, type AssetKind, type CaptureOrigin, type JobStatus } from "./api.js";
+import { API_VERSION, CAPTURE_FILES, type AssetKind, type CaptureFile, type CaptureOrigin, type JobStatus } from "./api.js";
 import type { Config } from "./config.js";
 import type { JobStore } from "./db.js";
 import { parseCaptureSettings } from "./settings.js";
@@ -17,7 +17,8 @@ export interface AppDeps {
   rejectUrl?: (url: string) => Promise<string | null>;
 }
 
-const ORIGINS: ReadonlySet<string> = new Set<CaptureOrigin>(["plugin", "api", "shortcut", "bookmarklet", "share"]);
+const ORIGINS: ReadonlySet<string> = new Set<CaptureOrigin>(["plugin", "api", "shortcut", "bookmarklet", "share", "enrich"]);
+const FILES: ReadonlySet<string> = new Set<string>(CAPTURE_FILES);
 const STATUSES: ReadonlySet<string> = new Set<JobStatus>(["pending", "running", "done", "failed", "delivered"]);
 const MAX_BODY = 16 * 1024;
 const MAX_SETTINGS_BODY = 512 * 1024;
@@ -80,8 +81,16 @@ async function readBody(req: IncomingMessage, limit = MAX_BODY): Promise<string>
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** Accepts JSON `{url, origin, template}`, a form body, or `?url=` so Shortcuts and curl stay simple. */
-async function captureRequest(req: IncomingMessage, query: URLSearchParams): Promise<{ url: string; origin: string; template: string }> {
+interface CaptureBody {
+  url: string;
+  origin: string;
+  template: string;
+  /** Extra capture files by name (JSON array, or comma-separated in a form or query). */
+  files: string[];
+}
+
+/** Accepts JSON `{url, origin, template, files}`, a form body, or `?url=` so Shortcuts and curl stay simple. */
+async function captureRequest(req: IncomingMessage, query: URLSearchParams): Promise<CaptureBody> {
   const raw = await readBody(req);
   const type = req.headers["content-type"] ?? "";
   let fields: Record<string, unknown> = {};
@@ -94,7 +103,13 @@ async function captureRequest(req: IncomingMessage, query: URLSearchParams): Pro
     url: String(fields.url ?? query.get("url") ?? "").trim(),
     origin: String(fields.origin ?? query.get("origin") ?? "api"),
     template: String(fields.template ?? query.get("template") ?? "").trim(),
+    files: listField(fields.files ?? query.get("files")),
   };
+}
+
+function listField(value: unknown): string[] {
+  const items = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  return items.map((item) => String(item).trim()).filter(Boolean);
 }
 
 export function createApp(deps: AppDeps): Server {
@@ -133,7 +148,7 @@ export function createApp(deps: AppDeps): Server {
     }
 
     if (method === "POST" && path === "/capture") {
-      let body: { url: string; origin: string; template: string };
+      let body: CaptureBody;
       try {
         body = await captureRequest(req, url.searchParams);
       } catch {
@@ -141,13 +156,15 @@ export function createApp(deps: AppDeps): Server {
       }
       if (!body.url) return sendJson(res, 400, { error: "bad_request", message: "url is required" });
       if (!ORIGINS.has(body.origin)) return sendJson(res, 400, { error: "bad_request", message: `unknown origin ${body.origin}` });
+      const unknownFile = body.files.find((name) => !FILES.has(name));
+      if (unknownFile) return sendJson(res, 400, { error: "bad_request", message: `unknown capture file ${unknownFile}` });
       const rejection = await rejectUrl(body.url);
       if (rejection) return sendJson(res, 422, { error: "url_rejected", message: rejection });
 
       if (body.template && !store.getSettings().templates.some((t) => t.name === body.template)) {
         return sendJson(res, 422, { error: "unknown_template", message: `No template named "${body.template}".` });
       }
-      const job = store.create(new URL(body.url).toString(), body.origin as CaptureOrigin, body.template || null);
+      const job = store.create(new URL(body.url).toString(), body.origin as CaptureOrigin, body.template || null, body.files as CaptureFile[]);
       worker.kick();
       if (url.searchParams.get("wait") !== "1") return sendJson(res, 202, { job });
       const settled = await worker.waitFor(job.id, config.waitCapMs);

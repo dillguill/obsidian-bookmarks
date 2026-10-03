@@ -1,15 +1,19 @@
-import { Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
+import { Notice, Plugin, TFile, TFolder, getFrontMatterInfo, normalizePath, parseYaml } from "obsidian";
 import { API_VERSION, CAPTURE_FILES, type CaptureFile, type ClipperTemplate, type Job, type RenderedNote } from "./api";
 import { CaptureModal } from "./capture-modal";
 import { ServerClient } from "./client";
 import { DedupIndex } from "./dedup";
+import { ENRICH_FILES, applyProperties, bodyBlock, enrichChoices, filesToSave, insertBlock, type EnrichSelection } from "./enrich";
+import { EnrichModal } from "./enrich-modal";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
 import { DEFAULT_TEMPLATE, captureIdPropertyName, chooseTemplate, urlPropertyName } from "./template";
 import { findUrl, normalizeUrl } from "./url";
-import { writeBookmark, type VaultPort, type WriteMode, type WriteResult } from "./writer";
+import { saveCaptureFiles, writeBookmark, type VaultPort, type WriteMode, type WriteResult } from "./writer";
 
 // Server jobs are pruned a few days after delivery, so a few hundred covers any redelivery.
 const WRITTEN_CAPTURES_KEPT = 500;
+/** How long to keep checking on an enrich capture the server didn't finish within its wait cap. */
+const ENRICH_TIMEOUT_MS = 3 * 60_000;
 
 export default class BookmarksPlugin extends Plugin {
   override settings: BookmarksSettings = DEFAULT_SETTINGS;
@@ -36,6 +40,16 @@ export default class BookmarksPlugin extends Plugin {
         const frontmatter = file ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
         if (!file || !frontmatter || !this.templates.map(urlPropertyName).some((name) => typeof frontmatter[name] === "string")) return false;
         if (!checking) void this.recapture(file.path);
+        return true;
+      },
+    });
+    this.addCommand({
+      id: "enrich",
+      name: "Pull metadata and images into current note",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== "md" || !this.noteUrl(file)) return false;
+        if (!checking) void this.enrich(file);
         return true;
       },
     });
@@ -262,6 +276,88 @@ export default class BookmarksPlugin extends Plugin {
       return;
     }
     await this.captureInteractive(url, null, { kind: "replace", path: file.path });
+  }
+
+  /** The page a note points at: a template's URL property, else a `url` or `source` property. */
+  private noteUrl(file: TFile): string | null {
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    if (!frontmatter) return null;
+    const names = [...this.templates.map(urlPropertyName), "url", "source", "URL"];
+    const url = names.map((name) => frontmatter[name]).find((value) => typeof value === "string" && normalizeUrl(value));
+    return typeof url === "string" ? url : null;
+  }
+
+  /** Captures a note's page again and lets the user pick which properties, content and images to pull into it. */
+  async enrich(file: TFile): Promise<void> {
+    const url = this.noteUrl(file);
+    if (!url) {
+      new Notice("This note has no URL property to fetch.");
+      return;
+    }
+    const progress = new Notice("Fetching page…", 0);
+    let job: Job | null = null;
+    const client = this.client();
+    try {
+      const problem = await this.checkServer();
+      if (problem) throw new Error(problem);
+      await this.syncShared().catch((err: unknown) => console.warn("bookmarks: couldn't fetch shared settings", err));
+      job = await client.capture(url, "enrich", true, null, ENRICH_FILES);
+      const deadline = Date.now() + ENRICH_TIMEOUT_MS;
+      while (job.status === "pending" || job.status === "running") {
+        if (Date.now() > deadline) throw new Error("the server is still capturing the page. Try again in a minute.");
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        job = await client.job(job.id);
+      }
+      if (job.status === "failed") throw new Error(job.error ?? "unknown error");
+      if (!job.assets.includes("note")) throw new Error("the server didn't render the page. Update bookmarks-server.");
+      const note = JSON.parse(await client.assetText(job.id, "note")) as RenderedNote;
+      const images: Partial<Record<CaptureFile, ArrayBuffer>> = {};
+      for (const kind of CAPTURE_FILES) if (job.assets.includes(kind)) images[kind] = await client.assetBinary(job.id, kind);
+      const template = this.templates.find((t) => t.name === note.template) ?? DEFAULT_TEMPLATE;
+      const current = { ...(this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) } as Record<string, unknown>;
+      const choices = enrichChoices(note, current, parseYaml, Object.keys(images) as CaptureFile[], captureIdPropertyName(template));
+      const text = await this.app.vault.read(file);
+      const bodyEmpty = !text.slice(getFrontMatterInfo(text).contentStart).trim();
+      progress.hide();
+      const settled = job;
+      const done = () => void client.delivered(settled.id).catch(() => {});
+      new EnrichModal(
+        this.app,
+        file.basename,
+        choices,
+        images,
+        settled.screenshotExt === "png" ? "image/png" : "image/jpeg",
+        bodyEmpty,
+        (selection) => void this.applyEnrich(file, settled, choices, images, selection).finally(done),
+        done,
+      ).open();
+    } catch (err) {
+      progress.hide();
+      if (job && (job.status === "done" || job.status === "failed")) void client.delivered(job.id).catch(() => {});
+      new Notice(`Couldn't fetch the page: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private async applyEnrich(
+    file: TFile,
+    job: Job,
+    choices: ReturnType<typeof enrichChoices>,
+    images: Partial<Record<CaptureFile, ArrayBuffer>>,
+    selection: EnrichSelection,
+  ): Promise<void> {
+    try {
+      const wanted = filesToSave(choices, selection);
+      const files = Object.fromEntries(wanted.map((kind) => [kind, images[kind] ?? null]));
+      const saved = await saveCaptureFiles(this.vaultPort(), this.settings.assetsFolder, files, job.screenshotExt, file.basename);
+      const block = bodyBlock(choices, selection, saved);
+      if (block) await this.app.vault.process(file, (text) => insertBlock(text, block, selection.position, getFrontMatterInfo(text).contentStart));
+      if (Object.keys(selection.properties).length > 0) {
+        await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => applyProperties(frontmatter, choices, selection, saved));
+      }
+      new Notice(block || Object.keys(selection.properties).length > 0 ? `Updated ${file.basename}.` : "Nothing picked; the note is unchanged.");
+    } catch (err) {
+      new Notice(`Couldn't update the note: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   async captureInteractive(raw: string, template: string | null = null, mode: WriteMode = { kind: "dedup" }): Promise<void> {

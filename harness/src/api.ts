@@ -1,12 +1,16 @@
 // Wire types for the HTTP API. plugin/src/api.ts mirrors these; bump
 // API_VERSION on any breaking change so a mismatched pair says which side to
 // update (design §5.3).
-export const API_VERSION = 4;
+export const API_VERSION = 5;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
-/** Where a capture was requested from (audit #1: not `source`, which is the URL). */
-export type CaptureOrigin = "plugin" | "api" | "shortcut" | "bookmarklet" | "share";
+/**
+ * Where a capture was requested from (audit #1: not `source`, which is the URL).
+ * "enrich" re-fetches a page for a note that already exists: the plugin reads
+ * it straight away, so it's never listed for delivery.
+ */
+export type CaptureOrigin = "plugin" | "api" | "shortcut" | "bookmarklet" | "share" | "enrich";
 
 export interface PageMeta {
   /** URL after redirects. */
@@ -45,6 +49,8 @@ export interface Job {
   screenshotExt: "jpg" | "png" | null;
   /** Template chosen at capture time by name; null means match by triggers. */
   template: string | null;
+  /** Capture files asked for on top of the ones the rendered note uses. */
+  files: CaptureFile[];
 }
 
 /**
