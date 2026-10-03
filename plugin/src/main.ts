@@ -6,7 +6,10 @@ import { DedupIndex } from "./dedup";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
 import { DEFAULT_TEMPLATE, captureIdPropertyName, chooseTemplate, urlPropertyName } from "./template";
 import { findUrl, normalizeUrl } from "./url";
-import { writeBookmark, type VaultPort, type WriteResult } from "./writer";
+import { writeBookmark, type VaultPort, type WriteMode, type WriteResult } from "./writer";
+
+// Server jobs are pruned a few days after delivery, so a few hundred covers any redelivery.
+const WRITTEN_CAPTURES_KEPT = 500;
 
 export default class BookmarksPlugin extends Plugin {
   override settings: BookmarksSettings = DEFAULT_SETTINGS;
@@ -25,7 +28,22 @@ export default class BookmarksPlugin extends Plugin {
 
     this.addCommand({ id: "capture-url", name: "Capture URL", callback: () => void this.openCaptureModal() });
     this.addCommand({ id: "sync-captures", name: "Fetch finished captures now", callback: () => void this.drain(true) });
+    this.addCommand({
+      id: "recapture",
+      name: "Capture current bookmark again",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        const frontmatter = file ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
+        if (!file || !frontmatter || !this.templates.map(urlPropertyName).some((name) => typeof frontmatter[name] === "string")) return false;
+        if (!checking) void this.recapture(file.path);
+        return true;
+      },
+    });
     this.addRibbonIcon("bookmark-plus", "Capture bookmark", () => void this.openCaptureModal());
+    // The "Retry capture" link in a failed capture's note (writer.ts retryLink).
+    this.registerObsidianProtocolHandler("bookmarks", (params) => {
+      if (params.action === "retry" && params.path) void this.recapture(params.path);
+    });
 
     this.app.workspace.onLayoutReady(() => {
       this.buildIndex();
@@ -86,6 +104,7 @@ export default class BookmarksPlugin extends Plugin {
     const changed = names(shared.templates) !== names(this.templates);
     this.templates = shared.templates;
     this.settings.templatesCache = shared.templates;
+    this.settings.hideCaptureId = shared.hideCaptureId ?? false;
     await this.saveData(this.settings);
     if (changed) this.buildIndex();
   }
@@ -137,11 +156,16 @@ export default class BookmarksPlugin extends Plugin {
       },
       writeBinary: async (path, data) => void (await vault.createBinary(normalizePath(path), data)),
       createNote: async (path, content) => void (await vault.create(normalizePath(path), content)),
+      replaceNote: async (path, content) => {
+        const file = vault.getAbstractFileByPath(normalizePath(path));
+        if (!(file instanceof TFile)) throw new Error(`${path} no longer exists`);
+        await vault.modify(file, content);
+      },
     };
   }
 
   /** Fetches a finished job's assets and writes it; acks the server once the vault holds it. */
-  private async deliver(job: Job): Promise<WriteResult | null> {
+  private async deliver(job: Job, mode: WriteMode = { kind: "dedup" }): Promise<WriteResult | null> {
     if (this.inFlight.has(job.id)) return null;
     this.inFlight.add(job.id);
     try {
@@ -163,13 +187,25 @@ export default class BookmarksPlugin extends Plugin {
           template,
           notesFolder: template.path || DEFAULT_TEMPLATE.path,
           assetsFolder: this.settings.assetsFolder,
+          hideCaptureId: this.settings.hideCaptureId,
+          writtenCapture: (id) => this.settings.writtenCaptures?.[id] ?? null,
+          mode,
         },
       );
+      if (result.kind === "written") await this.rememberCapture(job.id, result.path);
       await client.delivered(job.id);
       return result;
     } finally {
       this.inFlight.delete(job.id);
     }
+  }
+
+  /** Keeps the last WRITTEN_CAPTURES_KEPT capture ids this device wrote. */
+  private async rememberCapture(id: string, path: string): Promise<void> {
+    const entries = Object.entries(this.settings.writtenCaptures ?? {}).filter(([key]) => key !== id);
+    entries.push([id, path]);
+    this.settings.writtenCaptures = Object.fromEntries(entries.slice(-WRITTEN_CAPTURES_KEPT));
+    await this.saveData(this.settings);
   }
 
   // ---- entry points ----
@@ -193,28 +229,49 @@ export default class BookmarksPlugin extends Plugin {
     void this.app.workspace.openLinkText(path, "", false);
   }
 
-  private alreadySavedNotice(path: string, label: string): void {
-    new Notice(
+  /** Karakeep-style "already saved" popup, with the choices for a page that's already in the vault. */
+  private alreadySavedNotice(path: string, label: string, raw: string, template: string | null): void {
+    const notice = new Notice(
       createFragment((frag) => {
-        frag.appendText(`Already saved: ${label} `);
-        const link = frag.createEl("a", { text: "Open existing", href: "#" });
-        link.addEventListener("click", (event) => {
-          event.preventDefault();
-          this.openNote(path);
-        });
+        frag.appendText(`Already saved: ${label}`);
+        const actions = frag.createDiv({ cls: "bookmarks-notice-actions" });
+        const action = (text: string, run: () => void) => {
+          const link = actions.createEl("a", { text, href: "#" });
+          link.style.marginRight = "1em";
+          link.addEventListener("click", (event) => {
+            event.preventDefault();
+            notice.hide();
+            run();
+          });
+        };
+        action("Open existing", () => this.openNote(path));
+        action("Replace", () => void this.captureInteractive(raw, template, { kind: "replace", path }));
+        action("Save as new", () => void this.captureInteractive(raw, template, { kind: "new" }));
       }),
-      8000,
+      15000,
     );
   }
 
-  async captureInteractive(raw: string, template: string | null = null): Promise<void> {
+  /** Captures the page a bookmark note points at again and overwrites the note in place. */
+  async recapture(path: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
+    const frontmatter = file instanceof TFile ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
+    const url = frontmatter && this.templates.map(urlPropertyName).map((name) => frontmatter[name]).find((v) => typeof v === "string" && v);
+    if (!(file instanceof TFile) || typeof url !== "string") {
+      new Notice("This note has no bookmark URL to capture again.");
+      return;
+    }
+    await this.captureInteractive(url, null, { kind: "replace", path: file.path });
+  }
+
+  async captureInteractive(raw: string, template: string | null = null, mode: WriteMode = { kind: "dedup" }): Promise<void> {
     if (!normalizeUrl(raw)) {
       new Notice("That doesn't look like a web address.");
       return;
     }
-    const existing = this.index.findByUrl(raw);
+    const existing = mode.kind === "dedup" ? this.index.findByUrl(raw) : null;
     if (existing) {
-      this.alreadySavedNotice(existing, raw);
+      this.alreadySavedNotice(existing, raw, raw, template);
       return;
     }
 
@@ -228,11 +285,13 @@ export default class BookmarksPlugin extends Plugin {
         new Notice("Still capturing. The note will appear when it's done.");
         return;
       }
-      const result = await this.deliver(job);
+      const result = await this.deliver(job, mode);
       if (!result) return;
-      if (result.kind === "duplicate") this.alreadySavedNotice(result.path, job.meta?.title || raw);
+      if (result.kind === "duplicate") this.alreadySavedNotice(result.path, job.meta?.title || raw, raw, template);
       else this.openNote(result.path);
-      if (job.status === "failed") new Notice(`Capture failed: ${job.error ?? "unknown error"}. Saved the link anyway.`);
+      if (job.status === "failed") {
+        new Notice(`Capture failed: ${job.error ?? "unknown error"}. ${mode.kind === "replace" ? "Kept the note." : "Saved the link anyway."}`);
+      } else if (mode.kind === "replace") new Notice("Captured again.");
     } catch (err) {
       new Notice(`Capture failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {

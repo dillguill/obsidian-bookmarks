@@ -106,13 +106,13 @@ function yamlScalar(value: string): string {
 }
 
 /**
- * Renders the frontmatter block. The URL and capture_id properties are
- * required whatever the template says (dedup and idempotency depend on them).
+ * Renders the frontmatter block. The URL property is required whatever the
+ * template says (dedup depends on it), and so is capture_id unless hidden.
  */
-export function renderFrontmatter(template: ClipperTemplate, vars: Variables, page?: PageData): string {
-  const properties = [...template.properties];
+export function renderFrontmatter(template: ClipperTemplate, vars: Variables, page?: PageData, hideCaptureId = false): string {
+  const properties = template.properties.filter((p) => !(hideCaptureId && p.value === CAPTURE_ID_VARIABLE));
   if (!properties.some((p) => p.value === URL_VARIABLE)) properties.unshift({ name: "source", value: URL_VARIABLE, type: "text" });
-  if (!properties.some((p) => p.value === CAPTURE_ID_VARIABLE)) properties.push({ name: "capture_id", value: CAPTURE_ID_VARIABLE, type: "text" });
+  if (!hideCaptureId && !properties.some((p) => p.value === CAPTURE_ID_VARIABLE)) properties.push({ name: "capture_id", value: CAPTURE_ID_VARIABLE, type: "text" });
 
   const lines = properties.map(({ name, value, type }) => {
     const rendered = render(value, vars, page).trim();

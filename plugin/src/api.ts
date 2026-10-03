@@ -82,6 +82,8 @@ export interface CaptureSettings {
   templates: ClipperTemplate[];
   /** Property name -> type, shared by every template, like Web Clipper's Properties settings. */
   propertyTypes: PropertyTypeEntry[];
+  /** Leave capture_id out of note frontmatter; the plugin then tracks it itself. */
+  hideCaptureId?: boolean;
 }
 
 export interface PropertyTypeEntry {

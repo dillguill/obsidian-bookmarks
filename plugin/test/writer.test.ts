@@ -20,6 +20,10 @@ class MemoryVault implements VaultPort {
     if (this.files.has(path)) throw new Error("exists");
     this.files.set(path, content);
   }
+  async replaceNote(path: string, content: string) {
+    if (!this.files.has(path)) throw new Error("missing");
+    this.files.set(path, content);
+  }
 }
 
 const job = (over: Partial<Job> = {}): Job => ({
@@ -106,6 +110,17 @@ describe("writeBookmark", () => {
     expect(vault.files.get(second.path)).toBe(`---\nsource: "https://example.com/post"\ncover: ""\ncapture_id: "${job().id}"\n---\n# Body\n`);
   });
 
+  it("leaves capture_id out when hidden and still skips a capture it already wrote", async () => {
+    const written = new Map<string, string>();
+    const opts = { ...options(), hideCaptureId: true, writtenCapture: (id: string) => written.get(id) ?? null };
+    const first = await writeBookmark({ job: job(), markdown: "", screenshot: null }, opts);
+    expect(vault.files.get(first.path)).not.toContain("capture_id");
+    written.set(job().id, first.path);
+    // A fresh index (Obsidian restarted) has no capture ids, since the frontmatter has none.
+    index = new DedupIndex();
+    expect(await writeBookmark({ job: job(), markdown: "", screenshot: null }, { ...opts, index })).toEqual({ kind: "already-written", path: first.path });
+  });
+
   it("keeps the link when capture failed", async () => {
     const url = "https://www.nytimes.com/2026/10/01/technology/rogue-agents.html";
     const blockPage = { ...job().meta!, title: "Just a moment...", finalUrl: url, canonical: null };
@@ -116,6 +131,25 @@ describe("writeBookmark", () => {
     expect(note).toContain(`source: "${url}"`);
     expect(note).toContain('title: "rogue agents"');
     expect(note).toContain("> [!warning] Capture failed\n> Blocked by site: bot wall");
+    expect(note).toContain("> [Retry capture](obsidian://bookmarks?action=retry&path=Bookmarks%2Fnotes%2Fnytimes-com-rogue-agents-2026-10-02.md)");
+
+    // Retrying overwrites the same note instead of tripping URL dedup.
+    const retried = await writeBookmark(
+      { job: job({ id: "01JABCDEFGHJKMNPQRSTVWXYZ2", url, meta: { ...job().meta!, finalUrl: url, canonical: null } }), markdown: "Full text", screenshot: null },
+      { ...options(), mode: { kind: "replace", path: result.path } },
+    );
+    expect(retried).toEqual({ kind: "written", path: result.path });
+    expect(vault.files.get(result.path)).not.toContain("Capture failed");
+    expect(vault.files.get(result.path)).toContain("Full text");
+  });
+
+  it("saves a second note for the same page when asked", async () => {
+    const first = await writeBookmark({ job: job(), markdown: "", screenshot: null }, options());
+    const again = job({ id: "01JABCDEFGHJKMNPQRSTVWXYZ3" });
+    expect((await writeBookmark({ job: again, markdown: "", screenshot: null }, options())).kind).toBe("duplicate");
+    const second = await writeBookmark({ job: again, markdown: "", screenshot: null }, { ...options(), mode: { kind: "new" } });
+    expect(second.kind).toBe("written");
+    expect(second.path).not.toBe(first.path);
   });
 
   it("ignores a canonical link that points at another site", async () => {

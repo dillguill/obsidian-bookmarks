@@ -22,6 +22,10 @@ export interface BookmarksSettings {
   noScreenshotSites?: string[];
   /** Last templates fetched from the server, so the dedup index works offline. */
   templatesCache?: ClipperTemplate[];
+  /** Cached shared hideCaptureId setting. */
+  hideCaptureId?: boolean;
+  /** capture_id -> note path for recent captures this device wrote, so idempotency holds when capture_id is hidden. */
+  writtenCaptures?: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: BookmarksSettings = {

@@ -1,6 +1,7 @@
 import { SCREENSHOT_MARKER, type Job, type RenderedNote } from "./api";
 import type { DedupIndex } from "./dedup";
 import type { PageData } from "./page-data";
+import { cleanUrl } from "./url";
 import { formatDate, render, renderFrontmatter, type ClipperTemplate, type Variables } from "./template";
 
 /** The slice of the vault the writer needs, so it can be tested without Obsidian. */
@@ -9,6 +10,19 @@ export interface VaultPort {
   ensureFolder(path: string): Promise<void>;
   writeBinary(path: string, data: ArrayBuffer): Promise<void>;
   createNote(path: string, content: string): Promise<void>;
+  /** Overwrites an existing note. */
+  replaceNote(path: string, content: string): Promise<void>;
+}
+
+/**
+ * How a capture relates to a note for the same page: skip it (the default),
+ * overwrite that note in place, or save a second note anyway.
+ */
+export type WriteMode = { kind: "dedup" } | { kind: "replace"; path: string } | { kind: "new" };
+
+/** Link in a failed capture's note that re-captures it in place (see the plugin's protocol handler). */
+export function retryLink(notePath: string): string {
+  return `obsidian://bookmarks?action=retry&path=${encodeURIComponent(notePath)}`;
 }
 
 export interface CapturedBookmark {
@@ -27,6 +41,11 @@ export interface WriteOptions {
   notesFolder: string;
   assetsFolder: string;
   now?: Date;
+  /** Leave capture_id out of the fallback renderer's frontmatter (the shared hideCaptureId setting). */
+  hideCaptureId?: boolean;
+  /** Captures this device already wrote, for when capture_id isn't in the frontmatter. */
+  writtenCapture?: (id: string) => string | null;
+  mode?: WriteMode;
 }
 
 export type WriteResult =
@@ -52,12 +71,13 @@ function sameSite(a: string, b: string): boolean {
 
 /**
  * The URL stored in the note. Prefers the page's canonical link when it stays
- * on the same site, so the stored value and later dedup lookups agree (audit #4).
+ * on the same site, so the stored value and later dedup lookups agree (audit #4),
+ * and drops tracking and bot-wall params.
  */
 export function bookmarkUrl(job: Job): string {
   const final = job.meta?.finalUrl || job.url;
   const canonical = job.meta?.canonical;
-  return canonical && sameSite(canonical, final) ? canonical : final;
+  return cleanUrl(canonical && sameSite(canonical, final) ? canonical : final);
 }
 
 function cleanName(name: string): string {
@@ -122,22 +142,32 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   const { job } = input;
   const { vault, index, template } = options;
 
-  const existing = index.findByCaptureId(job.id);
+  const existing = index.findByCaptureId(job.id) ?? options.writtenCapture?.(job.id) ?? null;
   if (existing) return { kind: "already-written", path: existing };
 
   const url = bookmarkUrl(job);
-  const duplicate = index.findByUrl(url, job.url, job.meta?.finalUrl);
-  if (duplicate) return { kind: "duplicate", path: duplicate };
+  const mode = options.mode ?? { kind: "dedup" };
+  if (mode.kind === "dedup") {
+    const duplicate = index.findByUrl(url, job.url, job.meta?.finalUrl);
+    if (duplicate) return { kind: "duplicate", path: duplicate };
+  }
+  const replacing = mode.kind === "replace" ? mode.path : null;
+  /** A free path for a new note, or the note being replaced. */
+  const targetPath = async (folder: string, base: string) => {
+    if (replacing) return replacing;
+    await vault.ensureFolder(folder);
+    return freePath(vault, folder, base, "md");
+  };
+  const save = (path: string, content: string) => (replacing ? vault.replaceNote(path, content) : vault.createNote(path, content));
 
   if (input.note && job.status === "done") {
     const { note } = input;
     const folder = note.path.replace(/^\/+|\/+$/g, "") || options.notesFolder;
     const base = cleanName(note.noteName) || `bookmark-${formatDate((options.now ?? new Date()).toISOString(), "YYYY-MM-DD")}`;
-    await vault.ensureFolder(folder);
-    const notePath = await freePath(vault, folder, base, "md");
+    const notePath = await targetPath(folder, base);
     const shotPath = await saveScreenshot(input, options, notePath.slice(notePath.lastIndexOf("/") + 1, -3));
     const body = fillScreenshot(note.content, shotPath).replace(/^\s+/, "").trimEnd();
-    await vault.createNote(notePath, `${fillScreenshot(note.frontmatter, shotPath)}${body ? `${body}\n` : ""}`);
+    await save(notePath, `${fillScreenshot(note.frontmatter, shotPath)}${body ? `${body}\n` : ""}`);
     index.set(notePath, url, job.id);
     return { kind: "written", path: notePath };
   }
@@ -163,8 +193,7 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
 
   const page: PageData | undefined = meta ?? undefined;
   const base = noteBaseName(template, vars, page);
-  await vault.ensureFolder(options.notesFolder);
-  const notePath = await freePath(vault, options.notesFolder, base, "md");
+  const notePath = await targetPath(options.notesFolder, base);
   const noteBase = notePath.slice(notePath.lastIndexOf("/") + 1, -3);
 
   const shotPath = await saveScreenshot(input, options, noteBase);
@@ -176,12 +205,13 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
 
   let content = input.markdown.trim();
   if (job.status === "failed") {
-    content = `> [!warning] Capture failed\n> ${(job.error ?? "Unknown error").replace(/\n/g, " ")}\n\n${content}`.trim();
+    const error = (job.error ?? "Unknown error").replace(/\n/g, " ");
+    content = `> [!warning] Capture failed\n> ${error}\n> [Retry capture](${retryLink(notePath)})\n\n${content}`.trim();
   }
   vars.content = content;
 
   const body = render(template.noteContentFormat, vars, page).replace(/^\s+/, "").replace(/\n{3,}/g, "\n\n");
-  await vault.createNote(notePath, `${renderFrontmatter(template, vars, page)}\n${body.trimEnd()}\n`);
+  await save(notePath, `${renderFrontmatter(template, vars, page, options.hideCaptureId)}\n${body.trimEnd()}\n`);
   index.set(notePath, url, job.id);
   return { kind: "written", path: notePath };
 }

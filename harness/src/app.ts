@@ -29,6 +29,8 @@ const UI_FILES: Record<string, { file: string; type: string }> = {
   "/ui/": { file: "index.html", type: "text/html; charset=utf-8" },
   "/ui/app.js": { file: "app.js", type: "text/javascript; charset=utf-8" },
   "/ui/style.css": { file: "style.css", type: "text/css; charset=utf-8" },
+  "/ui/save": { file: "save.html", type: "text/html; charset=utf-8" },
+  "/ui/save.js": { file: "save.js", type: "text/javascript; charset=utf-8" },
 };
 const UI_HEADERS = {
   "content-security-policy": "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
