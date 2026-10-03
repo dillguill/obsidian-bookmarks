@@ -26,6 +26,7 @@ describe("fileVariables", () => {
       screenshot_article_dark: "",
       screenshot_thumbnail_dark: "",
       pdf_page: "",
+      image_local: "",
     });
   });
 });

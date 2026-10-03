@@ -1,6 +1,6 @@
 // Wire types for the bookmarks-server HTTP API; mirrors harness/src/api.ts.
 // Bump API_VERSION in both when the API changes incompatibly.
-export const API_VERSION = 3;
+export const API_VERSION = 4;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -40,7 +40,7 @@ export interface Job {
   meta: PageMeta | null;
   /** Asset kinds available from `GET /jobs/:id/asset/:kind`. */
   assets: AssetKind[];
-  /** File extension of the screenshot assets, when there are any (the PDF is always .pdf). */
+  /** File extension of the screenshot and image assets, when there are any (the PDF is always .pdf). */
   screenshotExt: "jpg" | "png" | null;
   /** Template chosen at capture time by name; null means match by triggers. */
   template?: string | null;
@@ -50,8 +50,9 @@ export interface Job {
  * Files a template can ask for, each named after its template variable, which
  * holds the file's vault path: full page, first screen, first screen at phone
  * width, the main content block and a small first screen, each also in the
- * site's dark mode (`_dark`), and a PDF of the page. The server makes only the
- * ones the rendered note uses.
+ * site's dark mode (`_dark`), a PDF of the page, and the page's {{image}}
+ * saved locally (`image_local`, since image links like TikTok's expire). The
+ * server makes only the ones the rendered note uses.
  */
 export const CAPTURE_FILES = [
   "screenshot_page",
@@ -65,6 +66,7 @@ export const CAPTURE_FILES = [
   "screenshot_article_dark",
   "screenshot_thumbnail_dark",
   "pdf_page",
+  "image_local",
 ] as const;
 export type CaptureFile = (typeof CAPTURE_FILES)[number];
 

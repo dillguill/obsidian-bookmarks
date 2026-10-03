@@ -113,9 +113,16 @@
             <tr><td><code class="copy">{{screenshot_article}}</code></td><td>Just the main content block, without navigation or sidebars, <code>note-article.jpg</code>. Empty when the page has no article or main element.</td></tr>
             <tr><td><code class="copy">{{screenshot_thumbnail}}</code></td><td>A small first screen (480×300) for covers in Bases or card views, <code>note-thumbnail.jpg</code>.</td></tr>
             <tr><td><code class="copy">{{pdf_page}}</code></td><td>A PDF of the page with selectable text, <code>note.pdf</code>.</td></tr>
+            <tr><td><code class="copy">{{image_local}}</code></td><td>The page's main image (<code>{{image}}</code>) saved in the vault, <code>note-image.jpg</code>. Use it for covers whose links expire, like TikTok's. Empty when the page has no image.</td></tr>
         </table>
         <p class="desc">Add <code>_dark</code> to any screenshot for the site's dark mode, e.g. <code class="copy">{{screenshot_page_dark}}</code> (<code>note-dark.jpg</code>) or <code class="copy">{{screenshot_mobile_dark}}</code> (<code>note-mobile-dark.jpg</code>). Sites without a dark mode look the same.</p>
         <p class="desc">Templates saved or imported with the older <code>{{screenshot}}</code>, <code>{{screenshot_link}}</code> and <code>{{screenshot_embed}}</code> are rewritten to these.</p>
+        <h2>Video</h2>
+        <p class="desc">Filled on TikTok video pages, empty elsewhere. TikTok pages also fill <code>{{title}}</code> (the caption's first line), <code>{{description}}</code> (the whole caption), <code>{{published}}</code>, <code>{{author}}</code>, <code>{{image}}</code> (the cover) and <code>{{content}}</code> (the embed and caption) from the post itself.</p>
+        <table class="key">
+            <tr><td><code class="copy">{{video_embed}}</code></td><td>A player that plays in the note: an <code>&lt;iframe&gt;</code> for the note content.</td></tr>
+            <tr><td><code class="copy">{{video_id}}</code></td><td>The video's id, e.g. <code>7382225350710824222</code>.</td></tr>
+        </table>
         <h2>Schema and meta</h2>
         <p class="desc">Read from the page's schema.org data and meta tags, as in Web Clipper.</p>
         <table class="key">

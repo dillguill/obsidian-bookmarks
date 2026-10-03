@@ -28,7 +28,7 @@ your vault as deduplicated bookmark notes. See the
    ```
 
    Check it: `curl -H "Authorization: Bearer desktop-token" http://127.0.0.1:8787/health`
-   should return `{"status":"ok","apiVersion":3,...}`.
+   should return `{"status":"ok","apiVersion":4,...}`.
 
 2. **Install the plugin** with [BRAT](https://github.com/TfTHacker/obsidian42-brat):
    in BRAT's settings choose **Add beta plugin** and enter `dillguill/obsidian-bookmarks`.
@@ -95,11 +95,19 @@ server, so every device and every phone Shortcut uses the same settings:
   `{{screenshot_mobile}}` (first screen at phone width), `{{screenshot_article}}`
   (main content block only), `{{screenshot_thumbnail}}` (small first screen), each
   also as `_dark` for the site's dark mode (`{{screenshot_page_dark}}`…), and
-  `{{pdf_page}}`. Write
+  `{{pdf_page}}`, plus `{{image_local}}`, the page's `{{image}}` saved in the vault
+  (for covers whose links expire, like TikTok's). Write
   `![[{{screenshot_page}}]]` to show one or `[[{{screenshot_page}}]]` to link it, in
   the note content or a property. A capture makes only the files its template
   uses. Older templates' `{{screenshot}}`, `{{screenshot_link}}` and
   `{{screenshot_embed}}` are rewritten when loaded or imported.
+
+- **TikTok** video pages get their caption as `{{title}}` (first line) and
+  `{{description}}`, plus `{{published}}`, `{{author}}`, `{{image}}` (the cover) and
+  `{{content}}` (player and caption), read from the post's data rather than the
+  page's sparse meta tags. `{{video_embed}}` is a player that plays in the note and
+  `{{video_id}}` the video's id; both are empty on other sites.
+  [docs/templates/tiktok.json](docs/templates/tiktok.json) is a template to import.
 
 Server URL, API token, screenshot folder and poll interval are set per device in the
 plugin; the token stays in each device's secret storage.
@@ -113,7 +121,7 @@ All endpoints need `Authorization: Bearer <token>`.
 | `POST /capture` | Enqueue `{url, origin, template?}` (`template` picks one by name; otherwise triggers decide) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
 | `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
 | `GET /jobs/:id` | One job. |
-| `GET /jobs/:id/asset/:kind` | Capture output: a screenshot or `pdf_page` named after its variable (only those the template uses), `markdown`, or the rendered `note`. |
+| `GET /jobs/:id/asset/:kind` | Capture output: a screenshot, `pdf_page` or `image_local` named after its variable (only those the template uses), `markdown`, or the rendered `note`. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
 | `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId}`. |
 | `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |

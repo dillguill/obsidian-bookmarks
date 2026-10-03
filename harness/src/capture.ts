@@ -5,12 +5,14 @@ import { CAPTURE_FILES, fileMarker, type CaptureFile, type PageMeta, type Render
 import type { Config } from "./config.js";
 import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
 import { urlRejection } from "./ssrf.js";
+import { readTikTokItem, SITE_VARIABLES, tiktokData, tiktokPost, type SiteData } from "./tiktok.js";
 
 const require = createRequire(import.meta.url);
 const DEFUDDLE_PATH = require.resolve("defuddle/full");
 const VIEWPORT = { width: 1280, height: 800 };
 const MOBILE_VIEWPORT = { width: 390, height: 844 };
 const THUMBNAIL_WIDTH = 480;
+const IMAGE_MAX_WIDTH = 2000;
 
 /**
  * Capture files are template variables: make only the ones the rendered note uses.
@@ -290,6 +292,48 @@ async function articleShot(page: Page, format: { type: "jpeg" | "png"; quality?:
   return page.screenshot({ ...format, fullPage: true, clip: { ...box, height: Math.min(box.height, maxHeight) } });
 }
 
+/**
+ * The page's {{image}} as a file, so the note keeps it after the link expires
+ * (TikTok's cover links last days). Drawn in a blank page and screenshotted,
+ * so it comes out in the screenshot format whatever the source format was.
+ * Null when it doesn't load.
+ */
+async function imageFile(context: BrowserContext, src: string, format: { type: "jpeg" | "png"; quality?: number }, maxHeight: number): Promise<Buffer | null> {
+  const page = await context.newPage();
+  try {
+    await page.setContent(`<body style="margin:0"><img style="display:block;width:100%;height:auto"></body>`);
+    const size = await page.evaluate(
+      (url) =>
+        new Promise<{ width: number; height: number } | null>((resolve) => {
+          const img = document.querySelector("img")!;
+          const done = () => resolve(img.naturalWidth > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : null);
+          img.onload = img.onerror = done;
+          setTimeout(done, 10_000);
+          img.src = url;
+        }),
+      src,
+    );
+    if (!size) return null;
+    const width = Math.min(size.width, IMAGE_MAX_WIDTH);
+    const height = Math.min(Math.round((size.height * width) / size.width), maxHeight);
+    await page.setViewportSize({ width, height });
+    return await page.screenshot(format);
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+/** Variables a site extractor found, for the render: site-only ones (empty elsewhere) and replaced generic ones. */
+function siteVariables(site: SiteData | null): Record<string, string> {
+  const variables: Record<string, string> = Object.fromEntries(SITE_VARIABLES.map((name) => [name, site?.variables[name] ?? ""]));
+  if (!site) return variables;
+  for (const name of ["title", "description", "author", "published", "image", "content"] as const) {
+    const value = site[name];
+    if (value !== undefined) variables[name] = value;
+  }
+  return variables;
+}
+
 export class PlaywrightEngine implements CaptureEngine {
   private browser: Promise<Browser> | null = null;
   private readonly turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
@@ -428,16 +472,18 @@ export class PlaywrightEngine implements CaptureEngine {
     }, page.url());
 
     const finalUrl = page.url();
+    const post = tiktokPost(finalUrl);
+    const siteData = post ? tiktokData(post, await page.evaluate(readTikTokItem, post.id)) : null;
     const meta: PageMeta = {
       finalUrl,
       canonical: parsed.canonical ? absolute(parsed.canonical, finalUrl) || null : null,
-      title: parsed.title,
-      description: parsed.description,
-      author: parsed.author,
+      title: siteData?.title ?? parsed.title,
+      description: siteData?.description ?? parsed.description,
+      author: siteData?.author ?? parsed.author,
       site: parsed.site,
       domain: parsed.domain || new URL(finalUrl).hostname.replace(/^www\./, ""),
-      published: parsed.published,
-      image: absolute(parsed.image, finalUrl),
+      published: siteData?.published ?? parsed.published,
+      image: absolute(siteData?.image ?? parsed.image, finalUrl),
       favicon: absolute(parsed.favicon, finalUrl),
       wordCount: parsed.wordCount,
       httpStatus: response?.status() ?? null,
@@ -449,8 +495,10 @@ export class PlaywrightEngine implements CaptureEngine {
     const blocked = blockReason(meta, parsed.bodyText);
     if (blocked) throw new BlockedError(`Blocked by site: ${blocked}`, meta);
 
-    const markdown = this.turndown.turndown(parsed.content);
-    const note = render ? await renderNote(page, render, bookmarkUrl(meta)) : null;
+    const markdown = siteData?.content ?? this.turndown.turndown(parsed.content);
+    const note = render
+      ? await renderNote(page, { ...render, extra: { ...render.extra, ...siteVariables(siteData) } }, bookmarkUrl(meta))
+      : null;
     const wanted = filesWanted(note);
     const files: Partial<Record<CaptureFile, Buffer>> = {};
     if (wanted.size === 0) return { meta, markdown, files, screenshotExt: null, note };
@@ -513,6 +561,10 @@ export class PlaywrightEngine implements CaptureEngine {
         if (anyDark) await darkMode(false);
         await mobileShot("");
       }
+    }
+    if (wanted.has("image_local") && meta.image) {
+      const image = await imageFile(page.context(), meta.image, format, maxHeight);
+      if (image) files.image_local = image;
     }
     const hasImage = CAPTURE_FILES.some((kind) => kind !== "pdf_page" && files[kind]);
     return { meta, markdown, files, screenshotExt: hasImage ? ext : null, note };

@@ -110,15 +110,15 @@ function fillFiles(text: string, saved: SavedFiles): string {
   }, text);
 }
 
-/** Saves capture files in the assets folder: <note>.jpg for the page, <note>-banner.jpg, <note>-banner-dark.jpg and so on, <note>.pdf. */
+/** Saves capture files in the assets folder: <note>.jpg for the page, <note>-banner.jpg, <note>-banner-dark.jpg and so on, <note>.pdf, <note>-image.jpg. */
 async function saveFiles(input: CapturedBookmark, options: WriteOptions, noteBase: string): Promise<SavedFiles> {
   const saved: SavedFiles = {};
   for (const kind of CAPTURE_FILES) {
     const data = input.files?.[kind];
     const ext = kind === "pdf_page" ? "pdf" : input.job.screenshotExt;
     if (!data || !ext) continue;
-    // screenshot_page -> note, screenshot_banner_dark -> note-banner-dark, screenshot_page_dark -> note-dark.
-    const suffix = kind.replace(/^(screenshot|pdf)_/, "").replace(/^page_?/, "").replace(/_/g, "-");
+    // screenshot_page -> note, screenshot_banner_dark -> note-banner-dark, screenshot_page_dark -> note-dark, image_local -> note-image.
+    const suffix = kind.replace(/^(screenshot|pdf)_/, "").replace(/^page_?/, "").replace(/_local$/, "").replace(/_/g, "-");
     const base = suffix ? `${noteBase}-${suffix}` : noteBase;
     await options.vault.ensureFolder(options.assetsFolder);
     const path = await freePath(options.vault, options.assetsFolder, base, ext);

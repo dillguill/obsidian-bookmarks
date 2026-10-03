@@ -26,6 +26,12 @@ describe("blockReason", () => {
   });
 });
 
+/** A 40×20 red PNG. */
+const COVER_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAIAAABwJOjsAAAAJElEQVR4nO3NMQ0AAAwEofdvupVxCwk7uy3RrGKxWCwWi8WJB336HQ594lo5AAAAAElFTkSuQmCC",
+  "base64",
+);
+
 /** Width and height from a JPEG's SOF0 marker. */
 function jpegSize(jpeg: Buffer): { width: number; height: number } {
   const sof = jpeg.indexOf(Buffer.from([0xff, 0xc0]));
@@ -58,6 +64,11 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
         res.end();
         return;
       }
+      if (req.url === "/cover.png") {
+        res.writeHead(200, { "content-type": "image/png" });
+        res.end(COVER_PNG);
+        return;
+      }
       if (req.url === "/print") {
         res.writeHead(200, { "content-type": "text/html" });
         res.end(`<html><head><title>Print</title></head><body><article>${"<p>Words to print on the page.</p>".repeat(40)}</article>
@@ -66,7 +77,7 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
       }
       res.writeHead(200, { "content-type": "text/html", "content-security-policy": "script-src 'none'" });
       if (req.url === "/layout") {
-        res.end(`<html><head><title>Layout</title><style>body{margin:0;background:#fff}@media (prefers-color-scheme: dark){body{background:#000;color:#fff}}</style></head>
+        res.end(`<html><head><title>Layout</title><meta property="og:image" content="/cover.png"><style>body{margin:0;background:#fff}@media (prefers-color-scheme: dark){body{background:#000;color:#fff}}</style></head>
           <body><nav style="height:120px">Nav</nav><div style="display:flex"><aside style="width:300px">Side</aside>
           <main style="display:contents"><article style="width:600px">${"<p>Article words for the main content block.</p>".repeat(60)}</article></main></div></body></html>`);
         return;
@@ -160,6 +171,8 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
       expect(dark.equals(light)).toBe(false);
     }
     expect(files.pdf_page!.subarray(0, 4).toString()).toBe("%PDF");
+    // The PNG og:image comes out at its own size, in the screenshot format.
+    expect(jpegSize(files.image_local!)).toEqual({ width: 40, height: 20 });
   });
 
   it("loads lazy images before printing the PDF", async () => {
