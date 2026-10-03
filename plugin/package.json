@@ -1,6 +1,6 @@
 {
   "name": "@obsidian-bookmarks/plugin",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "Obsidian plugin: sole vault writer for bookmarks captured by the harness",
   "main": "main.js",

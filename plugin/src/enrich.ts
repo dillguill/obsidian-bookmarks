@@ -29,7 +29,7 @@ const FILE_LABELS: Record<CaptureFile, string> = {
 };
 
 export function fileLabel(kind: CaptureFile): string {
-  return FILE_LABELS[kind];
+  return FILE_LABELS[kind] ?? kind;
 }
 
 export interface PropertyChoice {
