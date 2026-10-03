@@ -11,13 +11,24 @@ const PROPERTY_TYPES: ReadonlySet<string> = new Set<PropertyType>(["text", "mult
 const MAX_TEMPLATES = 50;
 const MAX_TEXT = 20_000;
 
+/** Old screenshot variable names: `screenshot`, and `_link`/`_embed` forms of it and of screenshot_page/banner. */
+const OLD_SCREENSHOT = /\bscreenshot(_page|_banner)?(?:_(link|embed))?\b/g;
+const base = (kind: string | undefined) => `screenshot${kind ?? "_page"}`;
+
 /**
- * Older templates used {{screenshot}}, {{screenshot_link}} and {{screenshot_embed}}
- * for the full-page shot; rename them to the screenshot_page forms inside
- * {{ }} and {% %} so plain text is left alone.
+ * Brings older screenshot variables up to date: {{screenshot}} becomes
+ * {{screenshot_page}}, and the {{…_link}}/{{…_embed}} shortcuts become
+ * [[{{screenshot_page}}]]/![[{{screenshot_page}}]]. Only text inside {{ }} and
+ * {% %} changes, so prose that says "screenshot" is left alone.
  */
 export function renameScreenshotVariables(text: string): string {
-  return text.replace(/\{\{[\s\S]*?\}\}|\{%[\s\S]*?%\}/g, (tag) => tag.replace(/\bscreenshot(_link|_embed)?\b/g, "screenshot_page$1"));
+  return text.replace(/\{\{([\s\S]*?)\}\}|\{%[\s\S]*?%\}/g, (tag, inner: string | undefined) => {
+    const simple = inner === undefined ? null : /^\s*screenshot(_page|_banner)?_(link|embed)\s*$/.exec(inner);
+    if (simple) return `${simple[2] === "embed" ? "!" : ""}[[{{${base(simple[1])}}}]]`;
+    return tag.replace(OLD_SCREENSHOT, (name, kind: string | undefined, form: string | undefined) =>
+      kind && !form ? name : base(kind),
+    );
+  });
 }
 
 function renameInTemplate(template: ClipperTemplate): ClipperTemplate {

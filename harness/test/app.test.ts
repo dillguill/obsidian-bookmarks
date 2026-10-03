@@ -37,8 +37,9 @@ const engine: CaptureEngine = {
     if (url.includes("slow")) await new Promise((resolve) => setTimeout(resolve, 300));
     const note = url.includes("rendered") ? { template: render!.templateName ?? "Bookmark", noteName: "Hello", path: "Clips", frontmatter: "---\ntitle: \"Hello\"\n---\n", content: "# Hello" } : null;
     // The real engine takes the shots the rendered note's variables ask for.
-    if (url.includes("nopic")) return { meta: meta(url), markdown: "# Hello", screenshot: null, banner: null, screenshotExt: null, note };
-    return { meta: meta(url), markdown: "# Hello", screenshot: shot, banner: url.includes("banner") ? shot : null, screenshotExt: "jpg", note };
+    if (url.includes("nopic")) return { meta: meta(url), markdown: "# Hello", files: {}, screenshotExt: null, note };
+    const files = url.includes("all") ? { screenshot_page: shot, screenshot_banner: shot, pdf_page: Buffer.from("%PDF-1.4") } : { screenshot_page: shot };
+    return { meta: meta(url), markdown: "# Hello", files, screenshotExt: "jpg", note };
   },
   async close() {},
 };
@@ -93,11 +94,11 @@ describe("http app", () => {
     expect(res.status).toBe(200);
     const { job } = (await res.json()) as { job: Job };
     expect(job).toMatchObject({ status: "done", origin: "plugin", screenshotExt: "jpg" });
-    expect(job.assets).toEqual(["screenshot", "markdown"]);
+    expect(job.assets).toEqual(["screenshot_page", "markdown"]);
 
     const md = await fetch(`${base}/jobs/${job.id}/asset/markdown`, { headers: auth });
     expect(await md.text()).toBe("# Hello");
-    const shot = await fetch(`${base}/jobs/${job.id}/asset/screenshot`, { headers: auth });
+    const shot = await fetch(`${base}/jobs/${job.id}/asset/screenshot_page`, { headers: auth });
     expect(shot.headers.get("content-type")).toBe("image/jpeg");
     expect(Buffer.from(await shot.arrayBuffer())).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
   });
@@ -146,17 +147,20 @@ describe("http app", () => {
     await put({});
   });
 
-  it("serves the shots a capture took as screenshot and banner assets", async () => {
+  it("serves each capture file as an asset named after its variable", async () => {
     const capture = async (target: string) =>
       ((await (await post("/capture?wait=1", { url: target, origin: "shortcut" })).json()) as { job: Job }).job;
-    const both = await capture("https://example.com/banner");
+    const all = await capture("https://example.com/all");
     const none = await capture("https://example.com/nopic");
-    expect(both.assets).toEqual(["screenshot", "banner", "markdown"]);
+    expect(all.assets).toEqual(["screenshot_page", "screenshot_banner", "pdf_page", "markdown"]);
     expect(none).toMatchObject({ status: "done", assets: ["markdown"], screenshotExt: null });
-    const banner = await fetch(`${base}/jobs/${both.id}/asset/banner`, { headers: auth });
+    const banner = await fetch(`${base}/jobs/${all.id}/asset/screenshot_banner`, { headers: auth });
     expect(banner.headers.get("content-type")).toBe("image/jpeg");
     expect(Buffer.from(await banner.arrayBuffer())).toEqual(shot);
-    expect((await fetch(`${base}/jobs/${none.id}/asset/banner`, { headers: auth })).status).toBe(404);
+    const pdf = await fetch(`${base}/jobs/${all.id}/asset/pdf_page`, { headers: auth });
+    expect(pdf.headers.get("content-type")).toBe("application/pdf");
+    expect((await fetch(`${base}/jobs/${none.id}/asset/screenshot_banner`, { headers: auth })).status).toBe(404);
+    expect((await fetch(`${base}/jobs/${all.id}/asset/screenshot_nope`, { headers: auth })).status).toBe(404);
   });
 
   it("stores templates, accepting Web Clipper exports", async () => {

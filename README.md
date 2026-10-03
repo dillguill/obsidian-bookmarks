@@ -90,13 +90,15 @@ server, so every device and every phone Shortcut uses the same settings:
   time wins; otherwise the first template whose trigger (a URL prefix, `/regex/` or
   `schema:@Type`) matches, else the default, top one. Set `TZ` in `.env` so
   `{{date}}` uses your time zone.
-- **Screenshots** are template variables, in the note content or as a property
-  value: `{{screenshot_page}}` for the full page and `{{screenshot_banner}}` for the
-  first screen, each with `_link` (`[[path]]`) and `_embed` (`![[path]]`) forms. A
-  capture takes only the screenshots its template uses, so a template without them
-  saves none. Templates with the older `{{screenshot}}`, `{{screenshot_link}}` and
-  `{{screenshot_embed}}` are renamed to the `screenshot_page` forms when loaded or
-  imported.
+- **Screenshots and PDF** are template variables holding the file's vault path:
+  `{{screenshot_page}}` (whole page), `{{screenshot_banner}}` (first screen),
+  `{{screenshot_mobile}}` (first screen at phone width), `{{screenshot_article}}`
+  (main content block only), `{{screenshot_thumbnail}}` (small first screen),
+  `{{screenshot_dark}}` (first screen in dark mode) and `{{pdf_page}}`. Write
+  `![[{{screenshot_page}}]]` to show one or `[[{{screenshot_page}}]]` to link it, in
+  the note content or a property. A capture makes only the files its template
+  uses. Older templates' `{{screenshot}}`, `{{screenshot_link}}` and
+  `{{screenshot_embed}}` are rewritten when loaded or imported.
 
 Server URL, API token, screenshot folder and poll interval are set per device in the
 plugin; the token stays in each device's secret storage.
@@ -110,7 +112,7 @@ All endpoints need `Authorization: Bearer <token>`.
 | `POST /capture` | Enqueue `{url, origin, template?}` (`template` picks one by name; otherwise triggers decide) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. |
 | `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
 | `GET /jobs/:id` | One job. |
-| `GET /jobs/:id/asset/screenshot` / `banner` / `markdown` / `note` | Capture output: full-page and first-screen shots (only those the template uses), readable text, and the rendered note. |
+| `GET /jobs/:id/asset/:kind` | Capture output: a screenshot or `pdf_page` named after its variable (only those the template uses), `markdown`, or the rendered `note`. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
 | `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId}`. |
 | `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |

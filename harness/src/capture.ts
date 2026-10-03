@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import TurndownService from "turndown";
-import { BANNER_MARKER, SCREENSHOT_MARKER, type PageMeta, type RenderedNote } from "./api.js";
+import { CAPTURE_FILES, fileMarker, type CaptureFile, type PageMeta, type RenderedNote } from "./api.js";
 import type { Config } from "./config.js";
 import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
 import { urlRejection } from "./ssrf.js";
@@ -9,24 +9,25 @@ import { urlRejection } from "./ssrf.js";
 const require = createRequire(import.meta.url);
 const DEFUDDLE_PATH = require.resolve("defuddle/full");
 const VIEWPORT = { width: 1280, height: 800 };
+const MOBILE_VIEWPORT = { width: 390, height: 844 };
+const THUMBNAIL_WIDTH = 480;
 
 /**
- * Screenshots are template variables: take only the ones the rendered note uses.
+ * Capture files are template variables: make only the ones the rendered note uses.
  * Without a rendered note the plugin falls back to its default template, which shows the page shot.
  */
-export function shotsWanted(note: RenderedNote | null): { page: boolean; banner: boolean } {
-  if (!note) return { page: true, banner: false };
+export function filesWanted(note: RenderedNote | null): Set<CaptureFile> {
+  if (!note) return new Set(["screenshot_page"]);
   const text = [note.noteName, note.path, note.frontmatter, note.content].join("\n");
-  return { page: text.includes(SCREENSHOT_MARKER), banner: text.includes(BANNER_MARKER) };
+  return new Set(CAPTURE_FILES.filter((kind) => text.includes(fileMarker(kind))));
 }
 
 export interface CaptureResult {
   meta: PageMeta;
   markdown: string;
-  /** Full-page shot; null when the rendered note doesn't use {{screenshot_page}}. */
-  screenshot: Buffer | null;
-  /** First-screen shot; null when the rendered note doesn't use {{screenshot_banner}}. */
-  banner: Buffer | null;
+  /** The capture files the rendered note uses; screenshot_article is missing when the page has no main content block. */
+  files: Partial<Record<CaptureFile, Buffer>>;
+  /** Extension of the screenshots in `files`; null when there are none. */
   screenshotExt: "jpg" | "png" | null;
   /** Null when no render was requested or Web Clipper's engine failed on the page. */
   note: RenderedNote | null;
@@ -207,6 +208,55 @@ function absolute(value: string | null | undefined, base: string): string {
   }
 }
 
+/** The first screen scaled down to THUMBNAIL_WIDTH, through CDP since Playwright can't scale a screenshot. */
+async function thumbnail(page: Page, type: "jpeg" | "png"): Promise<Buffer> {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const { data } = await cdp.send("Page.captureScreenshot", {
+      format: type,
+      ...(type === "jpeg" ? { quality: 80 } : {}),
+      clip: { x: 0, y: 0, ...VIEWPORT, scale: THUMBNAIL_WIDTH / VIEWPORT.width },
+    });
+    return Buffer.from(data, "base64");
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+}
+
+/**
+ * The page's main content block: the article/main element with the most text,
+ * or a smaller one inside it that holds nearly all of that text. Null when the
+ * page has none.
+ */
+async function articleShot(page: Page, format: { type: "jpeg" | "png"; quality?: number }, maxHeight: number): Promise<Buffer | null> {
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const box = await page.evaluate(() => {
+    const blocks = [...document.querySelectorAll<HTMLElement>('article, [itemprop="articleBody"], main, [role="main"]')]
+      .map((el) => {
+        let rect = el.getBoundingClientRect();
+        // display: contents (MDN's <main>) has no box of its own; measure what it holds.
+        if (rect.width === 0 && rect.height === 0) {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          rect = range.getBoundingClientRect();
+        }
+        return { el, rect, text: (el.innerText ?? "").length };
+      })
+      .filter((b) => b.rect.width >= 200 && b.rect.height >= 200 && b.text > 0)
+      .sort((a, b) => b.text - a.text);
+    let best = blocks[0];
+    if (!best) return null;
+    for (const b of blocks) {
+      if (b.el !== best.el && best.el.contains(b.el) && b.text >= best.text * 0.8) best = b;
+    }
+    const { left, top, width, height } = best.rect;
+    return { x: Math.max(0, left + window.scrollX), y: Math.max(0, top + window.scrollY), width, height };
+  });
+  if (!box) return null;
+  return page.screenshot({ ...format, fullPage: true, clip: { ...box, height: Math.min(box.height, maxHeight) } });
+}
+
 export class PlaywrightEngine implements CaptureEngine {
   private browser: Promise<Browser> | null = null;
   private readonly turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
@@ -368,30 +418,50 @@ export class PlaywrightEngine implements CaptureEngine {
 
     const markdown = this.turndown.turndown(parsed.content);
     const note = render ? await renderNote(page, render, bookmarkUrl(meta)) : null;
-    const wanted = shotsWanted(note);
-    if (!wanted.page && !wanted.banner) return { meta, markdown, screenshot: null, banner: null, screenshotExt: null, note };
+    const wanted = filesWanted(note);
+    const files: Partial<Record<CaptureFile, Buffer>> = {};
+    if (wanted.size === 0) return { meta, markdown, files, screenshotExt: null, note };
 
     await hideOverlays(page);
     const type = screenshotFormat;
     const format = type === "jpeg" ? { type, quality: 80 } : { type };
     const ext = type === "jpeg" ? "jpg" : "png";
-    let banner: Buffer | null = null;
-    if (wanted.banner) {
-      // First screen only, at the original viewport size even if it was grown for an inner scroller.
+    // At the original viewport size even if it was grown for an inner scroller.
+    const firstScreen = async () => {
       await page.evaluate(() => window.scrollTo(0, 0));
-      banner = await page.screenshot({ ...format, clip: { x: 0, y: 0, ...VIEWPORT } });
+      return page.screenshot({ ...format, clip: { x: 0, y: 0, ...VIEWPORT } });
+    };
+    if (wanted.has("screenshot_banner")) files.screenshot_banner = await firstScreen();
+    if (wanted.has("screenshot_thumbnail")) files.screenshot_thumbnail = await thumbnail(page, type);
+    if (wanted.has("screenshot_article")) {
+      const shot = await articleShot(page, format, maxHeight);
+      if (shot) files.screenshot_article = shot;
     }
-    let screenshot: Buffer | null = null;
-    if (wanted.page) {
+    if (wanted.has("screenshot_page")) {
       const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0));
       meta.truncated = height > maxHeight || VIEWPORT.height + extra > maxHeight;
-      screenshot = await page.screenshot({
+      files.screenshot_page = await page.screenshot({
         fullPage: true,
         ...format,
         ...(meta.truncated ? { clip: { x: 0, y: 0, width: VIEWPORT.width, height: maxHeight } } : {}),
       });
     }
-    return { meta, markdown, screenshot, banner, screenshotExt: ext, note };
+    if (wanted.has("screenshot_dark")) {
+      await page.emulateMedia({ colorScheme: "dark" });
+      await waitForDomQuiet(page, 300, 2000);
+      files.screenshot_dark = await firstScreen();
+      await page.emulateMedia({ colorScheme: "light" });
+    }
+    if (wanted.has("pdf_page")) files.pdf_page = await page.pdf({ format: "A4", printBackground: true });
+    // Last: the layout reflows at phone width.
+    if (wanted.has("screenshot_mobile")) {
+      await page.setViewportSize(MOBILE_VIEWPORT);
+      await waitForDomQuiet(page, 300, 2000);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      files.screenshot_mobile = await page.screenshot({ ...format, clip: { x: 0, y: 0, ...MOBILE_VIEWPORT } });
+    }
+    const hasImage = CAPTURE_FILES.some((kind) => kind !== "pdf_page" && files[kind]);
+    return { meta, markdown, files, screenshotExt: hasImage ? ext : null, note };
   }
 
   private restart(): void {

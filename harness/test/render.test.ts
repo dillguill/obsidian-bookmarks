@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bookmarkUrl, screenshotVariables } from "../src/render.js";
+import { bookmarkUrl, fileVariables } from "../src/render.js";
 import { currentSettings, DEFAULT_CAPTURE_SETTINGS, parseCaptureSettings, renameScreenshotVariables } from "../src/settings.js";
 
 describe("bookmarkUrl", () => {
@@ -12,15 +12,16 @@ describe("bookmarkUrl", () => {
   });
 });
 
-describe("screenshotVariables", () => {
-  it("offers path, link and embed forms", () => {
-    expect(screenshotVariables("a/p.jpg", "")).toEqual({
+describe("fileVariables", () => {
+  it("has every capture file, empty when missing", () => {
+    expect(fileVariables({ screenshot_page: "a/p.jpg" })).toEqual({
       screenshot_page: "a/p.jpg",
-      screenshot_page_link: "[[a/p.jpg]]",
-      screenshot_page_embed: "![[a/p.jpg]]",
       screenshot_banner: "",
-      screenshot_banner_link: "",
-      screenshot_banner_embed: "",
+      screenshot_mobile: "",
+      screenshot_article: "",
+      screenshot_thumbnail: "",
+      screenshot_dark: "",
+      pdf_page: "",
     });
   });
 });
@@ -35,18 +36,19 @@ describe("currentSettings", () => {
 describe("renameScreenshotVariables", () => {
   it("renames the old screenshot variables inside tags only", () => {
     expect(renameScreenshotVariables("Screenshot: {{screenshot_embed}} {{ screenshot_link }} {{screenshot|wikilink}}")).toBe(
-      "Screenshot: {{screenshot_page_embed}} {{ screenshot_page_link }} {{screenshot_page|wikilink}}",
+      "Screenshot: ![[{{screenshot_page}}]] [[{{screenshot_page}}]] {{screenshot_page|wikilink}}",
     );
-    expect(renameScreenshotVariables("{% if screenshot %}a screenshot{% endif %}")).toBe("{% if screenshot_page %}a screenshot{% endif %}");
-    expect(renameScreenshotVariables("{{screenshot_page}} {{screenshot_banner_link}}")).toBe("{{screenshot_page}} {{screenshot_banner_link}}");
+    expect(renameScreenshotVariables("{{screenshot_page_embed}} {{screenshot_banner_link}}")).toBe("![[{{screenshot_page}}]] [[{{screenshot_banner}}]]");
+    expect(renameScreenshotVariables("{% if screenshot_embed %}a screenshot{% endif %}")).toBe("{% if screenshot_page %}a screenshot{% endif %}");
+    expect(renameScreenshotVariables("{{screenshot_page}} {{screenshot_banner}} {{screenshot_mobile}}")).toBe("{{screenshot_page}} {{screenshot_banner}} {{screenshot_mobile}}");
   });
 
   it("applies to stored and imported templates", () => {
     const old = { ...DEFAULT_CAPTURE_SETTINGS.templates[0]!, noteContentFormat: "{{screenshot_embed}}", properties: [{ name: "screenshot", value: "{{screenshot_link}}", type: "text" as const }] };
     for (const settings of [currentSettings({ templates: [old] }), parseCaptureSettings({ templates: [old] })]) {
       const t = (settings as typeof DEFAULT_CAPTURE_SETTINGS).templates[0]!;
-      expect(t.noteContentFormat).toBe("{{screenshot_page_embed}}");
-      expect(t.properties[0]).toEqual({ name: "screenshot", value: "{{screenshot_page_link}}", type: "text" });
+      expect(t.noteContentFormat).toBe("![[{{screenshot_page}}]]");
+      expect(t.properties[0]).toEqual({ name: "screenshot", value: "[[{{screenshot_page}}]]", type: "text" });
     }
   });
 });

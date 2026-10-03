@@ -1,4 +1,4 @@
-import { BANNER_MARKER, SCREENSHOT_MARKER, type Job, type RenderedNote } from "./api";
+import { CAPTURE_FILES, fileMarker, type CaptureFile, type Job, type RenderedNote } from "./api";
 import type { DedupIndex } from "./dedup";
 import type { PageData } from "./page-data";
 import { cleanUrl } from "./url";
@@ -29,10 +29,8 @@ export interface CapturedBookmark {
   job: Job;
   /** Readable markdown; empty when the job failed or the page had none. */
   markdown: string;
-  /** Full-page shot; the server takes it when the template uses {{screenshot_page}}. */
-  screenshot: ArrayBuffer | null;
-  /** First-screen shot, for {{screenshot_banner}}. */
-  banner?: ArrayBuffer | null;
+  /** Screenshots and PDF, by template variable; the server makes only the ones the template uses. */
+  files?: Partial<Record<CaptureFile, ArrayBuffer | null>>;
   /** The note as the server rendered it with Web Clipper's engine; absent for failed captures and older servers. */
   note?: RenderedNote | null;
 }
@@ -95,37 +93,37 @@ function noteBaseName(template: ClipperTemplate, vars: Variables, page: PageData
   return cleanName(render(template.noteNameFormat, vars, page)) || `bookmark-${formatDate(vars.date ?? "", "YYYY-MM-DD")}`;
 }
 
-/**
- * Template variables for the saved shots' vault paths: {{screenshot_page}} and
- * {{screenshot_banner}}, each with _link and _embed forms. Mirrors harness/src/render.ts.
- */
-export function screenshotVariables(page: string, banner: string): Variables {
-  const forms = (name: string, path: string) =>
-    path ? { [name]: path, [`${name}_link`]: `[[${path}]]`, [`${name}_embed`]: `![[${path}]]` } : { [name]: "", [`${name}_link`]: "", [`${name}_embed`]: "" };
-  return { ...forms("screenshot_page", page), ...forms("screenshot_banner", banner) };
+/** Every capture file's variable, its vault path or empty. Mirrors fileVariables in harness/src/render.ts. */
+export function fileVariables(paths: Partial<Record<CaptureFile, string | null>>): Variables {
+  return Object.fromEntries(CAPTURE_FILES.map((kind) => [kind, paths[kind] ?? ""]));
 }
 
-/** Swaps a server screenshot marker for the saved file's vault path, or drops it when that shot is missing. */
-function fillMarker(text: string, marker: string, path: string | null): string {
-  if (path) return text.split(marker).join(path);
-  return text.split(`![[${marker}]]`).join("").split(`[[${marker}]]`).join("").split(marker).join("");
+type SavedFiles = Partial<Record<CaptureFile, string>>;
+
+/** Swaps each capture file's marker for its vault path, or drops it (with any [[ ]] or ![[ ]] around it) when there's no file. */
+function fillFiles(text: string, saved: SavedFiles): string {
+  return CAPTURE_FILES.reduce((out, kind) => {
+    const marker = fileMarker(kind);
+    const path = saved[kind];
+    if (path) return out.split(marker).join(path);
+    return out.split(`![[${marker}]]`).join("").split(`[[${marker}]]`).join("").split(marker).join("");
+  }, text);
 }
 
-function fillScreenshots(text: string, page: string | null, banner: string | null): string {
-  return fillMarker(fillMarker(text, SCREENSHOT_MARKER, page), BANNER_MARKER, banner);
-}
-
-/** Saves the page shot as <note>.<ext> and the banner as <note>-banner.<ext> in the assets folder. */
-async function saveScreenshots(input: CapturedBookmark, options: WriteOptions, noteBase: string): Promise<{ page: string | null; banner: string | null }> {
-  const ext = input.job.screenshotExt;
-  const save = async (data: ArrayBuffer | null | undefined, base: string) => {
-    if (!data || !ext) return null;
+/** Saves capture files in the assets folder: <note>.jpg for the page, <note>-banner.jpg and so on, <note>.pdf. */
+async function saveFiles(input: CapturedBookmark, options: WriteOptions, noteBase: string): Promise<SavedFiles> {
+  const saved: SavedFiles = {};
+  for (const kind of CAPTURE_FILES) {
+    const data = input.files?.[kind];
+    const ext = kind === "pdf_page" ? "pdf" : input.job.screenshotExt;
+    if (!data || !ext) continue;
+    const base = kind === "screenshot_page" || kind === "pdf_page" ? noteBase : `${noteBase}-${kind.replace("screenshot_", "")}`;
     await options.vault.ensureFolder(options.assetsFolder);
     const path = await freePath(options.vault, options.assetsFolder, base, ext);
     await options.vault.writeBinary(path, data);
-    return path;
-  };
-  return { page: await save(input.screenshot, noteBase), banner: await save(input.banner, `${noteBase}-banner`) };
+    saved[kind] = path;
+  }
+  return saved;
 }
 
 async function freePath(vault: VaultPort, folder: string, base: string, ext: string): Promise<string> {
@@ -186,9 +184,9 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
     const folder = note.path.replace(/^\/+|\/+$/g, "") || options.notesFolder;
     const base = cleanName(note.noteName) || `bookmark-${formatDate((options.now ?? new Date()).toISOString(), "YYYY-MM-DD")}`;
     const notePath = await targetPath(folder, base);
-    const shots = await saveScreenshots(input, options, notePath.slice(notePath.lastIndexOf("/") + 1, -3));
-    const body = fillScreenshots(note.content, shots.page, shots.banner).replace(/^\s+/, "").trimEnd();
-    await save(notePath, `${fillScreenshots(note.frontmatter, shots.page, shots.banner)}${body ? `${body}\n` : ""}`);
+    const saved = await saveFiles(input, options, notePath.slice(notePath.lastIndexOf("/") + 1, -3));
+    const body = fillFiles(note.content, saved).replace(/^\s+/, "").trimEnd();
+    await save(notePath, `${fillFiles(note.frontmatter, saved)}${body ? `${body}\n` : ""}`);
     index.set(notePath, url, job.id);
     return { kind: "written", path: notePath };
   }
@@ -207,6 +205,8 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
     favicon: meta?.favicon ?? "",
     date: (options.now ?? new Date()).toISOString(),
     capture_id: job.id,
+    // Markers, filled in after rendering so ![[{{screenshot_page}}]] disappears when there's no screenshot.
+    ...fileVariables(Object.fromEntries(CAPTURE_FILES.map((kind) => [kind, fileMarker(kind)]))),
   };
 
   const page: PageData | undefined = meta ?? undefined;
@@ -214,8 +214,7 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   const notePath = await targetPath(options.notesFolder, base);
   const noteBase = notePath.slice(notePath.lastIndexOf("/") + 1, -3);
 
-  const shots = await saveScreenshots(input, options, noteBase);
-  Object.assign(vars, screenshotVariables(shots.page ?? "", shots.banner ?? ""));
+  const saved = await saveFiles(input, options, noteBase);
 
   let content = input.markdown.trim();
   if (job.status === "failed") {
@@ -224,8 +223,8 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   }
   vars.content = content;
 
-  const body = render(template.noteContentFormat, vars, page).replace(/^\s+/, "").replace(/\n{3,}/g, "\n\n");
-  await save(notePath, `${renderFrontmatter(template, vars, page, options.hideCaptureId)}\n${body.trimEnd()}\n`);
+  const body = fillFiles(render(template.noteContentFormat, vars, page), saved).replace(/^\s+/, "").replace(/\n{3,}/g, "\n\n");
+  await save(notePath, `${fillFiles(renderFrontmatter(template, vars, page, options.hideCaptureId), saved)}\n${body.trimEnd()}\n`);
   index.set(notePath, url, job.id);
   return { kind: "written", path: notePath };
 }

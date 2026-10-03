@@ -1,5 +1,5 @@
 import { Notice, Plugin, TFile, TFolder, normalizePath } from "obsidian";
-import { API_VERSION, type ClipperTemplate, type Job, type RenderedNote } from "./api";
+import { API_VERSION, CAPTURE_FILES, type CaptureFile, type ClipperTemplate, type Job, type RenderedNote } from "./api";
 import { CaptureModal } from "./capture-modal";
 import { ServerClient } from "./client";
 import { DedupIndex } from "./dedup";
@@ -171,8 +171,8 @@ export default class BookmarksPlugin extends Plugin {
       const client = this.client();
       const markdown = job.assets.includes("markdown") ? await client.assetText(job.id, "markdown") : "";
       // The server takes only the shots the template's variables use.
-      const screenshot = job.assets.includes("screenshot") ? await client.assetBinary(job.id, "screenshot") : null;
-      const banner = job.assets.includes("banner") ? await client.assetBinary(job.id, "banner") : null;
+      const files: Partial<Record<CaptureFile, ArrayBuffer>> = {};
+      for (const kind of CAPTURE_FILES) if (job.assets.includes(kind)) files[kind] = await client.assetBinary(job.id, kind);
       // A failed job's metadata describes the block page, so schema triggers only see successful captures.
       const template =
         this.templates.find((t) => t.name === job.template) ??
@@ -180,7 +180,7 @@ export default class BookmarksPlugin extends Plugin {
       // Rendered on the server with Web Clipper's engine; older servers and failed captures use the plugin's renderer.
       const note = job.assets.includes("note") ? (JSON.parse(await client.assetText(job.id, "note")) as RenderedNote) : null;
       const result = await writeBookmark(
-        { job, markdown, screenshot, banner, note },
+        { job, markdown, files, note },
         {
           vault: this.vaultPort(),
           index: this.index,

@@ -40,14 +40,31 @@ export interface Job {
   meta: PageMeta | null;
   /** Asset kinds available from `GET /jobs/:id/asset/:kind`. */
   assets: AssetKind[];
-  /** File extension of the screenshot asset, when there is one. */
+  /** File extension of the screenshot assets, when there are any (the PDF is always .pdf). */
   screenshotExt: "jpg" | "png" | null;
   /** Template chosen at capture time by name; null means match by triggers. */
   template?: string | null;
 }
 
-/** `screenshot` is the full page, `banner` the first screen; `note` is the note rendered with Web Clipper's engine ({@link RenderedNote}, JSON). */
-export type AssetKind = "screenshot" | "banner" | "markdown" | "note";
+/**
+ * Files a template can ask for, each named after its template variable, which
+ * holds the file's vault path: full page, first screen, first screen at phone
+ * width, the main content block, a small first screen, the first screen in dark
+ * mode, and a PDF of the page. The server makes only the ones the rendered note uses.
+ */
+export const CAPTURE_FILES = [
+  "screenshot_page",
+  "screenshot_banner",
+  "screenshot_mobile",
+  "screenshot_article",
+  "screenshot_thumbnail",
+  "screenshot_dark",
+  "pdf_page",
+] as const;
+export type CaptureFile = (typeof CAPTURE_FILES)[number];
+
+/** A capture file, the readable `markdown`, or the `note` rendered with Web Clipper's engine ({@link RenderedNote}, JSON). */
+export type AssetKind = CaptureFile | "markdown" | "note";
 
 /** A note rendered on the server by Obsidian Web Clipper's template engine. */
 export interface RenderedNote {
@@ -63,14 +80,13 @@ export interface RenderedNote {
 }
 
 /**
- * Stand in for screenshot vault paths in a RenderedNote until the plugin saves
- * the files: `{{screenshot_page}}` is the full-page marker and
- * `{{screenshot_banner}}` the first-screen one, with `_link` ([[marker]]) and
- * `_embed` (![[marker]]) forms.
- * The server takes only the screenshots whose marker the rendered note uses.
+ * Stands in for a capture file's vault path in a RenderedNote until the plugin
+ * saves the file, which then replaces it (or removes it, with any [[ ]] or ![[ ]]
+ * around it, when there is no file).
  */
-export const SCREENSHOT_MARKER = "bookmarks-screenshot-path-5f2c9e";
-export const BANNER_MARKER = "bookmarks-banner-path-8d41a7";
+export function fileMarker(kind: CaptureFile): string {
+  return `bookmarks-${kind}-5f2c9e`;
+}
 
 /**
  * Capture settings shared by every device, stored on the server so captures

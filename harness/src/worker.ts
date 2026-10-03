@@ -1,14 +1,14 @@
 import { EventEmitter } from "node:events";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AssetKind, Job } from "./api.js";
+import { CAPTURE_FILES, type AssetKind, type Job } from "./api.js";
 import { BlockedError, type CaptureEngine } from "./capture.js";
 import type { JobStore } from "./db.js";
 import { renderRequest } from "./render.js";
 
 export function assetPath(dataDir: string, id: string, kind: AssetKind, ext: string | null): string {
   const file =
-    kind === "markdown" ? "content.md" : kind === "note" ? "note.json" : kind === "banner" ? `banner.${ext ?? "png"}` : `screenshot.${ext ?? "png"}`;
+    kind === "markdown" ? "content.md" : kind === "note" ? "note.json" : kind === "pdf_page" ? "pdf_page.pdf" : `${kind}.${ext ?? "png"}`;
   return join(dataDir, "jobs", id, file);
 }
 
@@ -49,13 +49,11 @@ export class Worker extends EventEmitter {
       const result = await this.engine.capture(job.url, renderRequest(settings, job.template, job.id));
       await mkdir(join(this.dataDir, "jobs", job.id), { recursive: true });
       const assets: AssetKind[] = [];
-      if (result.screenshot) {
-        await writeFile(assetPath(this.dataDir, job.id, "screenshot", result.screenshotExt), result.screenshot);
-        assets.push("screenshot");
-      }
-      if (result.banner) {
-        await writeFile(assetPath(this.dataDir, job.id, "banner", result.screenshotExt), result.banner);
-        assets.push("banner");
+      for (const kind of CAPTURE_FILES) {
+        const data = result.files[kind];
+        if (!data) continue;
+        await writeFile(assetPath(this.dataDir, job.id, kind, result.screenshotExt), data);
+        assets.push(kind);
       }
       await writeFile(assetPath(this.dataDir, job.id, "markdown", null), result.markdown);
       assets.push("markdown");
@@ -63,7 +61,7 @@ export class Worker extends EventEmitter {
         await writeFile(assetPath(this.dataDir, job.id, "note", null), JSON.stringify(result.note));
         assets.push("note");
       }
-      this.store.finish(job.id, result.meta, assets, result.screenshot || result.banner ? result.screenshotExt : null);
+      this.store.finish(job.id, result.meta, assets, result.screenshotExt);
     } catch (err) {
       const message = String((err as Error)?.message ?? err).split("\n")[0] ?? "capture failed";
       this.store.fail(job.id, message, err instanceof BlockedError ? err.meta : null);

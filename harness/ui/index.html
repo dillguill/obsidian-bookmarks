@@ -104,17 +104,18 @@
             <tr><td><code class="copy">{{date}}</code></td><td>When the page was captured, in the server's time zone (<code>TZ</code>). Format it with <code>|date:"YYYY-MM-DD"</code>.</td></tr>
             <tr><td><code class="copy">{{capture_id}}</code></td><td>The capture's id; always saved so a capture is never written twice.</td></tr>
         </table>
-        <h2>Screenshot</h2>
-        <p class="desc">A screenshot is taken only when a template uses it, so leave these out for no screenshot. Each is empty for a blocked page. Use them in the note content or as a property value.</p>
+        <h2>Screenshots and PDF</h2>
+        <p class="desc">Each is the saved file's vault path. Wrap it to show the image, <code>![[{{screenshot_page}}]]</code>, or to link it, <code>[[{{screenshot_page}}]]</code>, in the note content or a property. A file is made only when a template uses it, and is empty for a blocked page; the brackets around an empty one are removed.</p>
         <table class="key">
-            <tr><td><code class="copy">{{screenshot_page_embed}}</code></td><td>Shows the full-page screenshot in the note: <code>![[path]]</code>.</td></tr>
-            <tr><td><code class="copy">{{screenshot_page_link}}</code></td><td>Link to the full-page screenshot: <code>[[path]]</code>.</td></tr>
-            <tr><td><code class="copy">{{screenshot_page}}</code></td><td>The full-page screenshot's vault path, e.g. <code>Bookmarks/assets/note.jpg</code>.</td></tr>
-            <tr><td><code class="copy">{{screenshot_banner_embed}}</code></td><td>Shows the first screen of the page: <code>![[path]]</code>.</td></tr>
-            <tr><td><code class="copy">{{screenshot_banner_link}}</code></td><td>Link to the first-screen screenshot: <code>[[path]]</code>.</td></tr>
-            <tr><td><code class="copy">{{screenshot_banner}}</code></td><td>The first-screen screenshot's vault path, e.g. <code>Bookmarks/assets/note-banner.jpg</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_page}}</code></td><td>The whole page, e.g. <code>Bookmarks/assets/note.jpg</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_banner}}</code></td><td>The first screen (1280×800), <code>note-banner.jpg</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_mobile}}</code></td><td>The first screen at phone width (390×844), <code>note-mobile.jpg</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_article}}</code></td><td>Just the main content block, without navigation or sidebars, <code>note-article.jpg</code>. Empty when the page has no article or main element.</td></tr>
+            <tr><td><code class="copy">{{screenshot_thumbnail}}</code></td><td>A small first screen (480×300) for covers in Bases or card views, <code>note-thumbnail.jpg</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_dark}}</code></td><td>The first screen in the site's dark mode, when it has one, <code>note-dark.jpg</code>.</td></tr>
+            <tr><td><code class="copy">{{pdf_page}}</code></td><td>A PDF of the page with selectable text, <code>note.pdf</code>.</td></tr>
         </table>
-        <p class="desc">Templates saved or imported with the older <code>{{screenshot}}</code>, <code>{{screenshot_link}}</code> and <code>{{screenshot_embed}}</code> are renamed to the <code>screenshot_page</code> forms.</p>
+        <p class="desc">Templates saved or imported with the older <code>{{screenshot}}</code>, <code>{{screenshot_link}}</code> and <code>{{screenshot_embed}}</code> are rewritten to these.</p>
         <h2>Schema and meta</h2>
         <p class="desc">Read from the page's schema.org data and meta tags, as in Web Clipper.</p>
         <table class="key">

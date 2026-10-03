@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { BANNER_MARKER, SCREENSHOT_MARKER, type CaptureSettings, type ClipperTemplate, type PageMeta } from "./api.js";
+import { CAPTURE_FILES, fileMarker, type CaptureFile, type CaptureSettings, type ClipperTemplate, type PageMeta } from "./api.js";
 import { cleanUrl } from "./clean-url.js";
 
 const require = createRequire(import.meta.url);
@@ -28,15 +28,9 @@ export function withRequiredProperties(template: ClipperTemplate, hideCaptureId 
   return { ...template, properties };
 }
 
-/**
- * {{screenshot_page}} is the full-page shot's vault path and {{screenshot_banner}}
- * the first screen's, each with _link ([[path]]) and _embed (![[path]]) forms.
- * Mirrors screenshotVariables in plugin/src/writer.ts.
- */
-export function screenshotVariables(page: string, banner: string): Record<string, string> {
-  const forms = (name: string, path: string) =>
-    path ? { [name]: path, [`${name}_link`]: `[[${path}]]`, [`${name}_embed`]: `![[${path}]]` } : { [name]: "", [`${name}_link`]: "", [`${name}_embed`]: "" };
-  return { ...forms("screenshot_page", page), ...forms("screenshot_banner", banner) };
+/** Every capture file's variable, its vault path or empty. Mirrors fileVariables in plugin/src/writer.ts. */
+export function fileVariables(paths: Partial<Record<CaptureFile, string | null>>): Record<CaptureFile, string> {
+  return Object.fromEntries(CAPTURE_FILES.map((kind) => [kind, paths[kind] ?? ""])) as Record<CaptureFile, string>;
 }
 
 export function renderRequest(settings: CaptureSettings, templateName: string | null, captureId: string): RenderRequest {
@@ -44,7 +38,7 @@ export function renderRequest(settings: CaptureSettings, templateName: string | 
     templates: settings.templates.map((t) => withRequiredProperties(t, settings.hideCaptureId)),
     templateName,
     propertyTypes: Object.fromEntries(settings.propertyTypes.map((p) => [p.name, p.type])),
-    extra: { capture_id: captureId, ...screenshotVariables(SCREENSHOT_MARKER, BANNER_MARKER) },
+    extra: { capture_id: captureId, ...fileVariables(Object.fromEntries(CAPTURE_FILES.map((kind) => [kind, fileMarker(kind)]))) },
   };
 }
 

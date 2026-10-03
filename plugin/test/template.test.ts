@@ -22,7 +22,7 @@ describe("renderFrontmatter", () => {
     author: "",
     domain: "example.com",
     date: "2026-10-02T19:05:09.000Z",
-    screenshot_page_link: "[[Bookmarks/assets/x.jpg]]",
+    screenshot_page: "Bookmarks/assets/x.jpg",
     capture_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
   };
 
