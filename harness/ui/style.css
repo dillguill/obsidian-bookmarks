@@ -201,3 +201,12 @@ main.save h1 {
 .save [hidden] {
   display: none;
 }
+
+/* API keys */
+.key-form { display: flex; gap: 8px; margin: 12px 0; max-width: 520px; }
+.key-form input { flex: 1; min-width: 0; }
+.key-created { border: 1px solid var(--accent); border-radius: 8px; padding: 12px; margin: 12px 0; max-width: 520px; }
+.key-secret-row { display: flex; gap: 8px; }
+.key-secret-row input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; }
+.key-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.key-row .setting-info { flex: 1; min-width: 0; }

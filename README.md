@@ -23,11 +23,14 @@ your vault as deduplicated bookmark notes. See the
 
    ```sh
    cd harness
-   cp .env.example .env    # set BOOKMARKS_TOKENS, e.g. desktop-token,phone-token
+   cp .env.example .env    # set TZ
    docker compose up --build
    ```
 
-   Check it: `curl -H "Authorization: Bearer desktop-token" http://127.0.0.1:8787/health`
+   Open `http://127.0.0.1:8787/` and create your sign-in account with the setup
+   code from the server's log (`docker compose logs bookmarks-server`). Then, under
+   **API keys**, create a key for each device (say "MacBook" and "iPhone Shortcut").
+   Check one: `curl -H "Authorization: Bearer <key>" http://127.0.0.1:8787/health`
    should return `{"status":"ok","apiVersion":6,...}`.
 
 2. **Install the plugin** with [BRAT](https://github.com/TfTHacker/obsidian42-brat):
@@ -43,7 +46,8 @@ your vault as deduplicated bookmark notes. See the
    ```
 
    Enable **Bookmarker** under Settings → Community plugins, then in its settings set
-   the server URL (`http://127.0.0.1:8787`), add the API token, and press **Test**.
+   the server URL (`http://127.0.0.1:8787`), add the API key (saved in Obsidian's
+   secrets on that device), and press **Test**.
 
 3. **Capture from Obsidian**: copy a URL, run **Bookmarks: Capture URL** from the
    command palette (or the ribbon icon). The note opens when the capture finishes,
@@ -61,7 +65,7 @@ your vault as deduplicated bookmark notes. See the
 4. **Capture from elsewhere** (the phone path): with Obsidian closed, enqueue a URL
 
    ```sh
-   curl -X POST -H "Authorization: Bearer phone-token" \
+   curl -X POST -H "Authorization: Bearer <key>" \
      "http://127.0.0.1:8787/capture?origin=shortcut&url=https://example.com/"
    ```
 
@@ -79,10 +83,15 @@ note. Saved links drop tracking params (`utm_*`, `fbclid`…) and the ones bot w
 add (`js_challenge`, `__cf_chl_*`…).
 
 **Settings page.** Open the server in a browser (`http://127.0.0.1:8787/`, or your
-Tailscale address from a phone) and sign in with one of your API tokens. The plugin's
+Tailscale address from a phone) and sign in with your username and password. The plugin's
 settings have an **Open settings page** button too. Everything there is stored on the
 server, so every device and every phone Shortcut uses the same settings:
 
+- **API keys**: create a named key for each device or Shortcut, see when each was
+  last used, and revoke one without touching the others. A key is shown once, when
+  it's made. Tokens in `BOOKMARKS_TOKENS` in `.env` still work too.
+  Forgot the password? `docker compose exec bookmarks-server node dist/reset-login.js`
+  removes the account (keys stay) so the page offers to create it again.
 - **General**: **Hide capture ID** leaves `capture_id` out of new notes; the plugin
   then remembers which captures it wrote, and URL dedup still skips a page that's
   already saved. The browser bookmarklets are here too.
@@ -122,12 +131,15 @@ server, so every device and every phone Shortcut uses the same settings:
   caption with its time (`[0:03] …`); empty when TikTok has no captions, as for
   videos without speech. They're empty on other sites. [docs/templates/tiktok.json](docs/templates/tiktok.json) is a template to import.
 
-Server URL, API token, screenshot folder and poll interval are set per device in the
-plugin; the token stays in each device's secret storage.
+Server URL, API key, screenshot folder and poll interval are set per device in the
+plugin; the key stays in each device's secret storage.
 
 ### Server API
 
-All endpoints need `Authorization: Bearer <token>`.
+All endpoints need `Authorization: Bearer <key>`, with a key from the settings page's
+**API keys** or a token from `BOOKMARKS_TOKENS`. The settings page itself uses a
+session cookie from signing in (`/auth/*`); only that session can manage keys
+(`GET`/`POST /keys`, `DELETE /keys/:id`) or change the password.
 
 | Endpoint | What |
 |---|---|
@@ -138,7 +150,7 @@ All endpoints need `Authorization: Bearer <token>`.
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
 | `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId}`. |
 | `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |
-| `GET /ui/` | The settings page (static, no token needed to load it; it signs in with one). |
+| `GET /ui/` | The settings page (static, no key needed to load it; it signs in with a username and password). |
 | `GET /health` | `{status, apiVersion, version}`; the plugin warns when `apiVersion` doesn't match. |
 
 ## Development
@@ -154,8 +166,8 @@ npm run build        # plugin/main.js + harness/dist
 
 The capture engine's real-browser tests run when a Chromium is available:
 `BOOKMARKS_CHROMIUM_PATH=/path/to/chrome npm test -w harness`. `npm run dev -w harness`
-runs the server without Docker (set `BOOKMARKS_TOKENS`, and `BOOKMARKS_CHROMIUM_PATH`
-if Playwright's browser isn't installed).
+runs the server without Docker (set `BOOKMARKS_CHROMIUM_PATH` if Playwright's
+browser isn't installed).
 
 Releasing: `node scripts/set-version.mjs x.y.z`, commit, then push tag `x.y.z`
 (no `v`). The release workflow publishes `ghcr.io/dillguill/bookmarks-server:x.y.z`
@@ -169,6 +181,6 @@ Server:
 
 ```sh
 cd harness
-cp .env.example .env    # set BOOKMARKS_TOKENS
+cp .env.example .env    # set TZ
 docker compose up --build
 ```

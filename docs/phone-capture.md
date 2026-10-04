@@ -30,8 +30,9 @@ server an HTTPS address that only devices on your tailnet can open:
    curl -H "Authorization: Bearer phone-token" https://mac-mini.your-tailnet.ts.net/health
    ```
 
-Give each device its own token in `BOOKMARKS_TOKENS` (for example
-`desktop-token,phone-token`) so you can revoke one without touching the others.
+Make a key for the phone on the settings page under **API keys** (for example
+"iPhone Shortcut"), so you can revoke it without touching your other devices.
+`phone-token` below stands for that key.
 
 ## 2. iOS: a share-sheet Shortcut
 

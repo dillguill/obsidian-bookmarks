@@ -14,6 +14,7 @@
       <button class="nav-item" data-section="general">General</button>
       <button class="nav-item" data-section="properties">Properties</button>
       <button class="nav-item" data-section="variables">Variables</button>
+      <button class="nav-item" data-section="keys">API keys</button>
       <div class="nav-heading">
         <span>Templates</span>
         <button class="icon-button" id="new-template" title="New template" aria-label="New template">+</button>
@@ -31,10 +32,23 @@
 
       <section id="signin" hidden>
         <h1>Sign in</h1>
-        <p class="desc">Paste one of the API tokens from the server's <code>BOOKMARKS_TOKENS</code>. It's kept in this browser only.</p>
         <form id="signin-form" class="stack">
-          <input type="password" id="token" autocomplete="current-password" placeholder="API token" required>
+          <input type="text" id="signin-username" autocomplete="username" placeholder="Username" required>
+          <input type="password" id="signin-password" autocomplete="current-password" placeholder="Password" required>
           <button type="submit" class="primary">Sign in</button>
+        </form>
+        <p class="desc">Forgot the password? Run <code>docker compose exec bookmarks-server node dist/reset-login.js</code>, then create the account again here.</p>
+      </section>
+
+      <section id="setup" hidden>
+        <h1>Create your account</h1>
+        <p class="desc">You'll sign in to this page with it. The setup code is in the server's log: <code>docker compose logs bookmarks-server</code>.</p>
+        <form id="setup-form" class="stack">
+          <input type="text" id="setup-code" autocomplete="one-time-code" placeholder="Setup code" spellcheck="false" required>
+          <input type="text" id="setup-username" autocomplete="username" placeholder="Username" required>
+          <input type="password" id="setup-password" autocomplete="new-password" placeholder="Password (8 characters or more)" minlength="8" required>
+          <input type="password" id="setup-confirm" autocomplete="new-password" placeholder="Password again" minlength="8" required>
+          <button type="submit" class="primary">Create account</button>
         </form>
       </section>
 
@@ -46,7 +60,7 @@
         <div class="setting">
           <div class="setting-info">
             <div class="setting-name">Shared settings</div>
-            <div class="desc">Everything on this page is stored on the server, so every device and every phone Shortcut uses it. Server URL, API token and the screenshot folder are set per device in the Obsidian plugin.</div>
+            <div class="desc">Everything on this page is stored on the server, so every device and every phone Shortcut uses it. Server URL, API key and the screenshot folder are set per device in the Obsidian plugin.</div>
           </div>
         </div>
         <div class="setting">
@@ -67,9 +81,37 @@
           </div>
         </div>
         <div class="setting">
-          <div class="setting-info"><div class="setting-name">Sign out</div><div class="desc">Forget the API token in this browser.</div></div>
+          <div class="setting-info"><div class="setting-name">Signed in</div><div class="desc" id="signed-in-as"></div></div>
           <button id="signout">Sign out</button>
         </div>
+        <div class="setting column">
+          <div class="setting-info"><div class="setting-name">Change password</div><div class="desc">Signs out every other browser.</div></div>
+          <form id="password-form" class="stack">
+            <input type="text" autocomplete="username" id="password-username" hidden>
+            <input type="password" id="password-current" autocomplete="current-password" placeholder="Current password" required>
+            <input type="password" id="password-new" autocomplete="new-password" placeholder="New password (8 characters or more)" minlength="8" required>
+            <button type="submit">Change password</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="keys" hidden>
+        <h1>API keys</h1>
+        <p class="desc">Each device or Shortcut that saves bookmarks uses a key: paste it into the Obsidian plugin (stored in Obsidian's secrets) or a Shortcut's <code>Authorization: Bearer</code> header. Give each device its own key so you can revoke one without the others.</p>
+        <form id="key-form" class="key-form">
+          <input type="text" id="key-name" placeholder="Name, e.g. MacBook or iPhone Shortcut" maxlength="100" required>
+          <button type="submit" class="primary">Create key</button>
+        </form>
+        <div id="key-created" class="key-created" hidden>
+          <div class="setting-name">New key for <span id="key-created-name"></span></div>
+          <p class="desc">Copy it now. It isn't stored and won't be shown again.</p>
+          <div class="key-secret-row">
+            <input type="text" id="key-secret" readonly spellcheck="false">
+            <button id="key-copy">Copy</button>
+          </div>
+        </div>
+        <div id="key-list"></div>
+        <p class="desc" id="env-tokens"></p>
       </section>
 
       <section id="properties" hidden>

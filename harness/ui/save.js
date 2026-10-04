@@ -1,5 +1,5 @@
 // Popup opened by the bookmarklet on the settings page (General). It sends the
-// page to POST /capture with the token this browser signed in with. It saves
+// page to POST /capture with this browser's settings page sign-in. It saves
 // straight away only when the link carries this browser's bookmarklet key, so
 // another site opening this page can't save bookmarks without a click.
 "use strict";
@@ -17,7 +17,8 @@ function stored(key) {
   }
 }
 
-const token = stored("bookmarks-token");
+// Sent with every request so the server accepts the session cookie (see app.ts).
+const headers = { "x-bookmarks-ui": "1" };
 const trusted = Boolean(params.get("k")) && params.get("k") === stored("bookmarks-bookmarklet-key");
 
 function status(text, isError = false) {
@@ -32,11 +33,12 @@ async function save() {
     const template = $("save-template").value || undefined;
     const res = await fetch("/capture", {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      credentials: "same-origin",
+      headers: { ...headers, "content-type": "application/json" },
       body: JSON.stringify({ url, origin: "bookmarklet", template }),
     });
     const body = await res.json().catch(() => ({}));
-    if (res.status === 401) throw new Error("The saved token wasn't accepted. Sign in again on the settings page.");
+    if (res.status === 401) throw new Error("You're signed out. Sign in again on the settings page.");
     if (!res.ok) throw new Error(body.message || body.error || `Server returned HTTP ${res.status}`);
     status("Saved. It appears in Obsidian the next time it fetches captures.");
     setTimeout(() => window.close(), 1500);
@@ -49,7 +51,10 @@ async function save() {
 async function start() {
   $("save-url").textContent = url;
   if (!/^https?:\/\//i.test(url)) return status("This page can't be saved: it isn't a web address.", true);
-  if (!token) {
+  const state = await fetch("/auth", { credentials: "same-origin", headers })
+    .then((res) => res.json())
+    .catch(() => ({}));
+  if (!state.signedIn) {
     status("Sign in on the settings page in this browser first.", true);
     const link = document.createElement("a");
     link.href = "/ui/";
@@ -65,7 +70,7 @@ async function start() {
   });
   if (pick) {
     try {
-      const res = await fetch("/templates", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch("/templates", { credentials: "same-origin", headers });
       const { templates } = await res.json();
       for (const name of templates) $("save-template").append(new Option(name, name));
       $("template-row").hidden = templates.length < 2;

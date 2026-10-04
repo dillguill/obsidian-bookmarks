@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Job, PageMeta } from "../src/api.js";
 import { createApp } from "../src/app.js";
+import { AuthStore } from "../src/auth.js";
 import { BlockedError, type CaptureEngine } from "../src/capture.js";
 import type { RenderRequest } from "../src/render.js";
 import { JobStore } from "../src/db.js";
@@ -64,6 +65,7 @@ describe("http app", () => {
     server = createApp({
       config: { tokens: new Set(["device-a"]), dataDir, waitCapMs: 100, allowPrivateNetworks: false },
       store,
+      auth: new AuthStore(":memory:"),
       worker,
       version: "0.0.0-test",
       rejectUrl: async (url) => (url.includes("192.168.") ? "private" : null),
