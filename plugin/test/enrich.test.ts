@@ -100,16 +100,20 @@ describe("applying a selection", () => {
     expect(frontmatter.tags).toEqual(["web", "clip"]);
   });
 
-  it("adds variables and files as properties named after them", () => {
-    const frontmatter: Record<string, unknown> = { tiktok_author: "old" };
-    const author = variableProperty({ kind: "variable", name: "{{tiktok_author}}", value: "Marc" }, frontmatter);
-    const shot = variableProperty({ kind: "file", file: "screenshot_banner" }, frontmatter);
-    expect(author).toMatchObject({ target: "tiktok_author", current: "old" });
-    const withVars = { ...choices, properties: [...choices.properties, author, shot] };
-    const selection = select({ properties: { "{{tiktok_author}}": pick("replace", ""), "{{screenshot_banner}}": pick("replace", "banner") } });
+  it("adds variables and files into existing properties", () => {
+    const frontmatter: Record<string, unknown> = { author: "old" };
+    const author = variableProperty({ kind: "variable", name: "{{author}}", value: "Marc" }, frontmatter, []);
+    const handle = variableProperty({ kind: "variable", name: "{{tiktok_author_handle}}", value: "@marc" }, frontmatter, ["creator"]);
+    const shot = variableProperty({ kind: "file", file: "screenshot_banner" }, frontmatter, ["banner"]);
+    expect(author).toMatchObject({ target: "author", current: "old" });
+    expect(handle.target).toBe("");
+    const withVars = { ...choices, properties: [...choices.properties, author, handle, shot] };
+    const selection = select({
+      properties: { "{{author}}": pick("replace", "author"), "{{tiktok_author_handle}}": pick("replace", ""), "{{screenshot_banner}}": pick("replace", "banner") },
+    });
     expect(filesToSave(withVars, selection)).toEqual(["screenshot_banner"]);
     applyProperties(frontmatter, withVars, selection, saved);
-    expect(frontmatter).toEqual({ tiktok_author: "Marc", banner: "[[Bookmarks/assets/n-banner.jpg]]" });
+    expect(frontmatter).toEqual({ author: "Marc", banner: "[[Bookmarks/assets/n-banner.jpg]]" });
   });
 
   it("saves the files picked rows and variables use", () => {

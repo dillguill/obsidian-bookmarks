@@ -55,6 +55,10 @@ function isEmpty(value: unknown): boolean {
 }
 
 const CUSTOM = "\u0000custom";
+
+function startingPicks(o: EnrichModalOptions): EnrichSelection {
+  return { properties: { ...o.defaults.properties }, content: o.defaults.content.map((row) => ({ ...row })), offline: o.defaults.offline };
+}
 const POSITION_LABELS: Record<Placement["position"], string> = { prepend: "Prepend", append: "Append", replace: "Replace" };
 
 export interface EnrichFiles {
@@ -74,7 +78,7 @@ export interface EnrichFiles {
 
 export interface EnrichModalOptions {
   noteName: string;
-  /** Templates the update can start from; picking one captures the page again with it. */
+  /** Templates the update can start from; picking one captures the page again with it, and the modal shows that capture via switchTo. */
   templates: string[];
   template: string;
   choices: EnrichChoices;
@@ -84,6 +88,8 @@ export interface EnrichModalOptions {
   body: string;
   /** The note's frontmatter now, for property targets and current values. */
   frontmatter: Record<string, unknown>;
+  /** Properties used anywhere in the vault, which variables can go into. */
+  vaultProperties: string[];
   /** Variables + Content offers, with their values (capture file markers still in them). */
   variables: { name: string; value: string }[];
   /** The captures behind the update, which keep making files while the modal is open. */
@@ -106,7 +112,7 @@ export class EnrichModal extends Modal {
   private readonly urls = new Map<CaptureFile, string>();
   private submitted = false;
   // Not "selection": Obsidian's Modal stores its own selection there when it opens.
-  private readonly picks: EnrichSelection;
+  private picks: EnrichSelection;
   private readonly noteHeads;
   private templateSelect!: HTMLSelectElement;
   private propsEl!: HTMLElement;
@@ -115,27 +121,60 @@ export class EnrichModal extends Modal {
   private statusEl!: HTMLElement;
   private applyButton!: HTMLButtonElement;
   private staleContent = false;
+  /** Template whose capture is on its way, while switching. */
+  private pendingTemplate: string | null = null;
 
   constructor(
     app: App,
-    private readonly o: EnrichModalOptions,
+    private o: EnrichModalOptions,
   ) {
     super(app);
-    this.picks = { properties: { ...o.defaults.properties }, content: o.defaults.content.map((row) => ({ ...row })), offline: o.defaults.offline };
+    this.picks = startingPicks(o);
     this.noteHeads = noteHeadings(o.body);
   }
 
   override onOpen(): void {
+    this.setTitle(`Update ${this.o.noteName} from source`);
+    this.build();
+  }
+
+  /** Shows a capture made with another template, starting over from what it sets up. */
+  switchTo(o: EnrichModalOptions): void {
+    for (const url of this.urls.values()) URL.revokeObjectURL(url);
+    this.urls.clear();
+    this.o = o;
+    this.pendingTemplate = null;
+    this.picks = startingPicks(o);
+    this.contentEl.empty();
+    this.build();
+  }
+
+  /** Waits on another template's capture, keeping the current one on screen until it's ready. */
+  switching(name: string): void {
+    this.pendingTemplate = name;
+    this.templateSelect.disabled = true;
+    this.applyButton.disabled = true;
+    this.renderStatus();
+  }
+
+  /** The other template's capture failed: back to the current one. */
+  switchFailed(): void {
+    this.pendingTemplate = null;
+    this.templateSelect.value = this.o.template;
+    this.templateSelect.disabled = false;
+    this.applyButton.disabled = false;
+    this.renderStatus();
+  }
+
+  private build(): void {
     const { contentEl, o } = this;
-    this.setTitle(`Update ${o.noteName} from source`);
 
     new Setting(contentEl).setName("Template").addDropdown((dropdown) => {
       for (const name of o.templates) dropdown.addOption(name, name);
       dropdown.addOption(CUSTOM, "Custom");
       dropdown.setValue(o.template).onChange((value) => {
         if (value === CUSTOM) return;
-        this.submitted = true;
-        this.close();
+        this.switching(value);
         o.onTemplate(value);
       });
       this.templateSelect = dropdown.selectEl;
@@ -179,7 +218,7 @@ export class EnrichModal extends Modal {
           .onClick(() => {
             this.submitted = true;
             this.close();
-            o.onSubmit(this.picks);
+            this.o.onSubmit(this.picks);
           });
       });
 
@@ -202,6 +241,11 @@ export class EnrichModal extends Modal {
   }
 
   private renderStatus(): void {
+    if (this.pendingTemplate !== null) {
+      this.statusEl.setText(`Fetching the page with ${this.pendingTemplate}…`);
+      this.statusEl.toggle(true);
+      return;
+    }
     const ready = this.o.files.ready();
     this.statusEl.setText(ready ? "" : this.o.files.pending().length ? "Capturing the screenshots you added…" : "Still capturing screenshots…");
     this.statusEl.toggle(!ready);
@@ -226,7 +270,8 @@ export class EnrichModal extends Modal {
     el.empty();
     const picked = this.o.choices.properties.filter((p) => this.picks.properties[p.name]);
     if (!picked.length) el.createEl("p", { cls: "setting-item-description", text: "No properties picked." });
-    const names = Object.keys(this.o.frontmatter);
+    const inNote = Object.keys(this.o.frontmatter);
+    const inVault = this.o.vaultProperties.filter((name) => !inNote.includes(name));
     for (const property of picked) {
       const pick = this.picks.properties[property.name]!;
       const setting = new Setting(el).setName(property.name);
@@ -234,7 +279,17 @@ export class EnrichModal extends Modal {
       if (!isEmpty(now)) setting.descEl.createDiv({ text: `Now: ${preview(now)}` });
       setting.descEl.createDiv({ text: `${isEmpty(now) ? "Value" : "New"}: ${preview(property.value)}` });
       setting.addDropdown((dropdown) => {
-        for (const name of new Set([property.target ?? property.name, ...names])) dropdown.addOption(name, name);
+        const select = dropdown.selectEl;
+        if (!pick.target) select.createEl("option", { text: "Choose a property…", value: "" });
+        // A template property can always go into its own name.
+        if (property.target === undefined && !inNote.includes(property.name) && !inVault.includes(property.name)) select.createEl("option", { text: property.name, value: property.name });
+        const group = (label: string, names: string[]) => {
+          if (!names.length) return;
+          const el = select.createEl("optgroup", { attr: { label } });
+          for (const name of names) el.createEl("option", { text: name, value: name });
+        };
+        group("In this note", inNote);
+        group("In the vault", inVault);
         dropdown.setValue(pick.target).onChange((value) => {
           pick.target = value;
           if (pick.mode === "merge" && !this.canMerge(property, value)) pick.mode = "replace";
@@ -286,7 +341,7 @@ export class EnrichModal extends Modal {
     // The template's whole body makes no sense as a property.
     this.offerSources(menu, (name) => name === TEMPLATE_CONTENT || !!this.picks.properties[name], (source) => {
       if (source.kind === "file") this.requestIfNeeded(source.file);
-      pick(variableProperty(source, this.o.frontmatter));
+      pick(variableProperty(source, this.o.frontmatter, this.o.vaultProperties));
     });
     menu.showAtMouseEvent(evt);
   }

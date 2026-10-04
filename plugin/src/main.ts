@@ -17,7 +17,7 @@ import {
   replaceTikTokPlayer,
   type EnrichSelection,
 } from "./enrich";
-import { EnrichModal } from "./enrich-modal";
+import { EnrichModal, type EnrichModalOptions } from "./enrich-modal";
 import { EnrichSession } from "./enrich-session";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
 import { DEFAULT_TEMPLATE, captureIdPropertyName, chooseTemplate, urlPropertyName } from "./template";
@@ -32,6 +32,12 @@ const WRITTEN_CAPTURES_KEPT = 500;
  * stays out of data.json, which sync services share between devices.
  */
 const TOKEN_SECRET_KEY = "obsidian-bookmarker-token-secret";
+
+/** A capture for "Update note from source" and what the modal shows of it. */
+interface LoadedEnrich {
+  session: EnrichSession;
+  options: Omit<EnrichModalOptions, "onTemplate" | "onSubmit" | "onDone">;
+}
 
 export default class BookmarksPlugin extends Plugin {
   override settings: BookmarksSettings = DEFAULT_SETTINGS;
@@ -336,20 +342,63 @@ export default class BookmarksPlugin extends Plugin {
    * and files to pull into it. The modal opens once the note is rendered; the
    * screenshots keep arriving while it's open.
    */
-  async enrich(file: TFile, templateName: string | null = null): Promise<void> {
+  async enrich(file: TFile): Promise<void> {
     const url = this.noteUrl(file);
     if (!url) {
       new Notice("This note has no URL property to fetch.");
       return;
     }
     const progress = new Notice("Fetching page…", 0);
-    let session: EnrichSession | null = null;
-    const client = this.client();
     try {
       const problem = await this.checkServer();
       if (problem) throw new Error(problem);
       await this.syncShared().catch((err: unknown) => console.warn("bookmarks: couldn't fetch shared settings", err));
-      session = new EnrichSession(client, await client.capture(url, "enrich", false, templateName, ENRICH_FILES), url, templateName);
+      let current = await this.loadEnrich(file, url, null);
+      progress.hide();
+      let ended = false;
+      const end = () => {
+        ended = true;
+        current.session.close();
+      };
+      const options = (loaded: LoadedEnrich): EnrichModalOptions => ({
+        ...loaded.options,
+        onTemplate: (name) => {
+          // The current capture stays on screen until the new one is ready.
+          this.loadEnrich(file, url, name).then(
+            (next) => {
+              if (ended) return next.session.close();
+              current.session.close();
+              current = next;
+              next.session.onChange = () => modal.refresh();
+              modal.switchTo(options(next));
+            },
+            (err: unknown) => {
+              if (ended) return;
+              new Notice(`Couldn't fetch the page with ${name}: ${err instanceof Error ? err.message : String(err)}`);
+              modal.switchFailed();
+            },
+          );
+        },
+        onSubmit: (selection) => {
+          ended = true;
+          void this.applyEnrich(file, loaded.session, loaded.options.choices, selection).finally(() => loaded.session.close());
+        },
+        onDone: end,
+      });
+      const modal = new EnrichModal(this.app, options(current));
+      current.session.onChange = () => modal.refresh();
+      modal.open();
+    } catch (err) {
+      progress.hide();
+      new Notice(`Couldn't fetch the page: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** Captures the note's page with a template and works out what it offers; the session is closed if that fails. */
+  private async loadEnrich(file: TFile, url: string, templateName: string | null): Promise<LoadedEnrich> {
+    const client = this.client();
+    const session = new EnrichSession(client, await client.capture(url, "enrich", false, templateName, ENRICH_FILES), url, templateName);
+    try {
       const job = await session.waitForNote();
       const note = JSON.parse(await client.assetText(job.id, "note")) as RenderedNote;
       const template = this.templates.find((t) => t.name === note.template) ?? DEFAULT_TEMPLATE;
@@ -359,43 +408,45 @@ export default class BookmarksPlugin extends Plugin {
       choices.images = session.available();
       const text = await this.app.vault.read(file);
       const variables = [{ name: TEMPLATE_CONTENT, value: choices.body }, ...(await this.pageVariables(note, job, url))].filter((v) => v.value.trim());
-      progress.hide();
-      const live = session;
       const tiktok = hasTikTokPlayer(text);
-      const modal = new EnrichModal(this.app, {
-        noteName: file.basename,
-        templates: this.templates.filter((t) => t.updateFromSource !== false || t.name === template.name).map((t) => t.name),
-        template: template.name,
-        choices,
-        defaults: defaultSelection(choices),
-        body: text.slice(getFrontMatterInfo(text).contentStart),
-        frontmatter: current,
-        variables,
-        files: {
-          available: () => live.available(),
-          pending: () => live.pending(),
-          onDemand: ON_DEMAND_FILES,
-          ready: () => live.ready(),
-          data: (kind) => live.file(kind),
-          imageType: () => (live.screenshotExt() === "png" ? "image/png" : "image/jpeg"),
-          request: (kind) => void live.request(kind).catch((err: unknown) => new Notice(`Couldn't capture ${kind}: ${String(err)}`)),
-          drop: (kind) => void live.drop(kind),
+      return {
+        session,
+        options: {
+          noteName: file.basename,
+          templates: this.templates.filter((t) => t.updateFromSource !== false || t.name === template.name).map((t) => t.name),
+          template: template.name,
+          choices,
+          defaults: defaultSelection(choices),
+          body: text.slice(getFrontMatterInfo(text).contentStart),
+          frontmatter: current,
+          vaultProperties: this.vaultProperties(),
+          variables,
+          files: {
+            available: () => session.available(),
+            pending: () => session.pending(),
+            onDemand: ON_DEMAND_FILES,
+            ready: () => session.ready(),
+            data: (kind) => session.file(kind),
+            imageType: () => (session.screenshotExt() === "png" ? "image/png" : "image/jpeg"),
+            request: (kind) => void session.request(kind).catch((err: unknown) => new Notice(`Couldn't capture ${kind}: ${String(err)}`)),
+            drop: (kind) => void session.drop(kind),
+          },
+          offline: tiktok ? offlineFiles(choices.images) : [],
         },
-        offline: tiktok ? offlineFiles(choices.images) : [],
-        onTemplate: (name) => {
-          live.close();
-          void this.enrich(file, name);
-        },
-        onSubmit: (selection) => void this.applyEnrich(file, live, choices, selection).finally(() => live.close()),
-        onDone: () => live.close(),
-      });
-      live.onChange = () => modal.refresh();
-      modal.open();
+      };
     } catch (err) {
-      progress.hide();
-      session?.close();
-      new Notice(`Couldn't fetch the page: ${err instanceof Error ? err.message : String(err)}`);
+      session.close();
+      throw err;
     }
+  }
+
+  /** Every property name used in the vault's notes, sorted. */
+  private vaultProperties(): string[] {
+    const names = new Set<string>();
+    for (const note of this.app.vault.getMarkdownFiles()) {
+      for (const name of Object.keys(this.app.metadataCache.getFileCache(note)?.frontmatter ?? {})) names.add(name);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
   }
 
   /** Every variable the server rendered the note with; older servers send only the note, so fall back to the page's details. */
