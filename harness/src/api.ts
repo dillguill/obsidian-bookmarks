@@ -107,6 +107,8 @@ export interface RenderedNote {
   /** "---\n…\n---\n" */
   frontmatter: string;
   content: string;
+  /** Every non-empty template variable the note was rendered with, by "{{name}}", for "Update note from source". */
+  variables?: Record<string, string>;
 }
 
 /**

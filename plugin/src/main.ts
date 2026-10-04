@@ -358,18 +358,7 @@ export default class BookmarksPlugin extends Plugin {
       const choices = enrichChoices(note, current, parseYaml, CAPTURE_FILES, captureIdPropertyName(template));
       choices.images = session.available();
       const text = await this.app.vault.read(file);
-      const markdown = job.assets.includes("markdown") ? await client.assetText(job.id, "markdown").catch(() => "") : "";
-      const meta = job.meta;
-      const variables = [
-        { name: TEMPLATE_CONTENT, value: choices.body },
-        { name: "{{content}}", value: markdown },
-        { name: "{{title}}", value: meta?.title ?? "" },
-        { name: "{{description}}", value: meta?.description ?? "" },
-        { name: "{{author}}", value: meta?.author ?? "" },
-        { name: "{{published}}", value: meta?.published ?? "" },
-        { name: "{{site}}", value: meta?.site ?? "" },
-        { name: "{{url}}", value: url },
-      ].filter((v) => v.value.trim());
+      const variables = [{ name: TEMPLATE_CONTENT, value: choices.body }, ...(await this.pageVariables(note, job, url))].filter((v) => v.value.trim());
       progress.hide();
       const live = session;
       const tiktok = hasTikTokPlayer(text);
@@ -407,6 +396,22 @@ export default class BookmarksPlugin extends Plugin {
       session?.close();
       new Notice(`Couldn't fetch the page: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /** Every variable the server rendered the note with; older servers send only the note, so fall back to the page's details. */
+  private async pageVariables(note: RenderedNote, job: Job, url: string): Promise<{ name: string; value: string }[]> {
+    if (note.variables) return Object.entries(note.variables).map(([name, value]) => ({ name, value }));
+    const markdown = job.assets.includes("markdown") ? await this.client().assetText(job.id, "markdown").catch(() => "") : "";
+    const meta = job.meta;
+    return [
+      { name: "{{content}}", value: markdown },
+      { name: "{{title}}", value: meta?.title ?? "" },
+      { name: "{{description}}", value: meta?.description ?? "" },
+      { name: "{{author}}", value: meta?.author ?? "" },
+      { name: "{{published}}", value: meta?.published ?? "" },
+      { name: "{{site}}", value: meta?.site ?? "" },
+      { name: "{{url}}", value: url },
+    ];
   }
 
   private async applyEnrich(file: TFile, session: EnrichSession, choices: ReturnType<typeof enrichChoices>, selection: EnrichSelection): Promise<void> {

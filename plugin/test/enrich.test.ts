@@ -14,6 +14,7 @@ import {
   replaceTikTokPlayer,
   type ContentRow,
   type EnrichSelection,
+  variableProperty,
 } from "../src/enrich";
 
 /** The slice of YAML Web Clipper writes: quoted strings, numbers, empty values and lists of quoted strings. */
@@ -97,6 +98,18 @@ describe("applying a selection", () => {
     });
     applyProperties(frontmatter, choices, select({ properties: { tags: pick("replace", "tags") } }), saved);
     expect(frontmatter.tags).toEqual(["web", "clip"]);
+  });
+
+  it("adds variables and files as properties named after them", () => {
+    const frontmatter: Record<string, unknown> = { tiktok_author: "old" };
+    const author = variableProperty({ kind: "variable", name: "{{tiktok_author}}", value: "Marc" }, frontmatter);
+    const shot = variableProperty({ kind: "file", file: "screenshot_banner" }, frontmatter);
+    expect(author).toMatchObject({ target: "tiktok_author", current: "old" });
+    const withVars = { ...choices, properties: [...choices.properties, author, shot] };
+    const selection = select({ properties: { "{{tiktok_author}}": pick("replace", ""), "{{screenshot_banner}}": pick("replace", "banner") } });
+    expect(filesToSave(withVars, selection)).toEqual(["screenshot_banner"]);
+    applyProperties(frontmatter, withVars, selection, saved);
+    expect(frontmatter).toEqual({ tiktok_author: "Marc", banner: "[[Bookmarks/assets/n-banner.jpg]]" });
   });
 
   it("saves the files picked rows and variables use", () => {
