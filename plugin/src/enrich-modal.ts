@@ -1,133 +1,121 @@
-import { App, Modal, Setting } from "obsidian";
+import { App, Menu, Modal, Setting } from "obsidian";
 import { fileExt, type CaptureFile } from "./api";
-import { fileLabel, type EnrichChoices, type EnrichSelection } from "./enrich";
+import {
+  fileLabel,
+  noteHeadings,
+  placementOrder,
+  samePlacement,
+  type ContentItem,
+  type ContentRow,
+  type EnrichChoices,
+  type EnrichSelection,
+  type Placement,
+  type PropertyChoice,
+} from "./enrich";
 
-function preview(value: unknown): string {
+function preview(value: unknown, max = 160): string {
   if (value === undefined || value === null || value === "") return "(none)";
   const text = Array.isArray(value) ? value.map(String).join(", ") : typeof value === "string" ? value : JSON.stringify(value);
-  return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+  const flat = text.replace(/bookmarks-[a-z_0-9]+-5f2c9e/g, "…").replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+function isEmpty(value: unknown): boolean {
+  return value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
+}
+
+const CUSTOM = "\u0000custom";
+const POSITION_LABELS: Record<Placement["position"], string> = { prepend: "Prepend", append: "Append", replace: "Replace" };
+
+export interface EnrichModalOptions {
+  noteName: string;
+  /** Templates the update can start from; picking one captures the page again with it. */
+  templates: string[];
+  template: string;
+  choices: EnrichChoices;
+  /** The selection the template sets up. */
+  defaults: EnrichSelection;
+  /** The note's body (after its frontmatter), for its headings. */
+  body: string;
+  /** The note's frontmatter now, for property targets and current values. */
+  frontmatter: Record<string, unknown>;
+  /** Variables + Content offers, with their values (capture file markers still in them). */
+  variables: { name: string; value: string }[];
+  /** Image data by capture file, for previews. */
+  images: Partial<Record<CaptureFile, ArrayBuffer>>;
+  imageType: string;
+  /** Files that can replace the note's TikTok player; empty when it has none. */
+  offline: CaptureFile[];
+  onTemplate: (name: string) => void;
+  onSubmit: (selection: EnrichSelection) => void;
+  onDone: () => void;
 }
 
 /**
- * Lets the user pick what a fresh capture adds to an existing note: each
- * property (added, replaced, or merged into a list), the note body and each
- * image, and whether they go before or after the note's body.
+ * Lists what a fresh capture adds to an existing note, starting from what the
+ * template sets up: properties (each into a property, added, replaced or merged)
+ * and content rows (screenshots, variables and typed text), each put before, after
+ * or in place of the note body or one of its headings. Content rows are grouped by
+ * where they land, in note order; dragging a row into another group moves it there.
  */
 export class EnrichModal extends Modal {
-  private readonly urls: string[] = [];
+  private readonly urls = new Map<CaptureFile, string>();
   private submitted = false;
+  private readonly selection: EnrichSelection;
+  private readonly headings;
+  private templateSelect!: HTMLSelectElement;
+  private propsEl!: HTMLElement;
+  private contentEl2!: HTMLElement;
+  private dragging: ContentRow | null = null;
 
   constructor(
     app: App,
-    private readonly noteName: string,
-    private readonly choices: EnrichChoices,
-    /** Image data by capture file, for previews. */
-    private readonly images: Partial<Record<CaptureFile, ArrayBuffer>>,
-    private readonly imageType: string,
-    private readonly noteBodyEmpty: boolean,
-    /** Files that can replace the note's TikTok player; empty when it has none. */
-    private readonly offline: CaptureFile[],
-    private readonly onSubmit: (selection: EnrichSelection) => void,
-    private readonly onDone: () => void,
+    private readonly o: EnrichModalOptions,
   ) {
     super(app);
+    this.selection = { properties: { ...o.defaults.properties }, content: o.defaults.content.map((row) => ({ ...row })), offline: o.defaults.offline };
+    this.headings = noteHeadings(o.body);
   }
 
   override onOpen(): void {
-    const { contentEl, choices } = this;
-    this.setTitle(`Update ${this.noteName} from source`);
-    // Missing properties are picked by default; ones that would overwrite a value aren't.
-    const selection: EnrichSelection = {
-      properties: Object.fromEntries(choices.properties.filter((p) => p.current === undefined || p.current === null || p.current === "").map((p) => [p.name, "replace"])),
-      body: this.noteBodyEmpty && choices.body !== "",
-      images: [],
-      position: "append",
-      offline: false,
-    };
+    const { contentEl, o } = this;
+    this.setTitle(`Update ${o.noteName} from source`);
 
-    if (choices.properties.length + choices.images.length === 0 && !choices.body && !this.offline.length) {
-      contentEl.createEl("p", { text: "The page has nothing this note doesn't already have." });
+    new Setting(contentEl).setName("Template").addDropdown((dropdown) => {
+      for (const name of o.templates) dropdown.addOption(name, name);
+      dropdown.addOption(CUSTOM, "Custom");
+      dropdown.setValue(o.template).onChange((value) => {
+        if (value === CUSTOM) return;
+        this.submitted = true;
+        this.close();
+        o.onTemplate(value);
+      });
+      this.templateSelect = dropdown.selectEl;
+    });
+
+    new Setting(contentEl).setName("Properties").setHeading();
+    this.propsEl = contentEl.createDiv();
+    const addProperty = contentEl.createEl("button", { text: "+ Property" });
+    addProperty.onclick = (evt) => this.propertyMenu(evt);
+    if (o.choices.unchanged.length > 0) {
+      contentEl.createEl("p", { cls: "setting-item-description", text: `Already up to date: ${o.choices.unchanged.join(", ")}` });
     }
 
-    if (choices.properties.length > 0) new Setting(contentEl).setName("Properties").setHeading();
-    for (const property of choices.properties) {
-      const exists = !(property.current === undefined || property.current === null || property.current === "");
-      const setting = new Setting(contentEl).setName(property.name);
-      const desc = setting.descEl;
-      if (exists) desc.createDiv({ text: `Now: ${preview(property.current)}` });
-      desc.createDiv({ text: `${exists ? "New" : "Value"}: ${preview(property.value)}` });
-      let mode: "replace" | "merge" = "replace";
-      if (property.mergeable) {
-        setting.addDropdown((dropdown) =>
-          dropdown
-            .addOption("replace", "Replace")
-            .addOption("merge", "Add to list")
-            .setValue(mode)
-            .onChange((value) => {
-              mode = value as "replace" | "merge";
-              if (selection.properties[property.name]) selection.properties[property.name] = mode;
-            }),
-        );
-      }
-      setting.addToggle((toggle) =>
-        toggle
-          .setTooltip(exists ? (property.mergeable ? "Replace or add to the current value" : "Replace the current value") : "Add this property")
-          .setValue(property.name in selection.properties)
-          .onChange((on) => {
-            if (on) selection.properties[property.name] = mode;
-            else delete selection.properties[property.name];
-          }),
-      );
-    }
-    if (choices.unchanged.length > 0) {
-      contentEl.createEl("p", { cls: "setting-item-description", text: `Already up to date: ${choices.unchanged.join(", ")}` });
-    }
+    new Setting(contentEl).setName("Content").setHeading();
+    this.contentEl2 = contentEl.createDiv();
+    const addContent = contentEl.createEl("button", { text: "+ Content" });
+    addContent.onclick = (evt) => this.contentMenu(evt);
 
-    if (choices.body || choices.images.length > 0) new Setting(contentEl).setName("Note body").setHeading();
-    if (this.offline.length > 0) {
-      const video = this.offline.includes("tiktok_video");
+    if (o.offline.length > 0) {
+      const video = o.offline.includes("tiktok_video");
       new Setting(contentEl)
         .setName("Save TikTok offline")
-        .setDesc(`Replace the TikTok player in the note with the ${video ? "video" : `${this.offline.length} photos`}, saved in the vault.`)
-        .addToggle((toggle) => toggle.setValue(false).onChange((on) => (selection.offline = on)));
-    }
-    if (choices.body) {
-      new Setting(contentEl)
-        .setName("Page content")
-        .setDesc(preview(choices.body.replace(/bookmarks-[a-z_]+-5f2c9e/g, "…")))
-        .addToggle((toggle) => toggle.setValue(selection.body).onChange((on) => (selection.body = on)));
-    }
-    for (const kind of choices.images) {
-      const setting = new Setting(contentEl).setName(fileLabel(kind));
-      const data = this.images[kind];
-      // Images: the files whose extension is the screenshot format's.
-      if (data && fileExt(kind, null) === null) {
-        const url = URL.createObjectURL(new Blob([data], { type: this.imageType }));
-        this.urls.push(url);
-        const img = setting.descEl.createEl("img", { attr: { src: url, alt: fileLabel(kind) } });
-        img.style.maxWidth = "220px";
-        img.style.maxHeight = "140px";
-        img.style.objectFit = "cover";
-        img.style.objectPosition = "top";
-        img.style.borderRadius = "4px";
-      }
-      setting.addToggle((toggle) =>
-        toggle.setValue(false).onChange((on) => {
-          selection.images = on ? [...selection.images, kind] : selection.images.filter((k) => k !== kind);
-        }),
-      );
-    }
-    if (choices.body || choices.images.length > 0) {
-      new Setting(contentEl)
-        .setName("Position")
-        .setDesc("Where picked content and images go in the note.")
-        .addDropdown((dropdown) =>
-          dropdown
-            .addOption("append", "After the note's body")
-            .addOption("prepend", "Before the note's body")
-            .addOption("replace", "Replace the note's body")
-            .setValue(selection.position)
-            .onChange((value) => (selection.position = value as EnrichSelection["position"])),
+        .setDesc(`Replace the TikTok player in the note with the ${video ? "video" : `${o.offline.length} photos`}, saved in the vault.`)
+        .addToggle((toggle) =>
+          toggle.setValue(this.selection.offline).onChange((on) => {
+            this.selection.offline = on;
+            this.custom();
+          }),
         );
     }
 
@@ -140,14 +128,277 @@ export class EnrichModal extends Modal {
           .onClick(() => {
             this.submitted = true;
             this.close();
-            this.onSubmit(selection);
+            o.onSubmit(this.selection);
           }),
       );
+
+    this.renderProperties();
+    this.renderContent();
   }
 
   override onClose(): void {
-    for (const url of this.urls) URL.revokeObjectURL(url);
+    for (const url of this.urls.values()) URL.revokeObjectURL(url);
     this.contentEl.empty();
-    if (!this.submitted) this.onDone();
+    if (!this.submitted) this.o.onDone();
+  }
+
+  /** Any change makes the selection the user's own. */
+  private custom(): void {
+    this.templateSelect.value = CUSTOM;
+  }
+
+  // ---- properties ----
+
+  private renderProperties(): void {
+    const el = this.propsEl;
+    el.empty();
+    const picked = this.o.choices.properties.filter((p) => this.selection.properties[p.name]);
+    if (!picked.length) el.createEl("p", { cls: "setting-item-description", text: "No properties picked." });
+    const names = Object.keys(this.o.frontmatter);
+    for (const property of picked) {
+      const pick = this.selection.properties[property.name]!;
+      const setting = new Setting(el).setName(property.name);
+      const now = this.o.frontmatter[pick.target];
+      if (!isEmpty(now)) setting.descEl.createDiv({ text: `Now: ${preview(now)}` });
+      setting.descEl.createDiv({ text: `${isEmpty(now) ? "Value" : "New"}: ${preview(property.value)}` });
+      setting.addDropdown((dropdown) => {
+        for (const name of new Set([property.name, ...names])) dropdown.addOption(name, name);
+        dropdown.setValue(pick.target).onChange((value) => {
+          pick.target = value;
+          if (pick.mode === "merge" && !this.canMerge(property, value)) pick.mode = "replace";
+          this.custom();
+          this.renderProperties();
+        });
+      });
+      setting.addDropdown((dropdown) => {
+        dropdown.addOption("replace", isEmpty(now) ? "Add" : "Replace");
+        if (this.canMerge(property, pick.target)) dropdown.addOption("merge", "Merge");
+        dropdown.setValue(pick.mode).onChange((value) => {
+          pick.mode = value as typeof pick.mode;
+          this.custom();
+        });
+      });
+      setting.addExtraButton((button) =>
+        button
+          .setIcon("x")
+          .setTooltip("Remove")
+          .onClick(() => {
+            delete this.selection.properties[property.name];
+            this.custom();
+            this.renderProperties();
+          }),
+      );
+    }
+  }
+
+  private canMerge(property: PropertyChoice, target: string): boolean {
+    const now = this.o.frontmatter[target];
+    return !isEmpty(now) && (Array.isArray(now) || Array.isArray(property.value));
+  }
+
+  private propertyMenu(evt: MouseEvent): void {
+    const menu = new Menu();
+    const left = this.o.choices.properties.filter((p) => !this.selection.properties[p.name]);
+    if (!left.length) menu.addItem((item) => item.setTitle("Nothing else on this page").setDisabled(true));
+    for (const property of left) {
+      menu.addItem((item) =>
+        item.setTitle(property.name).onClick(() => {
+          this.selection.properties[property.name] = { mode: this.canMerge(property, property.name) ? "merge" : "replace", target: property.name };
+          this.custom();
+          this.renderProperties();
+        }),
+      );
+    }
+    menu.showAtMouseEvent(evt);
+  }
+
+  // ---- content ----
+
+  private targetLabel(heading: number | null): string {
+    if (heading === null) return "Note body";
+    const h = this.headings[heading]!;
+    return `${"#".repeat(h.level)} ${h.text}`;
+  }
+
+  private placementLabel(p: Placement): string {
+    return `${POSITION_LABELS[p.position]} ${p.position === "replace" ? "" : "to "}${this.targetLabel(p.heading)}`;
+  }
+
+  /** Every placement a row can be dragged to (replacing is picked from the dropdown). */
+  private allPlacements(): Placement[] {
+    const targets: (number | null)[] = [null, ...this.headings.map((_, i) => i)];
+    return targets.flatMap((heading) => [
+      { heading, position: "prepend" as const },
+      { heading, position: "append" as const },
+    ]);
+  }
+
+  private renderContent(): void {
+    const el = this.contentEl2;
+    el.empty();
+    const rows = this.selection.content;
+    if (!rows.length && !this.dragging) el.createEl("p", { cls: "setting-item-description", text: "Nothing picked for the note body." });
+    const used = rows.map((row): Placement => ({ heading: row.heading, position: row.position }));
+    const shown = this.dragging ? [...used, ...this.allPlacements()] : used;
+    const groups: Placement[] = [];
+    for (const p of placementOrder(shown, this.o.body)) if (!groups.some((g) => samePlacement(g, p))) groups.push(p);
+    for (const group of groups) {
+      const items = rows.filter((row) => samePlacement(row, group));
+      const box = el.createDiv();
+      box.style.borderRadius = "6px";
+      box.style.padding = "2px 4px";
+      box.style.marginBottom = "6px";
+      if (!items.length) box.style.border = "1px dashed var(--background-modifier-border)";
+      box.dataset.heading = String(group.heading);
+      box.dataset.position = group.position;
+      box.createDiv({ text: this.placementLabel(group), cls: "setting-item-description" }).style.fontWeight = "600";
+      for (const row of items) this.renderRow(box, row);
+    }
+  }
+
+  private renderRow(parent: HTMLElement, row: ContentRow): void {
+    const line = parent.createDiv();
+    Object.assign(line.style, {
+      display: "flex",
+      flexWrap: "wrap",
+      alignItems: "center",
+      gap: "8px",
+      padding: "6px 8px",
+      marginBottom: "4px",
+      border: "1px solid var(--background-modifier-border)",
+      borderRadius: "6px",
+      background: "var(--background-secondary)",
+      opacity: this.dragging === row ? "0.4" : "1",
+    });
+    line.dataset.row = String(this.selection.content.indexOf(row));
+
+    const handle = line.createSpan({ text: "⋮⋮", attr: { "aria-label": "Drag to move" } });
+    Object.assign(handle.style, { cursor: "grab", touchAction: "none", color: "var(--text-muted)", userSelect: "none" });
+    handle.onpointerdown = (evt) => this.startDrag(evt, row);
+
+    const main = line.createDiv();
+    Object.assign(main.style, { flex: "1 1 200px", minWidth: "0", display: "flex", alignItems: "center", gap: "8px" });
+    this.renderItem(main, row.item);
+
+    const target = line.createEl("select", { cls: "dropdown" });
+    target.createEl("option", { text: "Note body", value: "" });
+    this.headings.forEach((h, i) => target.createEl("option", { text: `${"  ".repeat(h.level - 1)}${"#".repeat(h.level)} ${h.text}`, value: String(i) }));
+    target.value = row.heading === null ? "" : String(row.heading);
+    const position = line.createEl("select", { cls: "dropdown" });
+    for (const [value, text] of Object.entries(POSITION_LABELS)) position.createEl("option", { text, value });
+    position.value = row.position;
+    const move = () => {
+      row.heading = target.value === "" ? null : Number(target.value);
+      row.position = position.value as Placement["position"];
+      // Moved rows go last in their new group.
+      this.selection.content = [...this.selection.content.filter((r) => r !== row), row];
+      this.custom();
+      this.renderContent();
+    };
+    target.onchange = move;
+    position.onchange = move;
+
+    const remove = line.createEl("button", { text: "×", attr: { "aria-label": "Remove" } });
+    remove.onclick = () => {
+      this.selection.content = this.selection.content.filter((r) => r !== row);
+      this.custom();
+      this.renderContent();
+    };
+  }
+
+  private renderItem(el: HTMLElement, item: ContentItem): void {
+    if (item.kind === "file") {
+      const data = this.o.images[item.file];
+      if (data && fileExt(item.file, null) === null) {
+        let url = this.urls.get(item.file);
+        if (!url) {
+          url = URL.createObjectURL(new Blob([data], { type: this.o.imageType }));
+          this.urls.set(item.file, url);
+        }
+        const img = el.createEl("img", { attr: { src: url, alt: fileLabel(item.file) } });
+        Object.assign(img.style, { width: "64px", height: "40px", objectFit: "cover", objectPosition: "top", borderRadius: "4px", flex: "none" });
+      }
+      el.createSpan({ text: fileLabel(item.file) });
+    } else if (item.kind === "variable") {
+      el.createSpan({ text: item.name }).style.fontWeight = "600";
+      const value = el.createSpan({ text: preview(item.value, 80), cls: "setting-item-description" });
+      Object.assign(value.style, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+    } else {
+      const input = el.createEl("textarea", { attr: { rows: "2", placeholder: "A heading or note" } });
+      input.value = item.text;
+      input.style.width = "100%";
+      input.oninput = () => {
+        item.text = input.value;
+        this.custom();
+      };
+    }
+  }
+
+  private contentMenu(evt: MouseEvent): void {
+    const menu = new Menu();
+    const picked = this.selection.content.map((row) => row.item);
+    const add = (item: ContentItem) => {
+      this.selection.content.push({ item, heading: null, position: "append" });
+      this.custom();
+      this.renderContent();
+    };
+    const files = this.o.choices.images.filter((kind) => !picked.some((i) => i.kind === "file" && i.file === kind));
+    if (files.length) {
+      menu.addItem((item) => item.setTitle("Screenshots and files").setDisabled(true));
+      for (const kind of files) menu.addItem((item) => item.setTitle(fileLabel(kind)).onClick(() => add({ kind: "file", file: kind })));
+      menu.addSeparator();
+    }
+    const vars = this.o.variables.filter((v) => !picked.some((i) => i.kind === "variable" && i.name === v.name));
+    if (vars.length) {
+      menu.addItem((item) => item.setTitle("Variables").setDisabled(true));
+      for (const v of vars) menu.addItem((item) => item.setTitle(v.name).onClick(() => add({ kind: "variable", name: v.name, value: v.value })));
+      menu.addSeparator();
+    }
+    menu.addItem((item) => item.setTitle("Text").onClick(() => add({ kind: "text", text: "" })));
+    menu.showAtMouseEvent(evt);
+  }
+
+  // ---- drag to move ----
+
+  private startDrag(evt: PointerEvent, row: ContentRow): void {
+    evt.preventDefault();
+    this.dragging = row;
+    this.renderContent();
+    const over = (e: PointerEvent): HTMLElement | null => {
+      const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+      return el?.closest<HTMLElement>("[data-position]") ?? null;
+    };
+    const onMove = (e: PointerEvent) => {
+      for (const box of Array.from(this.contentEl2.querySelectorAll<HTMLElement>("[data-position]"))) box.style.background = "";
+      const box = over(e);
+      if (box) box.style.background = "var(--background-modifier-hover)";
+    };
+    const onUp = (e: PointerEvent) => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      const box = over(e);
+      this.dragging = null;
+      if (box && this.contentEl2.contains(box)) {
+        const rest = this.selection.content.filter((r) => r !== row);
+        row.heading = box.dataset.heading === "null" ? null : Number(box.dataset.heading);
+        row.position = box.dataset.position as Placement["position"];
+        // Before the row under the pointer when on its top half, else after the group's last row.
+        const target = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>("[data-row]");
+        const beside = target ? this.selection.content[Number(target.dataset.row)] : undefined;
+        let at = rest.length;
+        if (beside && beside !== row && samePlacement(beside, row)) {
+          const rect = target!.getBoundingClientRect();
+          at = rest.indexOf(beside) + (e.clientY > rect.top + rect.height / 2 ? 1 : 0);
+        }
+        rest.splice(at, 0, row);
+        this.selection.content = rest;
+        this.custom();
+      }
+      this.renderContent();
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
   }
 }

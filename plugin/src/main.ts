@@ -6,11 +6,12 @@ import { DedupIndex } from "./dedup";
 import {
   ENRICH_FILES,
   applyProperties,
-  bodyBlock,
+  defaultSelection,
   enrichChoices,
   filesToSave,
   hasTikTokPlayer,
-  insertBlock,
+  placeContent,
+  TEMPLATE_CONTENT,
   offlineFiles,
   replaceTikTokPlayer,
   type EnrichSelection,
@@ -331,7 +332,7 @@ export default class BookmarksPlugin extends Plugin {
   }
 
   /** Captures a note's page again and lets the user pick which properties, content and images to pull into it. */
-  async enrich(file: TFile): Promise<void> {
+  async enrich(file: TFile, templateName: string | null = null): Promise<void> {
     const url = this.noteUrl(file);
     if (!url) {
       new Notice("This note has no URL property to fetch.");
@@ -344,7 +345,7 @@ export default class BookmarksPlugin extends Plugin {
       const problem = await this.checkServer();
       if (problem) throw new Error(problem);
       await this.syncShared().catch((err: unknown) => console.warn("bookmarks: couldn't fetch shared settings", err));
-      job = await client.capture(url, "enrich", true, null, ENRICH_FILES);
+      job = await client.capture(url, "enrich", true, templateName, ENRICH_FILES);
       const deadline = Date.now() + ENRICH_TIMEOUT_MS;
       while (job.status === "pending" || job.status === "running") {
         if (Date.now() > deadline) throw new Error("the server is still capturing the page. Try again in a minute.");
@@ -362,22 +363,41 @@ export default class BookmarksPlugin extends Plugin {
       const current = { ...(this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) } as Record<string, unknown>;
       const choices = enrichChoices(note, current, parseYaml, available, captureIdPropertyName(template));
       const text = await this.app.vault.read(file);
-      const bodyEmpty = !text.slice(getFrontMatterInfo(text).contentStart).trim();
       const offline = hasTikTokPlayer(text) ? offlineFiles(choices.images) : [];
+      const markdown = job.assets.includes("markdown") ? await client.assetText(job.id, "markdown").catch(() => "") : "";
+      const meta = job.meta;
+      const variables = [
+        { name: TEMPLATE_CONTENT, value: choices.body },
+        { name: "{{content}}", value: markdown },
+        { name: "{{title}}", value: meta?.title ?? "" },
+        { name: "{{description}}", value: meta?.description ?? "" },
+        { name: "{{author}}", value: meta?.author ?? "" },
+        { name: "{{published}}", value: meta?.published ?? "" },
+        { name: "{{site}}", value: meta?.site ?? "" },
+        { name: "{{url}}", value: url },
+      ].filter((v) => v.value.trim());
       progress.hide();
       const settled = job;
       const done = () => void client.delivered(settled.id).catch(() => {});
-      new EnrichModal(
-        this.app,
-        file.basename,
+      new EnrichModal(this.app, {
+        noteName: file.basename,
+        templates: this.templates.map((t) => t.name),
+        template: template.name,
         choices,
+        defaults: defaultSelection(choices),
+        body: text.slice(getFrontMatterInfo(text).contentStart),
+        frontmatter: current,
+        variables,
         images,
-        settled.screenshotExt === "png" ? "image/png" : "image/jpeg",
-        bodyEmpty,
+        imageType: settled.screenshotExt === "png" ? "image/png" : "image/jpeg",
         offline,
-        (selection) => void this.applyEnrich(file, settled, choices, images, selection).finally(done),
-        done,
-      ).open();
+        onTemplate: (name) => {
+          done();
+          void this.enrich(file, name);
+        },
+        onSubmit: (selection) => void this.applyEnrich(file, settled, choices, images, selection).finally(done),
+        onDone: done,
+      }).open();
     } catch (err) {
       progress.hide();
       if (job && (job.status === "done" || job.status === "failed")) void client.delivered(job.id).catch(() => {});
@@ -404,17 +424,19 @@ export default class BookmarksPlugin extends Plugin {
       }
       const files = Object.fromEntries(wanted.map((kind) => [kind, images[kind] ?? null]));
       const saved = await saveCaptureFiles(this.vaultPort(), this.settings.assetsFolder, files, job.screenshotExt, file.basename);
-      const block = bodyBlock(choices, selection, saved);
       const offline = selection.offline ? offlineFiles(choices.images) : [];
-      if (block || offline.length) {
-        await this.app.vault.process(file, (text) =>
-          replaceTikTokPlayer(insertBlock(text, block, selection.position, getFrontMatterInfo(text).contentStart), offline, saved),
-        );
+      let changed = false;
+      if (selection.content.length || offline.length) {
+        await this.app.vault.process(file, (text) => {
+          const out = replaceTikTokPlayer(placeContent(text, selection.content, saved, getFrontMatterInfo(text).contentStart), offline, saved);
+          changed = out !== text;
+          return out;
+        });
       }
       if (Object.keys(selection.properties).length > 0) {
         await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => applyProperties(frontmatter, choices, selection, saved));
       }
-      new Notice(block || offline.length || Object.keys(selection.properties).length > 0 ? `Updated ${file.basename}.` : "Nothing picked; the note is unchanged.");
+      new Notice(changed || Object.keys(selection.properties).length > 0 ? `Updated ${file.basename}.` : "Nothing picked; the note is unchanged.");
     } catch (err) {
       new Notice(`Couldn't update the note: ${err instanceof Error ? err.message : String(err)}`);
     }
