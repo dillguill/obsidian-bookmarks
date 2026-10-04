@@ -75,8 +75,9 @@ export interface EnrichModalOptions {
 export class EnrichModal extends Modal {
   private readonly urls = new Map<CaptureFile, string>();
   private submitted = false;
-  private readonly selection: EnrichSelection;
-  private readonly headings;
+  // Not "selection": Obsidian's Modal stores its own selection there when it opens.
+  private readonly picks: EnrichSelection;
+  private readonly noteHeads;
   private templateSelect!: HTMLSelectElement;
   private propsEl!: HTMLElement;
   private contentEl2!: HTMLElement;
@@ -90,8 +91,8 @@ export class EnrichModal extends Modal {
     private readonly o: EnrichModalOptions,
   ) {
     super(app);
-    this.selection = { properties: { ...o.defaults.properties }, content: o.defaults.content.map((row) => ({ ...row })), offline: o.defaults.offline };
-    this.headings = noteHeadings(o.body);
+    this.picks = { properties: { ...o.defaults.properties }, content: o.defaults.content.map((row) => ({ ...row })), offline: o.defaults.offline };
+    this.noteHeads = noteHeadings(o.body);
   }
 
   override onOpen(): void {
@@ -131,8 +132,8 @@ export class EnrichModal extends Modal {
         .setName("Save TikTok offline")
         .setDesc(`Replace the TikTok player in the note with the ${video ? "video" : `${o.offline.length} photos`}, saved in the vault.`)
         .addToggle((toggle) =>
-          toggle.setValue(this.selection.offline).onChange((on) => {
-            this.selection.offline = on;
+          toggle.setValue(this.picks.offline).onChange((on) => {
+            this.picks.offline = on;
             this.custom();
           }),
         );
@@ -148,7 +149,7 @@ export class EnrichModal extends Modal {
           .onClick(() => {
             this.submitted = true;
             this.close();
-            o.onSubmit(this.selection);
+            o.onSubmit(this.picks);
           });
       });
 
@@ -193,11 +194,11 @@ export class EnrichModal extends Modal {
   private renderProperties(): void {
     const el = this.propsEl;
     el.empty();
-    const picked = this.o.choices.properties.filter((p) => this.selection.properties[p.name]);
+    const picked = this.o.choices.properties.filter((p) => this.picks.properties[p.name]);
     if (!picked.length) el.createEl("p", { cls: "setting-item-description", text: "No properties picked." });
     const names = Object.keys(this.o.frontmatter);
     for (const property of picked) {
-      const pick = this.selection.properties[property.name]!;
+      const pick = this.picks.properties[property.name]!;
       const setting = new Setting(el).setName(property.name);
       const now = this.o.frontmatter[pick.target];
       if (!isEmpty(now)) setting.descEl.createDiv({ text: `Now: ${preview(now)}` });
@@ -224,7 +225,7 @@ export class EnrichModal extends Modal {
           .setIcon("x")
           .setTooltip("Remove")
           .onClick(() => {
-            delete this.selection.properties[property.name];
+            delete this.picks.properties[property.name];
             this.custom();
             this.renderProperties();
           }),
@@ -239,12 +240,12 @@ export class EnrichModal extends Modal {
 
   private propertyMenu(evt: MouseEvent): void {
     const menu = new Menu();
-    const left = this.o.choices.properties.filter((p) => !this.selection.properties[p.name]);
+    const left = this.o.choices.properties.filter((p) => !this.picks.properties[p.name]);
     if (!left.length) menu.addItem((item) => item.setTitle("Nothing else on this page").setDisabled(true));
     for (const property of left) {
       menu.addItem((item) =>
         item.setTitle(property.name).onClick(() => {
-          this.selection.properties[property.name] = { mode: this.canMerge(property, property.name) ? "merge" : "replace", target: property.name };
+          this.picks.properties[property.name] = { mode: this.canMerge(property, property.name) ? "merge" : "replace", target: property.name };
           this.custom();
           this.renderProperties();
         }),
@@ -257,7 +258,7 @@ export class EnrichModal extends Modal {
 
   private targetLabel(heading: number | null): string {
     if (heading === null) return "Note body";
-    const h = this.headings[heading]!;
+    const h = this.noteHeads[heading]!;
     return `${"#".repeat(h.level)} ${h.text}`;
   }
 
@@ -267,7 +268,7 @@ export class EnrichModal extends Modal {
 
   /** Every placement a row can be dragged to (replacing is picked from the dropdown). */
   private allPlacements(): Placement[] {
-    const targets: (number | null)[] = [null, ...this.headings.map((_, i) => i)];
+    const targets: (number | null)[] = [null, ...this.noteHeads.map((_, i) => i)];
     return targets.flatMap((heading) => [
       { heading, position: "prepend" as const },
       { heading, position: "append" as const },
@@ -278,7 +279,7 @@ export class EnrichModal extends Modal {
     this.staleContent = false;
     const el = this.contentEl2;
     el.empty();
-    const rows = this.selection.content;
+    const rows = this.picks.content;
     if (!rows.length && !this.dragging) el.createEl("p", { cls: "setting-item-description", text: "Nothing picked for the note body." });
     const used = rows.map((row): Placement => ({ heading: row.heading, position: row.position }));
     const shown = this.dragging ? [...used, ...this.allPlacements()] : used;
@@ -312,7 +313,7 @@ export class EnrichModal extends Modal {
       background: "var(--background-secondary)",
       opacity: this.dragging === row ? "0.4" : "1",
     });
-    line.dataset.row = String(this.selection.content.indexOf(row));
+    line.dataset.row = String(this.picks.content.indexOf(row));
 
     const handle = line.createSpan({ text: "⋮⋮", attr: { "aria-label": "Drag to move" } });
     Object.assign(handle.style, { cursor: "grab", touchAction: "none", color: "var(--text-muted)", userSelect: "none" });
@@ -324,7 +325,7 @@ export class EnrichModal extends Modal {
 
     const target = line.createEl("select", { cls: "dropdown" });
     target.createEl("option", { text: "Note body", value: "" });
-    this.headings.forEach((h, i) => target.createEl("option", { text: `${"  ".repeat(h.level - 1)}${"#".repeat(h.level)} ${h.text}`, value: String(i) }));
+    this.noteHeads.forEach((h, i) => target.createEl("option", { text: `${"  ".repeat(h.level - 1)}${"#".repeat(h.level)} ${h.text}`, value: String(i) }));
     target.value = row.heading === null ? "" : String(row.heading);
     const position = line.createEl("select", { cls: "dropdown" });
     for (const [value, text] of Object.entries(POSITION_LABELS)) position.createEl("option", { text, value });
@@ -333,7 +334,7 @@ export class EnrichModal extends Modal {
       row.heading = target.value === "" ? null : Number(target.value);
       row.position = position.value as Placement["position"];
       // Moved rows go last in their new group.
-      this.selection.content = [...this.selection.content.filter((r) => r !== row), row];
+      this.picks.content = [...this.picks.content.filter((r) => r !== row), row];
       this.custom();
       this.renderContent();
     };
@@ -342,7 +343,7 @@ export class EnrichModal extends Modal {
 
     const remove = line.createEl("button", { text: "×", attr: { "aria-label": "Remove" } });
     remove.onclick = () => {
-      this.selection.content = this.selection.content.filter((r) => r !== row);
+      this.picks.content = this.picks.content.filter((r) => r !== row);
       if (row.item.kind === "file" && this.o.files.pending().includes(row.item.file)) this.o.files.drop(row.item.file);
       this.custom();
       this.renderContent();
@@ -388,9 +389,9 @@ export class EnrichModal extends Modal {
 
   private contentMenu(evt: MouseEvent): void {
     const menu = new Menu();
-    const picked = this.selection.content.map((row) => row.item);
+    const picked = this.picks.content.map((row) => row.item);
     const add = (item: ContentItem) => {
-      this.selection.content.push({ item, heading: null, position: "append" });
+      this.picks.content.push({ item, heading: null, position: "append" });
       this.custom();
       this.renderContent();
     };
@@ -444,19 +445,19 @@ export class EnrichModal extends Modal {
       const box = over(e);
       this.dragging = null;
       if (box && this.contentEl2.contains(box)) {
-        const rest = this.selection.content.filter((r) => r !== row);
+        const rest = this.picks.content.filter((r) => r !== row);
         row.heading = box.dataset.heading === "null" ? null : Number(box.dataset.heading);
         row.position = box.dataset.position as Placement["position"];
         // Before the row under the pointer when on its top half, else after the group's last row.
         const target = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>("[data-row]");
-        const beside = target ? this.selection.content[Number(target.dataset.row)] : undefined;
+        const beside = target ? this.picks.content[Number(target.dataset.row)] : undefined;
         let at = rest.length;
         if (beside && beside !== row && samePlacement(beside, row)) {
           const rect = target!.getBoundingClientRect();
           at = rest.indexOf(beside) + (e.clientY > rect.top + rect.height / 2 ? 1 : 0);
         }
         rest.splice(at, 0, row);
-        this.selection.content = rest;
+        this.picks.content = rest;
         this.custom();
       }
       this.renderContent();
