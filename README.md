@@ -50,8 +50,8 @@ your vault as deduplicated bookmark notes. See the
    with the screenshot embedded at the top. Capturing the same URL again shows
    "Already saved" with **Open existing**, **Replace** (capture again into the
    same note) and **Save as new**. **Bookmarks: Capture current bookmark again**
-   refreshes the open note the same way. **Bookmarks: Pull metadata and images
-   into current note** fetches the open note's page again (any note with a URL
+   refreshes the open note the same way. **Bookmarks: Update note from
+   source** fetches the open note's page again (any note with a URL
    property, even one this plugin didn't make) and lets you pick which
    properties to add, replace or add to a list, whether to add the page content,
    and which images to save, placed before or after the note's body or in place of it.

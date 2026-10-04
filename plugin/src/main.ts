@@ -56,7 +56,7 @@ export default class BookmarksPlugin extends Plugin {
     });
     this.addCommand({
       id: "enrich",
-      name: "Pull metadata and images into current note",
+      name: "Update note from source",
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "md" || !this.noteUrl(file)) return false;

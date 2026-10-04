@@ -35,7 +35,7 @@ export class EnrichModal extends Modal {
 
   override onOpen(): void {
     const { contentEl, choices } = this;
-    this.setTitle(`Enrich ${this.noteName}`);
+    this.setTitle(`Update ${this.noteName} from source`);
     // Missing properties are picked by default; ones that would overwrite a value aren't.
     const selection: EnrichSelection = {
       properties: Object.fromEntries(choices.properties.filter((p) => p.current === undefined || p.current === null || p.current === "").map((p) => [p.name, "replace"])),
