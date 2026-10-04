@@ -13,6 +13,7 @@ import { fillFiles, type SavedFiles } from "./writer";
 export const ENRICH_FILES: readonly CaptureFile[] = [
   "image_local",
   "tiktok_thumbnail",
+  "tiktok_video",
   ...CAPTURE_FILES.filter((kind) => kind.startsWith("tiktok_image_")),
   "screenshot_banner",
   "screenshot_thumbnail",
@@ -33,6 +34,7 @@ const FILE_LABELS: Partial<Record<CaptureFile, string>> = {
   pdf_page: "PDF of the page",
   image_local: "Page image",
   tiktok_thumbnail: "TikTok cover",
+  tiktok_video: "TikTok video",
 };
 
 export function fileLabel(kind: CaptureFile): string {
@@ -69,6 +71,27 @@ export interface EnrichSelection {
   images: CaptureFile[];
   /** Where the body and images go: before the note's body (after its properties), after it, or in place of it. */
   position: "prepend" | "append" | "replace";
+  /** Replace the note's TikTok player with the saved video or photos ({@link offlineFiles}). */
+  offline: boolean;
+}
+
+/** The TikTok player {{tiktok_embed}} writes, however its attributes were edited since. */
+const TIKTOK_PLAYER = /<iframe\b[^>]*?\bsrc=["']https:\/\/www\.tiktok\.com\/player\/v1\/\d+[^"']*["'][^>]*>(?:\s*<\/iframe>)?/g;
+
+export function hasTikTokPlayer(text: string): boolean {
+  return new RegExp(TIKTOK_PLAYER.source).test(text);
+}
+
+/** The files that take the TikTok player's place when saving it offline: the video, else a carousel's photos. */
+export function offlineFiles(available: readonly CaptureFile[]): CaptureFile[] {
+  if (available.includes("tiktok_video")) return ["tiktok_video"];
+  return CAPTURE_FILES.filter((kind) => kind.startsWith("tiktok_image_") && available.includes(kind));
+}
+
+/** Swaps each TikTok player in a note for embeds of the saved files; unchanged when none were saved. */
+export function replaceTikTokPlayer(text: string, files: readonly CaptureFile[], saved: SavedFiles): string {
+  const embeds = files.filter((kind) => saved[kind]).map((kind) => `![[${saved[kind]}]]`);
+  return embeds.length ? text.replace(TIKTOK_PLAYER, embeds.join("\n")) : text;
 }
 
 /** Splits "---\n…\n---\n" into the YAML between the fences. */
@@ -129,7 +152,7 @@ export function enrichChoices(
 
 /** Capture files the selection needs saved: picked images plus any a picked property or body uses. */
 export function filesToSave(choices: EnrichChoices, selection: EnrichSelection): CaptureFile[] {
-  const used = new Set<CaptureFile>(selection.images);
+  const used = new Set<CaptureFile>([...selection.images, ...(selection.offline ? offlineFiles(choices.images) : [])]);
   for (const property of choices.properties) if (selection.properties[property.name]) filesIn(property.value).forEach((kind) => used.add(kind));
   if (selection.body) filesIn(choices.body).forEach((kind) => used.add(kind));
   return choices.images.filter((kind) => used.has(kind));
@@ -155,13 +178,15 @@ export function applyProperties(frontmatter: Record<string, unknown>, choices: E
 }
 
 /**
- * The text to add to the note: embeds for picked images the picked body and
- * properties don't already show, then the body.
+ * The text to add to the note: embeds for picked images the picked body,
+ * properties and offline player don't already show, then the body.
  */
 export function bodyBlock(choices: EnrichChoices, selection: EnrichSelection, saved: SavedFiles): string {
   const shown = new Set<CaptureFile>();
   if (selection.body) filesIn(choices.body).forEach((kind) => shown.add(kind));
   for (const property of choices.properties) if (selection.properties[property.name]) filesIn(property.value).forEach((kind) => shown.add(kind));
+  // Saved offline, they show where the player was.
+  if (selection.offline) offlineFiles(choices.images).forEach((kind) => shown.add(kind));
   const embeds = selection.images.filter((kind) => saved[kind] && !shown.has(kind)).map((kind) => `![[${saved[kind]}]]`);
   const body = selection.body ? fillFiles(choices.body, saved).replace(/\n{3,}/g, "\n\n").trim() : "";
   return [...embeds, body].filter(Boolean).join("\n\n");

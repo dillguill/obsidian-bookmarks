@@ -3,7 +3,18 @@ import { API_VERSION, CAPTURE_FILES, type CaptureFile, type ClipperTemplate, typ
 import { CaptureModal } from "./capture-modal";
 import { ServerClient } from "./client";
 import { DedupIndex } from "./dedup";
-import { ENRICH_FILES, applyProperties, bodyBlock, enrichChoices, filesToSave, insertBlock, type EnrichSelection } from "./enrich";
+import {
+  ENRICH_FILES,
+  applyProperties,
+  bodyBlock,
+  enrichChoices,
+  filesToSave,
+  hasTikTokPlayer,
+  insertBlock,
+  offlineFiles,
+  replaceTikTokPlayer,
+  type EnrichSelection,
+} from "./enrich";
 import { EnrichModal } from "./enrich-modal";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
 import { DEFAULT_TEMPLATE, captureIdPropertyName, chooseTemplate, urlPropertyName } from "./template";
@@ -45,7 +56,7 @@ export default class BookmarksPlugin extends Plugin {
     });
     this.addCommand({
       id: "enrich",
-      name: "Pull metadata and images into current note",
+      name: "Update note from source",
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "md" || !this.noteUrl(file)) return false;
@@ -311,13 +322,16 @@ export default class BookmarksPlugin extends Plugin {
       if (job.status === "failed") throw new Error(job.error ?? "unknown error");
       if (!job.assets.includes("note")) throw new Error("the server didn't render the page. Update bookmarks-server.");
       const note = JSON.parse(await client.assetText(job.id, "note")) as RenderedNote;
+      const available = CAPTURE_FILES.filter((kind) => job!.assets.includes(kind));
       const images: Partial<Record<CaptureFile, ArrayBuffer>> = {};
-      for (const kind of CAPTURE_FILES) if (job.assets.includes(kind)) images[kind] = await client.assetBinary(job.id, kind);
+      // The video is only downloaded if it's picked.
+      for (const kind of available) if (kind !== "tiktok_video") images[kind] = await client.assetBinary(job.id, kind);
       const template = this.templates.find((t) => t.name === note.template) ?? DEFAULT_TEMPLATE;
       const current = { ...(this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) } as Record<string, unknown>;
-      const choices = enrichChoices(note, current, parseYaml, Object.keys(images) as CaptureFile[], captureIdPropertyName(template));
+      const choices = enrichChoices(note, current, parseYaml, available, captureIdPropertyName(template));
       const text = await this.app.vault.read(file);
       const bodyEmpty = !text.slice(getFrontMatterInfo(text).contentStart).trim();
+      const offline = hasTikTokPlayer(text) ? offlineFiles(choices.images) : [];
       progress.hide();
       const settled = job;
       const done = () => void client.delivered(settled.id).catch(() => {});
@@ -328,6 +342,7 @@ export default class BookmarksPlugin extends Plugin {
         images,
         settled.screenshotExt === "png" ? "image/png" : "image/jpeg",
         bodyEmpty,
+        offline,
         (selection) => void this.applyEnrich(file, settled, choices, images, selection).finally(done),
         done,
       ).open();
@@ -347,14 +362,27 @@ export default class BookmarksPlugin extends Plugin {
   ): Promise<void> {
     try {
       const wanted = filesToSave(choices, selection);
+      if (wanted.includes("tiktok_video") && !images.tiktok_video) {
+        const progress = new Notice("Downloading video…", 0);
+        try {
+          images.tiktok_video = await this.client().assetBinary(job.id, "tiktok_video");
+        } finally {
+          progress.hide();
+        }
+      }
       const files = Object.fromEntries(wanted.map((kind) => [kind, images[kind] ?? null]));
       const saved = await saveCaptureFiles(this.vaultPort(), this.settings.assetsFolder, files, job.screenshotExt, file.basename);
       const block = bodyBlock(choices, selection, saved);
-      if (block) await this.app.vault.process(file, (text) => insertBlock(text, block, selection.position, getFrontMatterInfo(text).contentStart));
+      const offline = selection.offline ? offlineFiles(choices.images) : [];
+      if (block || offline.length) {
+        await this.app.vault.process(file, (text) =>
+          replaceTikTokPlayer(insertBlock(text, block, selection.position, getFrontMatterInfo(text).contentStart), offline, saved),
+        );
+      }
       if (Object.keys(selection.properties).length > 0) {
         await this.app.fileManager.processFrontMatter(file, (frontmatter: Record<string, unknown>) => applyProperties(frontmatter, choices, selection, saved));
       }
-      new Notice(block || Object.keys(selection.properties).length > 0 ? `Updated ${file.basename}.` : "Nothing picked; the note is unchanged.");
+      new Notice(block || offline.length || Object.keys(selection.properties).length > 0 ? `Updated ${file.basename}.` : "Nothing picked; the note is unchanged.");
     } catch (err) {
       new Notice(`Couldn't update the note: ${err instanceof Error ? err.message : String(err)}`);
     }

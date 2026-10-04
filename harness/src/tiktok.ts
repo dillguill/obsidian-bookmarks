@@ -16,7 +16,10 @@ export const TIKTOK_VARIABLES = [
   "tiktok_author_handle",
   "tiktok_embed",
   "tiktok_images",
+  "tiktok_save",
   "tiktok_image_count",
+  "tiktok_transcript",
+  "tiktok_transcript_timestamps",
 ] as const;
 export type TikTokVariable = (typeof TIKTOK_VARIABLES)[number];
 
@@ -26,6 +29,8 @@ export interface TikTokData {
   cover: string[];
   /** A photo post's carousel images in order, each as its mirror URLs, saved as tiktok_image_1… files. */
   images: string[][];
+  /** A video post's MP4 URLs (mirrors of one video), saved as the tiktok_video file; empty for photo posts. */
+  video: string[];
 }
 
 /** A TikTok post as its URL names it. */
@@ -41,7 +46,17 @@ export interface TikTokItem {
   desc?: string;
   createTime?: number | string;
   author?: { uniqueId?: string; nickname?: string };
-  video?: { cover?: string; originCover?: string };
+  video?: {
+    cover?: string;
+    originCover?: string;
+    playAddr?: string;
+    bitrateInfo?: { PlayAddr?: { UrlList?: string[] } }[];
+    subtitleInfos?: { Url?: string; LanguageCodeName?: string; Format?: string; Source?: string }[];
+    claInfo?: {
+      originalLanguageInfo?: { language?: string };
+      captionInfos?: { url?: string; urlList?: string[]; language?: string; captionFormat?: string; isOriginalCaption?: boolean }[];
+    };
+  };
   imagePost?: { cover?: TikTokImage; images?: TikTokImage[] };
 }
 
@@ -101,17 +116,79 @@ export function noTikTokVariables(): Record<TikTokVariable, string> {
   return Object.fromEntries(TIKTOK_VARIABLES.map((name) => [name, ""])) as Record<TikTokVariable, string>;
 }
 
+/** A caption line and when it starts, in seconds. */
+export interface TranscriptCue {
+  start: number;
+  text: string;
+}
+
+/**
+ * URLs of the post's captions in the language spoken (TikTok's mirrors of one
+ * WebVTT file), else of the first captions it has; empty when there are none.
+ */
+export function transcriptSources(item: TikTokItem | null): string[] {
+  const cla = item?.video?.claInfo;
+  const captions = (cla?.captionInfos ?? []).filter((c) => !c.captionFormat || c.captionFormat === "webvtt");
+  const caption = captions.find((c) => c.isOriginalCaption) ?? captions[0];
+  const fromCla = caption ? [...(caption.urlList ?? []), caption.url ?? ""] : [];
+  const subtitles = (item?.video?.subtitleInfos ?? []).filter((s) => !s.Format || s.Format === "webvtt");
+  const original = cla?.originalLanguageInfo?.language;
+  const subtitle =
+    subtitles.find((s) => original && s.LanguageCodeName === original) ?? subtitles.find((s) => s.Source === "ASR") ?? subtitles[0];
+  return [...new Set([...fromCla, subtitle?.Url ?? ""].filter(Boolean))];
+}
+
+/** A WebVTT file's cues, without markup and without a cue that repeats the one before. */
+export function vttCues(vtt: string): TranscriptCue[] {
+  const cues: TranscriptCue[] = [];
+  for (const block of vtt.replace(/\r\n?/g, "\n").split(/\n{2,}/)) {
+    const lines = block.split("\n");
+    const timing = lines.findIndex((line) => line.includes("-->"));
+    if (timing < 0) continue;
+    const time = /^\s*(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})/.exec(lines[timing]!);
+    if (!time) continue;
+    const text = lines
+      .slice(timing + 1)
+      .join(" ")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text || text === cues.at(-1)?.text) continue;
+    const start = Number(time[1] ?? 0) * 3600 + Number(time[2]) * 60 + Number(time[3]) + Number(time[4]!.padEnd(3, "0")) / 1000;
+    cues.push({ start, text });
+  }
+  return cues;
+}
+
+/** Seconds as m:ss, or h:mm:ss from an hour on. */
+function clock(seconds: number): string {
+  const s = Math.floor(seconds);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}` : `${Math.floor(s / 60)}:${pad(s % 60)}`;
+}
+
 /**
  * TikTok's variables for a post. `item` is null when no item JSON was found;
- * the id still gives the date and the embed.
+ * the id still gives the date and the embed. `transcript` is the captions'
+ * cues, saved now since their links expire.
  */
-export function tiktokData(post: TikTokPost, item: TikTokItem | null): TikTokData {
+export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript: TranscriptCue[] = []): TikTokData {
   const caption = (item?.desc ?? "").trim();
   const created = Number(item?.createTime);
   const date = Number.isFinite(created) && created > 0 ? new Date(created * 1000) : idTime(post.id);
   const urls = (image: TikTokImage | undefined) => (image?.imageURL?.urlList ?? []).filter(Boolean);
   const images = (item?.imagePost?.images ?? []).map(urls).filter((list) => list.length).slice(0, TIKTOK_IMAGE_MAX);
   const videoCover = [item?.video?.cover, item?.video?.originCover].filter((url): url is string => Boolean(url));
+  // playAddr is the version TikTok plays on the web; bitrateInfo lists it again with its mirrors.
+  const video = images.length
+    ? []
+    : [...new Set([item?.video?.playAddr ?? "", ...(item?.video?.bitrateInfo ?? []).flatMap((rate) => rate.PlayAddr?.UrlList ?? [])].filter(Boolean))];
+  // Each marker becomes the saved file's vault path, as with any capture file.
+  const photos = images.map((_, i) => `![[${fileMarker(`tiktok_image_${i + 1}`)}]]`).join("\n");
   return {
     variables: {
       tiktok_id: post.id,
@@ -121,12 +198,16 @@ export function tiktokData(post: TikTokPost, item: TikTokItem | null): TikTokDat
       tiktok_author: item?.author?.nickname?.trim() ?? "",
       tiktok_author_handle: item?.author?.uniqueId?.trim() || post.handle,
       tiktok_embed: videoEmbed(post.id),
-      // Each marker becomes the saved photo's vault path, as with any capture file.
-      tiktok_images: images.map((_, i) => `![[${fileMarker(`tiktok_image_${i + 1}`)}]]`).join("\n"),
+      tiktok_images: photos,
+      // The post saved in the vault: its video, or a carousel's photos.
+      tiktok_save: video.length ? `![[${fileMarker("tiktok_video")}]]` : photos,
       tiktok_image_count: images.length ? String(images.length) : "",
+      tiktok_transcript: transcript.map((cue) => cue.text).join(" "),
+      tiktok_transcript_timestamps: transcript.map((cue) => `[${clock(cue.start)}] ${cue.text}`).join("\n"),
     },
     cover: videoCover.length ? videoCover : urls(item?.imagePost?.cover),
     images,
+    video,
   };
 }
 

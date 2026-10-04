@@ -1,7 +1,7 @@
 import { createReadStream, readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { API_VERSION, CAPTURE_FILES, type AssetKind, type CaptureFile, type CaptureOrigin, type JobStatus } from "./api.js";
+import { API_VERSION, CAPTURE_FILES, fileExt, type AssetKind, type CaptureFile, type CaptureOrigin, type JobStatus } from "./api.js";
 import type { Config } from "./config.js";
 import type { JobStore } from "./db.js";
 import { parseCaptureSettings } from "./settings.js";
@@ -34,6 +34,8 @@ const UI_FILES: Record<string, { file: string; type: string }> = {
   "/ui/save": { file: "save.html", type: "text/html; charset=utf-8" },
   "/ui/save.js": { file: "save.js", type: "text/javascript; charset=utf-8" },
 };
+const ASSET_TYPES: Record<string, string> = { pdf: "application/pdf", mp4: "video/mp4", jpg: "image/jpeg", png: "image/png" };
+
 const UI_HEADERS = {
   "content-security-policy": "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   "x-content-type-options": "nosniff",
@@ -202,9 +204,7 @@ export function createApp(deps: AppDeps): Server {
             ? "text/markdown; charset=utf-8"
             : kind === "note"
               ? "application/json; charset=utf-8"
-              : kind === "pdf_page"
-                ? "application/pdf"
-                : job.screenshotExt === "jpg" ? "image/jpeg" : "image/png";
+              : ASSET_TYPES[fileExt(kind, job.screenshotExt) ?? "png"] ?? "application/octet-stream";
         res.writeHead(200, { "content-type": contentType, "content-length": info.size });
         createReadStream(file).pipe(res);
         return;
