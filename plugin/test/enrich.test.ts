@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fileMarker, type RenderedNote } from "../src/api";
-import { applyProperties, bodyBlock, enrichChoices, filesToSave, insertBlock, type EnrichSelection } from "../src/enrich";
+import { applyProperties, bodyBlock, ENRICH_FILES, enrichChoices, fileLabel, filesToSave, insertBlock, type EnrichSelection } from "../src/enrich";
 
 /** The slice of YAML Web Clipper writes: quoted strings, numbers, empty values and lists of quoted strings. */
 function parseYaml(yaml: string): Record<string, unknown> {
@@ -104,5 +104,19 @@ describe("insertBlock", () => {
     expect(insertBlock("---\ntitle: x\n---\n", "New.", "prepend", end)).toBe("---\ntitle: x\n---\nNew.\n");
     expect(insertBlock("", "New.", "prepend", 0)).toBe("New.\n");
     expect(insertBlock(text, "", "append", end)).toBe(text);
+  });
+
+  it("replaces the body, keeping the frontmatter", () => {
+    expect(insertBlock(text, "New.", "replace", end)).toBe("---\ntitle: x\n---\nNew.\n");
+    expect(insertBlock("Old body.\n", "New.", "replace", 0)).toBe("New.\n");
+    expect(insertBlock(text, "", "replace", end)).toBe(text);
+  });
+});
+
+describe("TikTok photos", () => {
+  it("asks for carousel photos and labels them", () => {
+    expect(ENRICH_FILES).toContain("tiktok_image_1");
+    expect(fileLabel("tiktok_image_3")).toBe("TikTok photo 3");
+    expect(fileLabel("image_local")).toBe("Page image");
   });
 });

@@ -114,6 +114,7 @@ export class EnrichModal extends Modal {
           dropdown
             .addOption("append", "After the note's body")
             .addOption("prepend", "Before the note's body")
+            .addOption("replace", "Replace the note's body")
             .setValue(selection.position)
             .onChange((value) => (selection.position = value as EnrichSelection["position"])),
         );
