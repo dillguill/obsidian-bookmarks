@@ -2,15 +2,17 @@ import { describe, expect, it } from "vitest";
 import { fileMarker, type CaptureFile, type RenderedNote } from "../src/api";
 import {
   applyProperties,
-  bodyBlock,
   ENRICH_FILES,
   enrichChoices,
   fileLabel,
   filesToSave,
   hasTikTokPlayer,
-  insertBlock,
+  noteHeadings,
   offlineFiles,
+  placeContent,
+  placementOrder,
   replaceTikTokPlayer,
+  type ContentRow,
   type EnrichSelection,
 } from "../src/enrich";
 
@@ -61,7 +63,8 @@ const note: RenderedNote = {
 
 const current = { source: "https://example.com/a", title: "Old title", tags: ["read-later"] };
 const choices = enrichChoices(note, current, parseYaml, ["screenshot_banner", "image_local"], "capture_id");
-const select = (over: Partial<EnrichSelection>): EnrichSelection => ({ properties: {}, body: false, images: [], position: "append", offline: false, ...over });
+const select = (over: Partial<EnrichSelection>): EnrichSelection => ({ properties: {}, content: [], offline: false, ...over });
+const pick = (mode: "replace" | "merge", target = "") => ({ mode, target });
 
 describe("enrichChoices", () => {
   it("offers properties that differ, leaving out capture_id, empty ones and ones needing a file that wasn't made", () => {
@@ -80,48 +83,91 @@ describe("applying a selection", () => {
 
   it("adds, replaces and merges properties, filling in file paths", () => {
     const frontmatter: Record<string, unknown> = { ...current, tags: ["read-later", "web"] };
-    const selection = select({ properties: { title: "replace", description: "replace", tags: "merge", screenshot: "replace" } });
+    const selection = select({
+      properties: { title: pick("replace", "title"), description: pick("replace", "summary"), tags: pick("merge", "tags"), screenshot: pick("replace", "screenshot") },
+    });
     expect(filesToSave(choices, selection)).toEqual(["screenshot_banner"]);
     applyProperties(frontmatter, choices, selection, saved);
     expect(frontmatter).toEqual({
       source: "https://example.com/a",
       title: "Hello",
-      description: "A page",
+      summary: "A page",
       tags: ["read-later", "web", "clip"],
       screenshot: "[[Bookmarks/assets/n-banner.jpg]]",
     });
-    applyProperties(frontmatter, choices, select({ properties: { tags: "replace" } }), saved);
+    applyProperties(frontmatter, choices, select({ properties: { tags: pick("replace", "tags") } }), saved);
     expect(frontmatter.tags).toEqual(["web", "clip"]);
   });
 
-  it("embeds picked images the body doesn't already show, then the body", () => {
-    const both = select({ body: true, images: ["screenshot_banner", "image_local"] });
-    expect(filesToSave(choices, both)).toEqual(["screenshot_banner", "image_local"]);
-    expect(bodyBlock(choices, both, saved)).toBe(
-      "![[Bookmarks/assets/n-image.jpg]]\n\n![[Bookmarks/assets/n-banner.jpg]]\n\nThe page text.",
-    );
-    // Without the body, its banner isn't saved unless picked.
-    expect(filesToSave(choices, select({ images: ["image_local"] }))).toEqual(["image_local"]);
-    expect(bodyBlock(choices, select({ images: ["image_local"] }), { image_local: saved.image_local })).toBe("![[Bookmarks/assets/n-image.jpg]]");
+  it("saves the files picked rows and variables use", () => {
+    const rows: ContentRow[] = [
+      { item: { kind: "file", file: "image_local" }, heading: null, position: "append" },
+      { item: { kind: "variable", name: "Template content", value: note.content }, heading: null, position: "append" },
+    ];
+    expect(filesToSave(choices, select({ content: rows }))).toEqual(["screenshot_banner", "image_local"]);
+    expect(filesToSave(choices, select({ content: rows.slice(0, 1) }))).toEqual(["image_local"]);
   });
 });
 
-describe("insertBlock", () => {
-  const text = "---\ntitle: x\n---\nExisting body.\n";
-  const end = "---\ntitle: x\n---\n".length;
+describe("placing content", () => {
+  const front = "---\ntitle: x\n---\n";
+  const text = `${front}Intro.\n\n## Notes\n\nMine.\n\n### Sub\n\nDeep.\n\n## Links\n\nA link.\n`;
+  const saved = { image_local: "a/img.jpg" };
+  const row = (body: string, heading: number | null, position: ContentRow["position"]): ContentRow => ({ item: { kind: "text", text: body }, heading, position });
 
-  it("appends after the body or prepends after the frontmatter", () => {
-    expect(insertBlock(text, "New.", "append", end)).toBe("---\ntitle: x\n---\nExisting body.\n\nNew.\n");
-    expect(insertBlock(text, "New.", "prepend", end)).toBe("---\ntitle: x\n---\nNew.\n\nExisting body.\n");
-    expect(insertBlock("---\ntitle: x\n---\n", "New.", "prepend", end)).toBe("---\ntitle: x\n---\nNew.\n");
-    expect(insertBlock("", "New.", "prepend", 0)).toBe("New.\n");
-    expect(insertBlock(text, "", "append", end)).toBe(text);
+  it("finds headings outside code fences, with their sections", () => {
+    const body = text.slice(front.length);
+    const headings = noteHeadings(`${body}\n\`\`\`\n# not a heading\n\`\`\`\n`);
+    expect(headings.map((h) => [h.level, h.text])).toEqual([[2, "Notes"], [3, "Sub"], [2, "Links"]]);
+    expect(body.slice(headings[0]!.start, headings[0]!.end)).toBe("\n\nMine.\n\n### Sub\n\nDeep.\n\n");
   });
 
-  it("replaces the body, keeping the frontmatter", () => {
-    expect(insertBlock(text, "New.", "replace", end)).toBe("---\ntitle: x\n---\nNew.\n");
-    expect(insertBlock("Old body.\n", "New.", "replace", 0)).toBe("New.\n");
-    expect(insertBlock(text, "", "replace", end)).toBe(text);
+  it("prepends and appends to the body and to headings, in list order", () => {
+    const out = placeContent(
+      text,
+      [row("Top.", null, "prepend"), row("First under notes.", 0, "prepend"), row("End of notes.", 0, "append"), row("End of sub.", 1, "append"), row("Bottom.", null, "append"), row("Bottom 2.", null, "append")],
+      saved,
+      front.length,
+    );
+    expect(out).toBe(
+      `${front}Top.\n\nIntro.\n\n## Notes\n\nFirst under notes.\n\nMine.\n\n### Sub\n\nDeep.\n\nEnd of sub.\n\nEnd of notes.\n\n## Links\n\nA link.\n\nBottom.\n\nBottom 2.\n`,
+    );
+  });
+
+  it("replaces a section keeping its heading, or the whole body keeping the frontmatter", () => {
+    expect(placeContent(text, [row("New links.", 2, "replace")], saved, front.length)).toBe(
+      `${front}Intro.\n\n## Notes\n\nMine.\n\n### Sub\n\nDeep.\n\n## Links\n\nNew links.\n`,
+    );
+    expect(placeContent(text, [row("All new.", null, "replace"), row("Dropped.", 0, "append")], saved, front.length)).toBe(`${front}All new.\n`);
+  });
+
+  it("embeds files and leaves the note alone when nothing has text", () => {
+    expect(placeContent(`${front}Body.\n`, [{ item: { kind: "file", file: "image_local" }, heading: null, position: "prepend" }], saved, front.length)).toBe(
+      `${front}![[a/img.jpg]]\n\nBody.\n`,
+    );
+    expect(placeContent(text, [{ item: { kind: "file", file: "tiktok_video" }, heading: null, position: "append" }], saved, front.length)).toBe(text);
+    expect(placeContent("", [row("New.", null, "prepend")], saved, 0)).toBe("New.\n");
+  });
+
+  it("orders placements as their text lands in the note", () => {
+    const body = text.slice(front.length);
+    const order = placementOrder(
+      [
+        { heading: null, position: "append" },
+        { heading: 0, position: "append" },
+        { heading: 1, position: "append" },
+        { heading: 0, position: "prepend" },
+        { heading: null, position: "prepend" },
+      ],
+      body,
+    );
+    expect(order).toEqual([
+      { heading: null, position: "prepend" },
+      { heading: 0, position: "prepend" },
+      { heading: 1, position: "append" },
+      { heading: 0, position: "append" },
+      { heading: null, position: "append" },
+    ]);
   });
 });
 
@@ -159,11 +205,10 @@ describe("saving TikTok offline", () => {
     expect(replaceTikTokPlayer(text, ["tiktok_video"], {})).toBe(text);
   });
 
-  it("saves the offline files and doesn't embed them again", () => {
+  it("saves the offline files", () => {
     const tiktok = { ...choices, images: ["tiktok_video", "tiktok_thumbnail"] as CaptureFile[] };
-    const offline = select({ offline: true, images: ["tiktok_video", "tiktok_thumbnail"] });
-    expect(filesToSave(tiktok, offline)).toEqual(["tiktok_video", "tiktok_thumbnail"]);
+    const thumb: ContentRow = { item: { kind: "file", file: "tiktok_thumbnail" }, heading: null, position: "append" };
+    expect(filesToSave(tiktok, select({ offline: true, content: [thumb] }))).toEqual(["tiktok_video", "tiktok_thumbnail"]);
     expect(filesToSave(tiktok, select({ offline: true }))).toEqual(["tiktok_video"]);
-    expect(bodyBlock(tiktok, offline, { tiktok_video: "v.mp4", tiktok_thumbnail: "t.jpg" })).toBe("![[t.jpg]]");
   });
 });

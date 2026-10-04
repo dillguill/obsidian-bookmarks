@@ -7,18 +7,19 @@ import { CAPTURE_FILES, fileMarker, type CaptureFile, type RenderedNote } from "
 import { fillFiles, type SavedFiles } from "./writer";
 
 /**
- * Images an enrich capture asks for on top of the ones the template uses, so
- * there's something to pick from even when the template has no screenshot.
+ * Files an enrich capture asks for on top of the ones the template uses: cheap
+ * ones, so the first capture stays quick. Other screenshots are captured on demand.
  */
 export const ENRICH_FILES: readonly CaptureFile[] = [
   "image_local",
   "tiktok_thumbnail",
   "tiktok_video",
   ...CAPTURE_FILES.filter((kind) => kind.startsWith("tiktok_image_")),
-  "screenshot_banner",
   "screenshot_thumbnail",
-  "screenshot_page",
 ];
+
+/** Files an update can ask the server to capture later, when the user adds one the first capture didn't make. */
+export const ON_DEMAND_FILES: readonly CaptureFile[] = CAPTURE_FILES.filter((kind) => kind.startsWith("screenshot_") || kind === "pdf_page");
 
 const FILE_LABELS: Partial<Record<CaptureFile, string>> = {
   screenshot_page: "Full page screenshot",
@@ -64,13 +65,33 @@ export interface EnrichChoices {
 
 export type PropertyMode = "replace" | "merge";
 
-export interface EnrichSelection {
-  /** Picked properties by name. "merge" keeps the note's list values and adds the new ones. */
-  properties: Record<string, PropertyMode>;
-  body: boolean;
-  images: CaptureFile[];
-  /** Where the body and images go: before the note's body (after its properties), after it, or in place of it. */
+/** What a property row writes: its value, into `target` (the same name unless retargeted), replacing or merged into a list. */
+export interface PropertyPick {
+  mode: PropertyMode;
+  target: string;
+}
+
+/** Something a content row puts in the note: a capture file's embed, a variable's value, or text the user typed. */
+export type ContentItem =
+  | { kind: "file"; file: CaptureFile }
+  | { kind: "variable"; name: string; value: string }
+  | { kind: "text"; text: string };
+
+/** Where a content row goes: the note body or one of its headings (by index in {@link noteHeadings}), at its start, its end, or in place of it. */
+export interface Placement {
+  heading: number | null;
   position: "prepend" | "append" | "replace";
+}
+
+export interface ContentRow extends Placement {
+  item: ContentItem;
+}
+
+export interface EnrichSelection {
+  /** Picked properties by their name in the capture. */
+  properties: Record<string, PropertyPick>;
+  /** Content rows in list order; rows with the same placement go in that order. */
+  content: ContentRow[];
   /** Replace the note's TikTok player with the saved video or photos ({@link offlineFiles}). */
   offline: boolean;
 }
@@ -150,11 +171,17 @@ export function enrichChoices(
   return { properties, unchanged, body: fillFiles(note.content, asIfSaved).trim() ? note.content.trim() : "", images };
 }
 
-/** Capture files the selection needs saved: picked images plus any a picked property or body uses. */
+/** Capture files a content row shows. */
+function rowFiles(item: ContentItem): CaptureFile[] {
+  if (item.kind === "file") return [item.file];
+  return item.kind === "variable" ? filesIn(item.value) : [];
+}
+
+/** Capture files the selection needs saved: picked files plus any a picked property or variable uses. */
 export function filesToSave(choices: EnrichChoices, selection: EnrichSelection): CaptureFile[] {
-  const used = new Set<CaptureFile>([...selection.images, ...(selection.offline ? offlineFiles(choices.images) : [])]);
+  const used = new Set<CaptureFile>(selection.offline ? offlineFiles(choices.images) : []);
   for (const property of choices.properties) if (selection.properties[property.name]) filesIn(property.value).forEach((kind) => used.add(kind));
-  if (selection.body) filesIn(choices.body).forEach((kind) => used.add(kind));
+  for (const row of selection.content) rowFiles(row.item).forEach((kind) => used.add(kind));
   return choices.images.filter((kind) => used.has(kind));
 }
 
@@ -165,42 +192,143 @@ function asList(value: unknown): unknown[] {
 /** Sets the picked properties on a note's frontmatter object (as Obsidian's processFrontMatter hands it over). */
 export function applyProperties(frontmatter: Record<string, unknown>, choices: EnrichChoices, selection: EnrichSelection, saved: SavedFiles): void {
   for (const property of choices.properties) {
-    const mode = selection.properties[property.name];
-    if (!mode) continue;
+    const pick = selection.properties[property.name];
+    if (!pick) continue;
     const value = fillValue(property.value, saved);
     if (isEmpty(value)) continue;
-    if (mode === "merge" && property.mergeable) {
-      const merged = asList(frontmatter[property.name]);
+    const target = pick.target || property.name;
+    const now = frontmatter[target];
+    if (pick.mode === "merge" && !isEmpty(now)) {
+      const merged = asList(now);
       for (const item of asList(value)) if (!merged.some((existing) => same(existing, item))) merged.push(item);
-      frontmatter[property.name] = merged;
-    } else frontmatter[property.name] = value;
+      frontmatter[target] = merged;
+    } else frontmatter[target] = value;
   }
+}
+
+/** The Markdown a content row adds, with capture file markers swapped for saved paths. */
+export function rowText(item: ContentItem, saved: SavedFiles): string {
+  if (item.kind === "file") return saved[item.file] ? `![[${saved[item.file]}]]` : "";
+  const text = item.kind === "variable" ? fillFiles(item.value, saved) : item.text;
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export interface NoteHeading {
+  level: number;
+  text: string;
+  /** Offset in the body just after the heading line. */
+  start: number;
+  /** Offset in the body where the heading's section ends: the next heading of the same or a higher level, else the body's end. */
+  end: number;
+}
+
+/** The headings in a note body (the text after its frontmatter), skipping fenced code. */
+export function noteHeadings(body: string): NoteHeading[] {
+  const found: { level: number; text: string; lineStart: number; start: number }[] = [];
+  let fence: string | null = null;
+  let offset = 0;
+  for (const line of body.split("\n")) {
+    const lineEnd = offset + line.length;
+    const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (marker) {
+      if (!fence) fence = marker[1]![0]!;
+      else if (marker[1]![0] === fence) fence = null;
+    } else if (!fence) {
+      const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+      if (heading) found.push({ level: heading[1]!.length, text: heading[2]!, lineStart: offset, start: lineEnd });
+    }
+    offset = lineEnd + 1;
+  }
+  return found.map((h, i) => {
+    const next = found.slice(i + 1).find((other) => other.level <= h.level);
+    return { level: h.level, text: h.text, start: h.start, end: next ? next.lineStart : body.length };
+  });
+}
+
+/** Where a placement's text goes in the body, and its rank among placements at the same offset (lower first). */
+function spot(placement: Placement, headings: readonly NoteHeading[], body: string): { from: number; to: number; rank: number } {
+  const h = placement.heading === null ? null : headings[placement.heading];
+  if (!h) {
+    if (placement.position === "prepend") return { from: 0, to: 0, rank: -1 };
+    if (placement.position === "append") return { from: body.length, to: body.length, rank: headings.length + 1 };
+    return { from: 0, to: body.length, rank: 0 };
+  }
+  const i = headings.indexOf(h);
+  if (placement.position === "prepend") return { from: h.start, to: h.start, rank: 0 };
+  // A nested section ends where its parent does: the inner one's appended text comes first.
+  if (placement.position === "append") return { from: h.end, to: h.end, rank: headings.length - i };
+  return { from: h.start, to: h.end, rank: 0 };
+}
+
+/** Placements sorted in the order their text lands in the note, for listing rows in note order. */
+export function placementOrder(placements: readonly Placement[], body: string): Placement[] {
+  const headings = noteHeadings(body);
+  return [...placements].sort((a, b) => {
+    const x = spot(a, headings, body);
+    const y = spot(b, headings, body);
+    return x.from - y.from || x.rank - y.rank;
+  });
+}
+
+export function samePlacement(a: Placement, b: Placement): boolean {
+  return a.heading === b.heading && a.position === b.position;
 }
 
 /**
- * The text to add to the note: embeds for picked images the picked body,
- * properties and offline player don't already show, then the body.
+ * Puts each content row's text into a note at its placement, keeping the
+ * frontmatter. Rows with the same placement go in list order; a replaced
+ * section keeps its heading.
  */
-export function bodyBlock(choices: EnrichChoices, selection: EnrichSelection, saved: SavedFiles): string {
-  const shown = new Set<CaptureFile>();
-  if (selection.body) filesIn(choices.body).forEach((kind) => shown.add(kind));
-  for (const property of choices.properties) if (selection.properties[property.name]) filesIn(property.value).forEach((kind) => shown.add(kind));
-  // Saved offline, they show where the player was.
-  if (selection.offline) offlineFiles(choices.images).forEach((kind) => shown.add(kind));
-  const embeds = selection.images.filter((kind) => saved[kind] && !shown.has(kind)).map((kind) => `![[${saved[kind]}]]`);
-  const body = selection.body ? fillFiles(choices.body, saved).replace(/\n{3,}/g, "\n\n").trim() : "";
-  return [...embeds, body].filter(Boolean).join("\n\n");
+export function placeContent(text: string, rows: readonly ContentRow[], saved: SavedFiles, frontmatterEnd: number): string {
+  const front = text.slice(0, frontmatterEnd);
+  const body = text.slice(frontmatterEnd);
+  const headings = noteHeadings(body);
+  const groups: { from: number; to: number; rank: number; blocks: string[] }[] = [];
+  for (const row of rows) {
+    const block = rowText(row.item, saved);
+    if (!block) continue;
+    const at = spot(row, headings, body);
+    const group = groups.find((g) => g.from === at.from && g.to === at.to && g.rank === at.rank);
+    if (group) group.blocks.push(block);
+    else groups.push({ ...at, blocks: [block] });
+  }
+  // Replacing a whole section or body drops anything else placed inside it.
+  const replaced = groups.filter((g) => g.to > g.from);
+  const kept = groups.filter((g) => g.to > g.from || !replaced.some((r) => r !== g && g.from > r.from && g.from < r.to));
+  if (!kept.length) return text;
+  kept.sort((a, b) => a.from - b.from || a.rank - b.rank);
+  let out = "";
+  let cursor = 0;
+  for (const g of kept) {
+    if (g.from < cursor) continue;
+    out = join(join(out, body.slice(cursor, g.from)), g.blocks.join("\n\n"));
+    cursor = g.to;
+  }
+  out = join(out, body.slice(cursor));
+  const lead = front && !front.endsWith("\n") ? `${front}\n` : front;
+  return `${lead}${out}\n`;
 }
 
-/** Puts `block` right after the note's frontmatter, at its end, or in place of its body (the frontmatter stays). */
-export function insertBlock(text: string, block: string, position: EnrichSelection["position"], frontmatterEnd: number): string {
-  if (!block) return text;
-  if (position === "append") {
-    const head = text.trimEnd();
-    return `${head}${head ? "\n\n" : ""}${block}\n`;
+/** Joins two pieces of Markdown with one blank line, dropping the newlines at their edges. */
+function join(out: string, piece: string): string {
+  const p = piece.replace(/^\n+/, "").replace(/\s+$/, "");
+  if (!p.trim()) return out;
+  return out ? `${out}\n\n${p}` : p;
+}
+
+/** Name of the variable holding the template's rendered note content. */
+export const TEMPLATE_CONTENT = "Template content";
+
+/**
+ * The selection a template sets up: properties the note is missing are added
+ * and lists are merged, and the template's note content is appended to the body.
+ */
+export function defaultSelection(choices: EnrichChoices): EnrichSelection {
+  const properties: Record<string, PropertyPick> = {};
+  for (const property of choices.properties) {
+    if (isEmpty(property.current)) properties[property.name] = { mode: "replace", target: property.name };
+    else if (property.mergeable) properties[property.name] = { mode: "merge", target: property.name };
   }
-  const front = text.slice(0, frontmatterEnd);
-  const rest = position === "replace" ? "" : text.slice(frontmatterEnd).replace(/^\s+/, "");
-  const lead = front && !front.endsWith("\n") ? `${front}\n` : front;
-  return `${lead}${block}\n${rest ? `\n${rest}` : ""}`;
+  const content: ContentRow[] = choices.body ? [{ item: { kind: "variable", name: TEMPLATE_CONTENT, value: choices.body }, heading: null, position: "append" }] : [];
+  return { properties, content, offline: false };
 }

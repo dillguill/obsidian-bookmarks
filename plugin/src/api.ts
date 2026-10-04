@@ -1,6 +1,6 @@
 // Wire types for the bookmarks-server HTTP API; mirrors harness/src/api.ts.
 // Bump API_VERSION in both when the API changes incompatibly.
-export const API_VERSION = 6;
+export const API_VERSION = 7;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -151,4 +151,6 @@ export interface ClipperTemplate {
   properties: TemplateProperty[];
   /** URL prefixes or `/regex/`; the first template whose trigger matches is used, else the first template. */
   triggers?: string[];
+  /** False hides the template from "Update note from source"; missing means shown. Not part of Web Clipper's format. */
+  updateFromSource?: boolean;
 }

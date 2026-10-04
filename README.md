@@ -147,7 +147,8 @@ session cookie from signing in (`/auth/*`); only that session can manage keys
 | `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
 | `GET /jobs/:id` | One job. |
 | `GET /jobs/:id/asset/:kind` | Capture output: a screenshot, `pdf_page`, `image_local`, `tiktok_thumbnail` or `tiktok_image_N` named after its variable (only those the template uses), `markdown`, or the rendered `note`. |
-| `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS`. |
+| `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS` (an update's blobs right away). |
+| `POST /jobs/:id/cancel` | Stops a pending or running capture; it fails as `cancelled` and its result is thrown away. |
 | `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId}`. |
 | `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |
 | `GET /ui/` | The settings page (static, no key needed to load it; it signs in with a username and password). |

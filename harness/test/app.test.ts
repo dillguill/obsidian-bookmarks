@@ -32,8 +32,16 @@ const meta = (url: string): PageMeta => ({
 const renders: (RenderRequest | null | undefined)[] = [];
 const shot = Buffer.from([0xff, 0xd8, 0xff]);
 const engine: CaptureEngine = {
-  async capture(url, render) {
+  async capture(url, render, progress) {
     renders.push(render);
+    if (url.includes("progress")) {
+      // Text first, then a screenshot a while later.
+      progress?.page(meta(url), "# Hello", null);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      progress?.file("screenshot_page", shot, "jpg");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return { meta: meta(url), markdown: "# Hello", files: { screenshot_page: shot }, screenshotExt: "jpg", note: null };
+    }
     if (url.includes("blocked")) throw new BlockedError("Blocked by site: bot wall", meta(url));
     if (url.includes("slow")) await new Promise((resolve) => setTimeout(resolve, 300));
     const note = url.includes("rendered") ? { template: render!.templateName ?? "Bookmark", noteName: "Hello", path: "Clips", frontmatter: "---\ntitle: \"Hello\"\n---\n", content: "# Hello" } : null;
@@ -88,7 +96,7 @@ describe("http app", () => {
   it("reports health and API version", async () => {
     const res = await fetch(`${base}/health`, { headers: auth });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ok", apiVersion: 6, version: "0.0.0-test" });
+    expect(await res.json()).toEqual({ status: "ok", apiVersion: 7, version: "0.0.0-test" });
   });
 
   it("captures synchronously with ?wait=1 and serves assets", async () => {
@@ -307,5 +315,32 @@ describe("http app", () => {
     const { job: pending } = (await (await post("/capture", { url: "https://example.com/slow" })).json()) as { job: Job };
     expect((await post(`/jobs/${pending.id}/delivered`)).status).toBe(409);
     expect((await post(`/jobs/01ARZ3NDEKTSV4RRFFQ69G5FAV/delivered`)).status).toBe(404);
+  });
+
+  it("lists assets as they're made, so a running job's text can be read early", async () => {
+    const { job } = (await (await post("/capture", { url: "https://example.com/progress", origin: "enrich" })).json()) as { job: Job };
+    const get = async () => ((await (await fetch(`${base}/jobs/${job.id}`, { headers: auth })).json()) as { job: Job }).job;
+    let now = await get();
+    for (let i = 0; i < 50 && !now.assets.includes("markdown"); i++) now = await new Promise((r) => setTimeout(r, 20)).then(get);
+    expect(now.status).toBe("running");
+    expect(now.assets).toEqual(["markdown"]);
+    expect((await fetch(`${base}/jobs/${job.id}/asset/markdown`, { headers: auth })).status).toBe(200);
+    for (let i = 0; i < 100 && now.status === "running"; i++) now = await new Promise((r) => setTimeout(r, 20)).then(get);
+    expect(now.status).toBe("done");
+    expect(now.assets).toEqual(["markdown", "screenshot_page"]);
+    // Collecting an update drops its files right away.
+    await post(`/jobs/${job.id}/delivered`);
+    expect((await get()).assets).toEqual([]);
+  });
+
+  it("cancels unfinished jobs and throws their result away", async () => {
+    const { job } = (await (await post("/capture", { url: "https://example.com/progress", origin: "enrich" })).json()) as { job: Job };
+    const res = await post(`/jobs/${job.id}/cancel`);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { job: Job }).job).toMatchObject({ status: "failed", error: "cancelled", assets: [] });
+    await new Promise((r) => setTimeout(r, 800));
+    const after = ((await (await fetch(`${base}/jobs/${job.id}`, { headers: auth })).json()) as { job: Job }).job;
+    expect(after).toMatchObject({ status: "failed", error: "cancelled", assets: [] });
+    expect((await post(`/jobs/${job.id}/cancel`)).status).toBe(409);
   });
 });

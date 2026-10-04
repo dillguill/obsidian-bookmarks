@@ -121,5 +121,6 @@ export function parseTemplate(raw: unknown): ClipperTemplate | string {
     noteContentFormat,
     properties,
     triggers,
+    ...(t.updateFromSource === false ? { updateFromSource: false } : {}),
   });
 }

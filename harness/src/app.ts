@@ -25,7 +25,7 @@ const FILES: ReadonlySet<string> = new Set<string>(CAPTURE_FILES);
 const STATUSES: ReadonlySet<string> = new Set<JobStatus>(["pending", "running", "done", "failed", "delivered"]);
 const MAX_BODY = 16 * 1024;
 const MAX_SETTINGS_BODY = 512 * 1024;
-const JOB_PATH = new RegExp(`^/jobs/([0-9A-Z]{26})(?:/(delivered|asset/(${[...CAPTURE_FILES, "markdown", "note"].join("|")})))?$`);
+const JOB_PATH = new RegExp(`^/jobs/([0-9A-Z]{26})(?:/(delivered|cancel|asset/(${[...CAPTURE_FILES, "markdown", "note"].join("|")})))?$`);
 
 // The settings page: static files with no secrets in them, so they're served
 // without signing in; the page signs in with a password and calls the API
@@ -332,6 +332,13 @@ export function createApp(deps: AppDeps): Server {
 
       if (method === "POST" && action === "delivered") {
         if (!store.markDelivered(id)) return sendJson(res, 409, { error: "not_finished", message: `job is ${job.status}` });
+        // An update's files are read once, by the plugin that asked for them.
+        if (job.origin === "enrich") await deps.worker.discard(id);
+        return sendJson(res, 200, { job: store.get(id) });
+      }
+
+      if (method === "POST" && action === "cancel") {
+        if (!(await deps.worker.cancel(id))) return sendJson(res, 409, { error: "finished", message: `job is ${job.status}` });
         return sendJson(res, 200, { job: store.get(id) });
       }
 
