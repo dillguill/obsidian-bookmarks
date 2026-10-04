@@ -1,7 +1,9 @@
+import { timingSafeEqual } from "node:crypto";
 import { createReadStream, readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { API_VERSION, CAPTURE_FILES, fileExt, type AssetKind, type CaptureFile, type CaptureOrigin, type JobStatus } from "./api.js";
+import { passwordProblem, SESSION_DAYS, Throttle, type AuthStore } from "./auth.js";
 import type { Config } from "./config.js";
 import type { JobStore } from "./db.js";
 import { parseCaptureSettings } from "./settings.js";
@@ -11,6 +13,7 @@ import { assetPath, type Worker } from "./worker.js";
 export interface AppDeps {
   config: Pick<Config, "tokens" | "dataDir" | "waitCapMs" | "allowPrivateNetworks">;
   store: JobStore;
+  auth: AuthStore;
   worker: Worker;
   version: string;
   /** Override for tests; defaults to the DNS-backed SSRF check. */
@@ -25,7 +28,8 @@ const MAX_SETTINGS_BODY = 512 * 1024;
 const JOB_PATH = new RegExp(`^/jobs/([0-9A-Z]{26})(?:/(delivered|asset/(${[...CAPTURE_FILES, "markdown", "note"].join("|")})))?$`);
 
 // The settings page: static files with no secrets in them, so they're served
-// without a token; the page signs in and calls the API with a bearer token.
+// without signing in; the page signs in with a password and calls the API
+// with a session cookie.
 const UI_DIR = new URL("../ui/", import.meta.url);
 const UI_FILES: Record<string, { file: string; type: string }> = {
   "/ui/": { file: "index.html", type: "text/html; charset=utf-8" },
@@ -66,10 +70,41 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-function isAuthorized(req: IncomingMessage, tokens: ReadonlySet<string>): boolean {
-  const header = req.headers.authorization ?? "";
-  const match = /^Bearer (.+)$/.exec(header);
-  return match?.[1] !== undefined && tokens.has(match[1]);
+const SESSION_COOKIE = "bookmarks_session";
+/**
+ * The settings page sends this with every request. A session cookie counts only
+ * alongside it: other sites can't add custom headers to a request without CORS
+ * permission, which this server never grants, so they can't use the cookie.
+ */
+const UI_HEADER = "x-bookmarks-ui";
+const KEY_PATH = /^\/keys\/([A-Za-z0-9_-]{1,64})$/;
+const MAX_NAME = 100;
+
+function bearer(req: IncomingMessage): string | null {
+  const match = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
+  return match?.[1] ?? null;
+}
+
+function sessionCookie(req: IncomingMessage): string | null {
+  if (req.headers[UI_HEADER] !== "1") return null;
+  for (const part of (req.headers.cookie ?? "").split(";")) {
+    const [name, ...value] = part.trim().split("=");
+    if (name === SESSION_COOKIE) return value.join("=") || null;
+  }
+  return null;
+}
+
+function setSessionCookie(req: IncomingMessage, res: ServerResponse, id: string | null): void {
+  // Behind Tailscale Serve or another HTTPS proxy, keep the cookie off plain HTTP.
+  const https = req.headers["x-forwarded-proto"] === "https" || "encrypted" in req.socket;
+  const attrs = ["HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${id ? SESSION_DAYS * 86400 : 0}`, ...(https ? ["Secure"] : [])];
+  res.setHeader("set-cookie", `${SESSION_COOKIE}=${id ?? ""}; ${attrs.join("; ")}`);
+}
+
+function sameText(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
 }
 
 async function readBody(req: IncomingMessage, limit = MAX_BODY): Promise<string> {
@@ -115,8 +150,112 @@ function listField(value: unknown): string[] {
 }
 
 export function createApp(deps: AppDeps): Server {
-  const { config, store, worker } = deps;
+  const { config, store, worker, auth } = deps;
   const rejectUrl = deps.rejectUrl ?? ((url: string) => urlRejection(url, config.allowPrivateNetworks));
+  const throttle = new Throttle();
+
+  /** "key" for a bearer token (from BOOKMARKS_TOKENS or made on the API keys page), "session" for the signed-in settings page. */
+  function caller(req: IncomingMessage): "key" | "session" | null {
+    const token = bearer(req);
+    if (token) return config.tokens.has(token) || auth.useKey(token) ? "key" : null;
+    const session = sessionCookie(req);
+    return session && auth.touchSession(session) ? "session" : null;
+  }
+
+  async function jsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+    try {
+      const body = JSON.parse(await readBody(req)) as unknown;
+      return body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const text = (value: unknown) => (typeof value === "string" ? value : "");
+
+  /** Sign-in, sign-out and first-run account creation; null when the path isn't one of these. */
+  async function handleSession(req: IncomingMessage, res: ServerResponse, path: string, method: string): Promise<void | null> {
+    const client = req.socket.remoteAddress ?? "";
+    if (path === "/auth" && method === "GET") {
+      const username = auth.username();
+      const session = sessionCookie(req);
+      const signedIn = Boolean(username && session && auth.touchSession(session));
+      auth.setupCode(); // logs the code if no account exists yet
+      return sendJson(res, 200, { account: Boolean(username), signedIn, username: signedIn ? username : null });
+    }
+    if (method !== "POST" || !path.startsWith("/auth/")) return null;
+    // Same rule as the cookie: only the settings page itself can call these.
+    if (req.headers[UI_HEADER] !== "1") return sendJson(res, 403, { error: "forbidden" });
+
+    if (path === "/auth/logout") {
+      const session = sessionCookie(req);
+      if (session) auth.endSession(session);
+      setSessionCookie(req, res, null);
+      return sendJson(res, 200, { signedIn: false });
+    }
+    if (path !== "/auth/login" && path !== "/auth/setup") return null;
+    if (throttle.blocked(client)) return sendJson(res, 429, { error: "too_many_attempts", message: "Too many failed attempts. Try again in a few minutes." });
+    const body = await jsonBody(req);
+    if (!body) return sendJson(res, 400, { error: "bad_request", message: "Body must be JSON." });
+    const username = text(body.username).trim();
+    const password = text(body.password);
+
+    if (path === "/auth/setup") {
+      const code = auth.setupCode();
+      if (!code) return sendJson(res, 409, { error: "account_exists", message: "An account already exists. Sign in instead." });
+      if (!sameText(text(body.code).trim(), code)) {
+        throttle.fail(client);
+        return sendJson(res, 401, { error: "bad_setup_code", message: "That setup code isn't right. It's in the server's log." });
+      }
+      if (!username || username.length > MAX_NAME) return sendJson(res, 400, { error: "bad_request", message: "Choose a username." });
+      const problem = passwordProblem(password);
+      if (problem) return sendJson(res, 400, { error: "bad_request", message: problem });
+      if (!(await auth.createAccount(username, password))) return sendJson(res, 409, { error: "account_exists", message: "An account already exists." });
+      throttle.clear(client);
+      setSessionCookie(req, res, auth.createSession());
+      return sendJson(res, 200, { signedIn: true, username });
+    }
+
+    if (!(await auth.verify(username, password))) {
+      throttle.fail(client);
+      return sendJson(res, 401, { error: "bad_login", message: "Wrong username or password." });
+    }
+    throttle.clear(client);
+    setSessionCookie(req, res, auth.createSession());
+    return sendJson(res, 200, { signedIn: true, username });
+  }
+
+  /** Password change and API keys: only for the signed-in settings page, so a key can't make more keys. */
+  async function handleAccount(req: IncomingMessage, res: ServerResponse, path: string, method: string): Promise<void | null> {
+    const isKeys = path === "/keys" || KEY_PATH.test(path);
+    if (!isKeys && path !== "/auth/password") return null;
+    if (caller(req) !== "session") return sendJson(res, 403, { error: "session_required", message: "Sign in on the settings page to do this." });
+
+    if (path === "/auth/password" && method === "POST") {
+      const body = await jsonBody(req);
+      if (!body) return sendJson(res, 400, { error: "bad_request", message: "Body must be JSON." });
+      if (!(await auth.verify(auth.username() ?? "", text(body.current)))) return sendJson(res, 401, { error: "bad_login", message: "The current password isn't right." });
+      const problem = passwordProblem(text(body.password));
+      if (problem) return sendJson(res, 400, { error: "bad_request", message: problem });
+      await auth.setPassword(text(body.password));
+      // Other browsers are signed out; this one gets a fresh session.
+      setSessionCookie(req, res, auth.createSession());
+      return sendJson(res, 200, { ok: true });
+    }
+    if (path === "/keys" && method === "GET") return sendJson(res, 200, { keys: auth.listKeys(), envTokens: config.tokens.size });
+    if (path === "/keys" && method === "POST") {
+      const name = text((await jsonBody(req))?.name).trim();
+      if (!name || name.length > MAX_NAME) return sendJson(res, 400, { error: "bad_request", message: "Give the key a name, like the device that will use it." });
+      const { key, secret } = auth.createKey(name);
+      return sendJson(res, 201, { key, secret });
+    }
+    const match = KEY_PATH.exec(path);
+    if (match && method === "DELETE") {
+      if (!auth.revokeKey(match[1]!)) return sendJson(res, 404, { error: "not_found" });
+      return sendJson(res, 200, { revoked: match[1] });
+    }
+    return sendJson(res, 405, { error: "method_not_allowed" });
+  }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -124,7 +263,9 @@ export function createApp(deps: AppDeps): Server {
     const method = req.method ?? "GET";
 
     if (method === "GET" && serveUi(res, path)) return;
-    if (!isAuthorized(req, config.tokens)) return sendJson(res, 401, { error: "unauthorized" });
+    if ((await handleSession(req, res, path, method)) !== null) return;
+    if ((await handleAccount(req, res, path, method)) !== null) return;
+    if (!caller(req)) return sendJson(res, 401, { error: "unauthorized" });
 
     if (method === "GET" && path === "/health") {
       return sendJson(res, 200, { status: "ok", apiVersion: API_VERSION, version: deps.version });

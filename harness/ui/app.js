@@ -2,31 +2,13 @@
 // user-provided string goes through textContent or .value, never innerHTML.
 "use strict";
 
-const TOKEN_KEY = "bookmarks-token";
 const PROPERTY_TYPES = ["text", "multitext", "number", "checkbox", "date", "datetime"];
 const $ = (id) => document.getElementById(id);
 
-let token = readToken();
 let settings = null;
 let view = { section: "general", template: 0 };
 let saveTimer = null;
-
-function readToken() {
-  try {
-    return localStorage.getItem(TOKEN_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-function writeToken(value) {
-  try {
-    if (value) localStorage.setItem(TOKEN_KEY, value);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    // storage blocked: the token lasts for this page load only
-  }
-}
+let username = "";
 
 // The bookmarklet carries a random key kept in this browser, so the save popup
 // can save straight away for it but asks first when another site opens it.
@@ -57,14 +39,16 @@ function renderBookmarklets() {
   }
 }
 
-async function api(method, path, body) {
+// The header lets the server accept this page's session cookie (see app.ts).
+async function api(method, path, body, { quiet401 = false } = {}) {
   const res = await fetch(path, {
     method,
-    headers: { Authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
+    credentials: "same-origin",
+    headers: { "x-bookmarks-ui": "1", ...(body ? { "content-type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401) {
-    showSignIn("That token wasn't accepted.");
+  if (res.status === 401 && !quiet401) {
+    showSignIn("You've been signed out. Sign in again.");
     throw new Error("unauthorized");
   }
   const json = await res.json().catch(() => ({}));
@@ -258,14 +242,15 @@ window.addEventListener("beforeunload", (event) => {
 // ---- sections ----
 
 function show(section) {
-  for (const id of ["signin", "general", "properties", "variables", "template"]) $(id).hidden = id !== section;
+  for (const id of ["signin", "setup", "general", "properties", "variables", "keys", "template"]) $(id).hidden = id !== section;
 }
 
-function showSignIn(message) {
-  show("signin");
+function showSignIn(message, section = "signin") {
+  settings = null;
+  show(section);
   for (const el of document.querySelectorAll(".sidebar button, .sidebar label")) el.toggleAttribute("disabled", true);
   if (message) status(message, true);
-  $("token").focus();
+  $(section === "setup" ? "setup-code" : "signin-username").focus();
 }
 
 function render() {
@@ -278,6 +263,7 @@ function render() {
   if (view.section === "template") renderTemplate();
   else if (view.section === "general") renderGeneral();
   else if (view.section === "properties") renderPropertyTypes();
+  else if (view.section === "keys") void renderKeys();
   show(view.section);
 }
 
@@ -311,7 +297,101 @@ function renderTemplateList() {
 
 function renderGeneral() {
   $("hide-capture-id").checked = Boolean(settings.hideCaptureId);
+  $("signed-in-as").textContent = username ? `As ${username}.` : "";
+  $("password-username").value = username;
 }
+
+$("password-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("POST", "/auth/password", { current: $("password-current").value, password: $("password-new").value }, { quiet401: true });
+    $("password-current").value = "";
+    $("password-new").value = "";
+    status("Password changed.");
+  } catch (err) {
+    status(err.message, true);
+  }
+});
+
+// ---- API keys ----
+
+const when = (iso) => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+async function renderKeys() {
+  let data;
+  try {
+    data = await api("GET", "/keys");
+  } catch (err) {
+    if (err.message !== "unauthorized") status(`Couldn't load keys: ${err.message}`, true);
+    return;
+  }
+  const list = $("key-list");
+  if (!data.keys.length) {
+    const empty = document.createElement("p");
+    empty.className = "desc";
+    empty.textContent = "No keys yet.";
+    list.replaceChildren(empty);
+  } else {
+    list.replaceChildren(
+      ...data.keys.map((key) => {
+        const row = document.createElement("div");
+        row.className = "key-row";
+        const info = document.createElement("div");
+        info.className = "setting-info";
+        const name = document.createElement("div");
+        name.className = "setting-name";
+        name.textContent = key.name;
+        const desc = document.createElement("div");
+        desc.className = "desc";
+        desc.textContent = `${key.hint}… · created ${when(key.createdAt)} · ${key.lastUsedAt ? `last used ${when(key.lastUsedAt)}` : "never used"}`;
+        info.append(name, desc);
+        const revoke = document.createElement("button");
+        revoke.className = "danger";
+        revoke.textContent = "Revoke";
+        revoke.addEventListener("click", async () => {
+          if (!confirm(`Revoke "${key.name}"? Anything using it stops working.`)) return;
+          try {
+            await api("DELETE", `/keys/${encodeURIComponent(key.id)}`);
+            status(`Revoked ${key.name}.`);
+            void renderKeys();
+          } catch (err) {
+            if (err.message !== "unauthorized") status(`Couldn't revoke: ${err.message}`, true);
+          }
+        });
+        row.append(info, revoke);
+        return row;
+      }),
+    );
+  }
+  $("env-tokens").textContent = data.envTokens
+    ? `${data.envTokens} token${data.envTokens === 1 ? "" : "s"} from BOOKMARKS_TOKENS in the server's .env also work. Remove them there (and restart) to revoke them.`
+    : "";
+}
+
+$("key-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const { key, secret } = await api("POST", "/keys", { name: $("key-name").value.trim() });
+    $("key-name").value = "";
+    $("key-created-name").textContent = key.name;
+    $("key-secret").value = secret;
+    $("key-created").hidden = false;
+    $("key-secret").select();
+    void renderKeys();
+  } catch (err) {
+    if (err.message !== "unauthorized") status(`Couldn't create key: ${err.message}`, true);
+  }
+});
+
+$("key-copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("key-secret").value);
+    status("Copied the key.");
+  } catch {
+    $("key-secret").select();
+    status("Couldn't copy; select the key instead.", true);
+  }
+});
 
 $("hide-capture-id").addEventListener("change", (e) => {
   settings.hideCaptureId = e.target.checked;
@@ -611,19 +691,36 @@ for (const el of document.querySelectorAll(".nav-item[data-section]")) {
   });
 }
 
-$("signout").addEventListener("click", () => {
-  token = "";
-  writeToken("");
-  settings = null;
+$("signout").addEventListener("click", async () => {
+  await api("POST", "/auth/logout").catch(() => {});
+  username = "";
   showSignIn();
 });
 
+async function signIn(path, body) {
+  try {
+    const result = await api("POST", path, body, { quiet401: true });
+    username = result.username;
+    return load();
+  } catch (err) {
+    status(err.message, true);
+    return false;
+  }
+}
+
 $("signin-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  token = $("token").value.trim();
-  if (await load()) {
-    writeToken(token);
-    $("token").value = "";
+  if (await signIn("/auth/login", { username: $("signin-username").value.trim(), password: $("signin-password").value })) {
+    $("signin-password").value = "";
+  }
+});
+
+$("setup-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if ($("setup-password").value !== $("setup-confirm").value) return status("The passwords don't match.", true);
+  const body = { code: $("setup-code").value.trim(), username: $("setup-username").value.trim(), password: $("setup-password").value };
+  if (await signIn("/auth/setup", body)) {
+    for (const id of ["setup-code", "setup-password", "setup-confirm"]) $(id).value = "";
   }
 });
 
@@ -641,5 +738,16 @@ async function load() {
   }
 }
 
-if (token) void load();
-else showSignIn();
+async function start() {
+  try {
+    const state = await api("GET", "/auth");
+    if (!state.account) return showSignIn("", "setup");
+    if (!state.signedIn) return showSignIn();
+    username = state.username;
+    void load();
+  } catch (err) {
+    status(`Couldn't reach the server: ${err.message}`, true);
+  }
+}
+
+void start();
