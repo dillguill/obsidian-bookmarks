@@ -114,7 +114,10 @@ server, so every device and every phone Shortcut uses the same settings:
   carousel) and `{{tiktok_thumbnail}}` (the cover saved in the vault, since its link
   expires). Photo carousels also save each photo: `{{tiktok_images}}` embeds them
   all, `{{tiktok_image_1}}`… are their paths and `{{tiktok_image_count}}` counts
-  them. They're empty on other sites. [docs/templates/tiktok.json](docs/templates/tiktok.json) is a template to import.
+  them. `{{tiktok_transcript}}` is what's said, from TikTok's captions in the
+  language spoken, and `{{tiktok_transcript_timestamps}}` the same one line per
+  caption with its time (`[0:03] …`); empty when TikTok has no captions, as for
+  videos without speech. They're empty on other sites. [docs/templates/tiktok.json](docs/templates/tiktok.json) is a template to import.
 
 Server URL, API token, screenshot folder and poll interval are set per device in the
 plugin; the token stays in each device's secret storage.

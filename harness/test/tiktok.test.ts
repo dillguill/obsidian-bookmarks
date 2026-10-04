@@ -10,8 +10,10 @@ import {
   TIKTOK_VARIABLES,
   tiktokData,
   tiktokPost,
+  transcriptSources,
   videoEmbed,
   videoUrl,
+  vttCues,
 } from "../src/tiktok.js";
 
 describe("tiktokPost", () => {
@@ -71,6 +73,8 @@ describe("tiktokData", () => {
         tiktok_embed: videoEmbed(post.id),
         tiktok_images: "",
         tiktok_image_count: "",
+        tiktok_transcript: "",
+        tiktok_transcript_timestamps: "",
       },
       cover: ["https://p16.tiktokcdn-us.com/cover.image", "https://p16.tiktokcdn-us.com/origin.image"],
       images: [],
@@ -101,6 +105,67 @@ describe("tiktokData", () => {
     expect(data.variables.tiktok_image_count).toBe("2");
     // TikTok's player swipes through photo posts too.
     expect(data.variables.tiktok_embed).toBe(videoEmbed(post.id));
+  });
+});
+
+describe("transcripts", () => {
+  const vtt = [
+    "WEBVTT",
+    "",
+    "",
+    "00:00:00.060 --> 00:00:03.340",
+    "This right here. One of the best",
+    "new features &amp; <c>more</c>.",
+    "",
+    "00:00:03.341 --> 00:00:05.181",
+    "If you want to track a price",
+    "",
+    "00:00:05.182 --> 00:00:07.061",
+    "If you want to track a price",
+    "",
+    "01:02:07.500 --> 01:02:09.000",
+    "Bye.",
+    "",
+  ].join("\r\n");
+
+  it("reads WebVTT cues without markup or repeats", () => {
+    expect(vttCues(vtt)).toEqual([
+      { start: 0.06, text: "This right here. One of the best new features & more." },
+      { start: 3.341, text: "If you want to track a price" },
+      { start: 3727.5, text: "Bye." },
+    ]);
+    expect(vttCues("WEBVTT\n\n")).toEqual([]);
+  });
+
+  it("gives the transcript as plain text and with timestamps", () => {
+    const { variables } = tiktokData({ id: "6718335390845095173", handle: "scout2015", kind: "video" }, null, vttCues(vtt));
+    expect(variables.tiktok_transcript).toBe("This right here. One of the best new features & more. If you want to track a price Bye.");
+    expect(variables.tiktok_transcript_timestamps).toBe(
+      "[0:00] This right here. One of the best new features & more.\n[0:03] If you want to track a price\n[1:02:07] Bye.",
+    );
+  });
+
+  it("prefers captions in the language spoken", () => {
+    expect(
+      transcriptSources({
+        video: {
+          claInfo: {
+            originalLanguageInfo: { language: "spa-ES" },
+            captionInfos: [
+              { language: "eng-US", url: "https://a/en", captionFormat: "webvtt" },
+              { language: "spa-ES", url: "https://a/es", urlList: ["https://a/es", "https://b/es"], captionFormat: "webvtt", isOriginalCaption: true },
+            ],
+          },
+          subtitleInfos: [
+            { Url: "https://c/en", LanguageCodeName: "eng-US", Format: "webvtt", Source: "MT" },
+            { Url: "https://c/es", LanguageCodeName: "spa-ES", Format: "webvtt", Source: "ASR" },
+          ],
+        },
+      }),
+    ).toEqual(["https://a/es", "https://b/es", "https://c/es"]);
+    expect(transcriptSources({ video: { subtitleInfos: [{ Url: "https://c/en", Format: "webvtt", Source: "ASR" }] } })).toEqual(["https://c/en"]);
+    expect(transcriptSources({ video: { claInfo: { captionInfos: [] }, subtitleInfos: [] } })).toEqual([]);
+    expect(transcriptSources(null)).toEqual([]);
   });
 });
 

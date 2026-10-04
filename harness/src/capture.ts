@@ -14,9 +14,12 @@ import {
   scriptsFromHtml,
   tiktokData,
   tiktokPost,
+  transcriptSources,
+  vttCues,
   videoUrl,
   type TikTokItem,
   type TikTokPost,
+  type TranscriptCue,
 } from "./tiktok.js";
 
 const require = createRequire(import.meta.url);
@@ -349,19 +352,32 @@ async function imageFile(context: BrowserContext, sources: readonly string[], fo
 async function tiktokItem(page: Page, post: TikTokPost): Promise<TikTokItem | null> {
   const fromPage = itemFromScripts(await page.evaluate(readTikTokScripts), post.id);
   if (fromPage) return fromPage;
-  const get = async (url: string) => {
-    try {
-      const response = await page.context().request.get(url, { timeout: 10_000 });
-      return response.ok() ? response : null;
-    } catch {
-      return null;
-    }
-  };
+  const get = (url: string) => tiktokGet(page, url);
   const videoPage = await get(videoUrl(post));
   const fromVideoPage = videoPage ? itemFromScripts(scriptsFromHtml(await videoPage.text()), post.id) : null;
   if (fromVideoPage) return fromVideoPage;
   const oembed = await get(oembedUrl(videoUrl(post)));
   return oembed ? oembedItem(await oembed.json().catch(() => null)) : null;
+}
+
+/** A GET with the page's cookies, or null when it fails. */
+async function tiktokGet(page: Page, url: string) {
+  try {
+    const response = await page.context().request.get(url, { timeout: 10_000 });
+    return response.ok() ? response : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The post's captions, from the first of their mirror URLs that answers; empty when it has none. */
+async function tiktokTranscript(page: Page, item: TikTokItem | null): Promise<TranscriptCue[]> {
+  for (const url of transcriptSources(item)) {
+    const response = await tiktokGet(page, url);
+    const cues = response ? vttCues(await response.text().catch(() => "")) : [];
+    if (cues.length) return cues;
+  }
+  return [];
 }
 
 export class PlaywrightEngine implements CaptureEngine {
@@ -503,7 +519,8 @@ export class PlaywrightEngine implements CaptureEngine {
 
     const finalUrl = page.url();
     const post = tiktokPost(finalUrl);
-    const tiktok = post ? tiktokData(post, await tiktokItem(page, post)) : null;
+    const item = post ? await tiktokItem(page, post) : null;
+    const tiktok = post ? tiktokData(post, item, await tiktokTranscript(page, item)) : null;
     const meta: PageMeta = {
       finalUrl,
       canonical: parsed.canonical ? absolute(parsed.canonical, finalUrl) || null : null,
