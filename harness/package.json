@@ -1,6 +1,6 @@
 {
   "name": "@obsidian-bookmarks/harness",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "description": "Capture backend (bookmarks-server): Playwright capture engine, SQLite job queue, HTTP API + SSE",
   "type": "module",
