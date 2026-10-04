@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import TurndownService from "turndown";
-import { CAPTURE_FILES, fileMarker, type CaptureFile, type PageMeta, type RenderedNote } from "./api.js";
+import { CAPTURE_FILES, fileExt, fileMarker, type CaptureFile, type PageMeta, type RenderedNote } from "./api.js";
 import type { Config } from "./config.js";
 import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
 import { urlRejection } from "./ssrf.js";
@@ -28,6 +28,8 @@ const VIEWPORT = { width: 1280, height: 800 };
 const MOBILE_VIEWPORT = { width: 390, height: 844 };
 const THUMBNAIL_WIDTH = 480;
 const IMAGE_MAX_WIDTH = 2000;
+const VIDEO_MAX_BYTES = 300 * 1024 * 1024;
+const VIDEO_TIMEOUT_MS = 120_000;
 
 /**
  * Capture files are template variables: make only the ones the rendered note uses.
@@ -380,6 +382,26 @@ async function tiktokTranscript(page: Page, item: TikTokItem | null): Promise<Tr
   return [];
 }
 
+/**
+ * A TikTok video as a file, from the first of its mirror URLs that answers
+ * with one. TikTok serves it to the browser that loaded the post (its cookies
+ * and a tiktok.com referrer); null when none does.
+ */
+async function videoFile(context: BrowserContext, sources: readonly string[], allowPrivateNetworks: boolean): Promise<Buffer | null> {
+  for (const url of sources) {
+    try {
+      if (await urlRejection(url, allowPrivateNetworks)) continue;
+      const response = await context.request.get(url, { headers: { referer: "https://www.tiktok.com/" }, timeout: VIDEO_TIMEOUT_MS });
+      if (!response.ok() || Number(response.headers()["content-length"] ?? 0) > VIDEO_MAX_BYTES) continue;
+      const body = await response.body();
+      if (body.length > 0 && body.length <= VIDEO_MAX_BYTES && (response.headers()["content-type"] ?? "").startsWith("video/")) return body;
+    } catch {
+      // Try the next mirror.
+    }
+  }
+  return null;
+}
+
 export class PlaywrightEngine implements CaptureEngine {
   private browser: Promise<Browser> | null = null;
   private readonly turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
@@ -417,13 +439,18 @@ export class PlaywrightEngine implements CaptureEngine {
     try {
       // A timed-out page can leave Chromium wedged for every later context, so
       // restart the browser rather than just closing this context.
-      return await withTimeout(this.run(context, url, render), this.options.captureTimeoutMs, () => void this.restart());
+      const { video, ...result } = await withTimeout(this.run(context, url, render), this.options.captureTimeoutMs, () => void this.restart());
+      // Outside the capture timeout: a long video can take a while to download.
+      const videoData = video?.length ? await videoFile(context, video, this.options.allowPrivateNetworks) : null;
+      if (videoData) result.files.tiktok_video = videoData;
+      return result;
     } finally {
       await context.close().catch(() => {});
     }
   }
 
-  private async run(context: BrowserContext, url: string, render: RenderRequest | null): Promise<CaptureResult> {
+  /** The capture, plus the TikTok video's URLs when the note wants it saved. */
+  private async run(context: BrowserContext, url: string, render: RenderRequest | null): Promise<CaptureResult & { video?: string[] }> {
     const { allowPrivateNetworks, maxHeight, scrollBudgetMs, screenshotFormat } = this.options;
     // Re-check every document the page loads (redirects, iframes), so a public
     // URL can't bounce the browser into the private network (design §8).
@@ -619,8 +646,9 @@ export class PlaywrightEngine implements CaptureEngine {
       const image = await imageFile(page.context(), sources, format, maxHeight);
       if (image) files[kind] = image;
     }
-    const hasImage = CAPTURE_FILES.some((kind) => kind !== "pdf_page" && files[kind]);
-    return { meta, markdown, files, screenshotExt: hasImage ? ext : null, note };
+    const hasImage = CAPTURE_FILES.some((kind) => fileExt(kind, ext) === ext && files[kind]);
+    const video = wanted.has("tiktok_video") ? tiktok?.video : undefined;
+    return { meta, markdown, files, screenshotExt: hasImage ? ext : null, note, video };
   }
 
   private restart(): void {

@@ -28,6 +28,8 @@ export interface TikTokData {
   cover: string[];
   /** A photo post's carousel images in order, each as its mirror URLs, saved as tiktok_image_1… files. */
   images: string[][];
+  /** A video post's MP4 URLs (mirrors of one video), saved as the tiktok_video file; empty for photo posts. */
+  video: string[];
 }
 
 /** A TikTok post as its URL names it. */
@@ -46,6 +48,8 @@ export interface TikTokItem {
   video?: {
     cover?: string;
     originCover?: string;
+    playAddr?: string;
+    bitrateInfo?: { PlayAddr?: { UrlList?: string[] } }[];
     subtitleInfos?: { Url?: string; LanguageCodeName?: string; Format?: string; Source?: string }[];
     claInfo?: {
       originalLanguageInfo?: { language?: string };
@@ -178,6 +182,10 @@ export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript
   const urls = (image: TikTokImage | undefined) => (image?.imageURL?.urlList ?? []).filter(Boolean);
   const images = (item?.imagePost?.images ?? []).map(urls).filter((list) => list.length).slice(0, TIKTOK_IMAGE_MAX);
   const videoCover = [item?.video?.cover, item?.video?.originCover].filter((url): url is string => Boolean(url));
+  // playAddr is the version TikTok plays on the web; bitrateInfo lists it again with its mirrors.
+  const video = images.length
+    ? []
+    : [...new Set([item?.video?.playAddr ?? "", ...(item?.video?.bitrateInfo ?? []).flatMap((rate) => rate.PlayAddr?.UrlList ?? [])].filter(Boolean))];
   return {
     variables: {
       tiktok_id: post.id,
@@ -195,6 +203,7 @@ export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript
     },
     cover: videoCover.length ? videoCover : urls(item?.imagePost?.cover),
     images,
+    video,
   };
 }
 

@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { fileMarker, type RenderedNote } from "../src/api";
-import { applyProperties, bodyBlock, ENRICH_FILES, enrichChoices, fileLabel, filesToSave, insertBlock, type EnrichSelection } from "../src/enrich";
+import { fileMarker, type CaptureFile, type RenderedNote } from "../src/api";
+import {
+  applyProperties,
+  bodyBlock,
+  ENRICH_FILES,
+  enrichChoices,
+  fileLabel,
+  filesToSave,
+  hasTikTokPlayer,
+  insertBlock,
+  offlineFiles,
+  replaceTikTokPlayer,
+  type EnrichSelection,
+} from "../src/enrich";
 
 /** The slice of YAML Web Clipper writes: quoted strings, numbers, empty values and lists of quoted strings. */
 function parseYaml(yaml: string): Record<string, unknown> {
@@ -49,7 +61,7 @@ const note: RenderedNote = {
 
 const current = { source: "https://example.com/a", title: "Old title", tags: ["read-later"] };
 const choices = enrichChoices(note, current, parseYaml, ["screenshot_banner", "image_local"], "capture_id");
-const select = (over: Partial<EnrichSelection>): EnrichSelection => ({ properties: {}, body: false, images: [], position: "append", ...over });
+const select = (over: Partial<EnrichSelection>): EnrichSelection => ({ properties: {}, body: false, images: [], position: "append", offline: false, ...over });
 
 describe("enrichChoices", () => {
   it("offers properties that differ, leaving out capture_id, empty ones and ones needing a file that wasn't made", () => {
@@ -118,5 +130,40 @@ describe("TikTok photos", () => {
     expect(ENRICH_FILES).toContain("tiktok_image_1");
     expect(fileLabel("tiktok_image_3")).toBe("TikTok photo 3");
     expect(fileLabel("image_local")).toBe("Page image");
+  });
+});
+
+describe("saving TikTok offline", () => {
+  const player = `<iframe\nsrc="https://www.tiktok.com/player/v1/7382225350710824222?autoplay=0"\nallow="fullscreen"\nstyle="width:100%;height:50vh;"\n/>`;
+  const text = `---\ntitle: x\n---\n${player}\n\nCaption.\n`;
+
+  it("finds the player {{tiktok_embed}} writes", () => {
+    expect(hasTikTokPlayer(text)).toBe(true);
+    expect(hasTikTokPlayer(`<iframe src="https://www.youtube.com/embed/x"></iframe>`)).toBe(false);
+  });
+
+  it("uses the video, else the carousel photos", () => {
+    expect(offlineFiles(["tiktok_thumbnail", "tiktok_video"])).toEqual(["tiktok_video"]);
+    expect(offlineFiles(["tiktok_image_2", "tiktok_thumbnail", "tiktok_image_1"])).toEqual(["tiktok_image_1", "tiktok_image_2"]);
+    expect(offlineFiles(["tiktok_thumbnail"])).toEqual([]);
+  });
+
+  it("swaps the player for the saved files", () => {
+    expect(replaceTikTokPlayer(text, ["tiktok_video"], { tiktok_video: "a/n-tiktok-video.mp4" })).toBe(
+      "---\ntitle: x\n---\n![[a/n-tiktok-video.mp4]]\n\nCaption.\n",
+    );
+    expect(replaceTikTokPlayer(`<iframe src='https://www.tiktok.com/player/v1/1'></iframe>`, ["tiktok_image_1", "tiktok_image_2"], { tiktok_image_1: "p1.jpg", tiktok_image_2: "p2.jpg" })).toBe(
+      "![[p1.jpg]]\n![[p2.jpg]]",
+    );
+    // Nothing saved: the player stays.
+    expect(replaceTikTokPlayer(text, ["tiktok_video"], {})).toBe(text);
+  });
+
+  it("saves the offline files and doesn't embed them again", () => {
+    const tiktok = { ...choices, images: ["tiktok_video", "tiktok_thumbnail"] as CaptureFile[] };
+    const offline = select({ offline: true, images: ["tiktok_video", "tiktok_thumbnail"] });
+    expect(filesToSave(tiktok, offline)).toEqual(["tiktok_video", "tiktok_thumbnail"]);
+    expect(filesToSave(tiktok, select({ offline: true }))).toEqual(["tiktok_video"]);
+    expect(bodyBlock(tiktok, offline, { tiktok_video: "v.mp4", tiktok_thumbnail: "t.jpg" })).toBe("![[t.jpg]]");
   });
 });

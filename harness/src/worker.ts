@@ -1,14 +1,13 @@
 import { EventEmitter } from "node:events";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { CAPTURE_FILES, type AssetKind, type Job } from "./api.js";
+import { CAPTURE_FILES, fileExt, type AssetKind, type Job } from "./api.js";
 import { BlockedError, type CaptureEngine } from "./capture.js";
 import type { JobStore } from "./db.js";
 import { renderRequest } from "./render.js";
 
-export function assetPath(dataDir: string, id: string, kind: AssetKind, ext: string | null): string {
-  const file =
-    kind === "markdown" ? "content.md" : kind === "note" ? "note.json" : kind === "pdf_page" ? "pdf_page.pdf" : `${kind}.${ext ?? "png"}`;
+export function assetPath(dataDir: string, id: string, kind: AssetKind, screenshotExt: Job["screenshotExt"]): string {
+  const file = kind === "markdown" ? "content.md" : kind === "note" ? "note.json" : `${kind}.${fileExt(kind, screenshotExt) ?? "png"}`;
   return join(dataDir, "jobs", id, file);
 }
 

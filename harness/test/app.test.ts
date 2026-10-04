@@ -38,7 +38,7 @@ const engine: CaptureEngine = {
     const note = url.includes("rendered") ? { template: render!.templateName ?? "Bookmark", noteName: "Hello", path: "Clips", frontmatter: "---\ntitle: \"Hello\"\n---\n", content: "# Hello" } : null;
     // The real engine takes the shots the rendered note's variables ask for.
     if (url.includes("nopic")) return { meta: meta(url), markdown: "# Hello", files: {}, screenshotExt: null, note };
-    const files = url.includes("all") ? { screenshot_page: shot, screenshot_banner: shot, screenshot_page_dark: shot, pdf_page: Buffer.from("%PDF-1.4"), image_local: shot } : { screenshot_page: shot };
+    const files = url.includes("all") ? { screenshot_page: shot, screenshot_banner: shot, screenshot_page_dark: shot, pdf_page: Buffer.from("%PDF-1.4"), image_local: shot, tiktok_video: Buffer.from("mp4") } : { screenshot_page: shot };
     return { meta: meta(url), markdown: "# Hello", files, screenshotExt: "jpg", note };
   },
   async close() {},
@@ -86,7 +86,7 @@ describe("http app", () => {
   it("reports health and API version", async () => {
     const res = await fetch(`${base}/health`, { headers: auth });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ok", apiVersion: 5, version: "0.0.0-test" });
+    expect(await res.json()).toEqual({ status: "ok", apiVersion: 6, version: "0.0.0-test" });
   });
 
   it("captures synchronously with ?wait=1 and serves assets", async () => {
@@ -152,7 +152,7 @@ describe("http app", () => {
       ((await (await post("/capture?wait=1", { url: target, origin: "shortcut" })).json()) as { job: Job }).job;
     const all = await capture("https://example.com/all");
     const none = await capture("https://example.com/nopic");
-    expect(all.assets).toEqual(["screenshot_page", "screenshot_banner", "screenshot_page_dark", "pdf_page", "image_local", "markdown"]);
+    expect(all.assets).toEqual(["screenshot_page", "screenshot_banner", "screenshot_page_dark", "pdf_page", "image_local", "tiktok_video", "markdown"]);
     expect(none).toMatchObject({ status: "done", assets: ["markdown"], screenshotExt: null });
     const banner = await fetch(`${base}/jobs/${all.id}/asset/screenshot_banner`, { headers: auth });
     expect(banner.headers.get("content-type")).toBe("image/jpeg");
@@ -163,6 +163,9 @@ describe("http app", () => {
     }
     const pdf = await fetch(`${base}/jobs/${all.id}/asset/pdf_page`, { headers: auth });
     expect(pdf.headers.get("content-type")).toBe("application/pdf");
+    const video = await fetch(`${base}/jobs/${all.id}/asset/tiktok_video`, { headers: auth });
+    expect(video.headers.get("content-type")).toBe("video/mp4");
+    expect(await video.text()).toBe("mp4");
     expect((await fetch(`${base}/jobs/${none.id}/asset/screenshot_banner`, { headers: auth })).status).toBe(404);
     expect((await fetch(`${base}/jobs/${all.id}/asset/screenshot_nope`, { headers: auth })).status).toBe(404);
   });

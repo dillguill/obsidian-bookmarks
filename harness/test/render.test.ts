@@ -28,6 +28,7 @@ describe("fileVariables", () => {
       pdf_page: "",
       image_local: "",
       tiktok_thumbnail: "",
+      tiktok_video: "",
       ...Object.fromEntries(Array.from({ length: 35 }, (_, i) => [`tiktok_image_${i + 1}`, ""])),
     });
   });

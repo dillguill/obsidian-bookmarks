@@ -1,5 +1,5 @@
 import { App, Modal, Setting } from "obsidian";
-import type { CaptureFile } from "./api";
+import { fileExt, type CaptureFile } from "./api";
 import { fileLabel, type EnrichChoices, type EnrichSelection } from "./enrich";
 
 function preview(value: unknown): string {
@@ -25,6 +25,8 @@ export class EnrichModal extends Modal {
     private readonly images: Partial<Record<CaptureFile, ArrayBuffer>>,
     private readonly imageType: string,
     private readonly noteBodyEmpty: boolean,
+    /** Files that can replace the note's TikTok player; empty when it has none. */
+    private readonly offline: CaptureFile[],
     private readonly onSubmit: (selection: EnrichSelection) => void,
     private readonly onDone: () => void,
   ) {
@@ -40,9 +42,10 @@ export class EnrichModal extends Modal {
       body: this.noteBodyEmpty && choices.body !== "",
       images: [],
       position: "append",
+      offline: false,
     };
 
-    if (choices.properties.length + choices.images.length === 0 && !choices.body) {
+    if (choices.properties.length + choices.images.length === 0 && !choices.body && !this.offline.length) {
       contentEl.createEl("p", { text: "The page has nothing this note doesn't already have." });
     }
 
@@ -81,6 +84,13 @@ export class EnrichModal extends Modal {
     }
 
     if (choices.body || choices.images.length > 0) new Setting(contentEl).setName("Note body").setHeading();
+    if (this.offline.length > 0) {
+      const video = this.offline.includes("tiktok_video");
+      new Setting(contentEl)
+        .setName("Save TikTok offline")
+        .setDesc(`Replace the TikTok player in the note with the ${video ? "video" : `${this.offline.length} photos`}, saved in the vault.`)
+        .addToggle((toggle) => toggle.setValue(false).onChange((on) => (selection.offline = on)));
+    }
     if (choices.body) {
       new Setting(contentEl)
         .setName("Page content")
@@ -90,7 +100,8 @@ export class EnrichModal extends Modal {
     for (const kind of choices.images) {
       const setting = new Setting(contentEl).setName(fileLabel(kind));
       const data = this.images[kind];
-      if (data && kind !== "pdf_page") {
+      // Images: the files whose extension is the screenshot format's.
+      if (data && fileExt(kind, null) === null) {
         const url = URL.createObjectURL(new Blob([data], { type: this.imageType }));
         this.urls.push(url);
         const img = setting.descEl.createEl("img", { attr: { src: url, alt: fileLabel(kind) } });

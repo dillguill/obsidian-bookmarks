@@ -60,7 +60,12 @@ describe("tiktokData", () => {
       desc: "Scramble up ur name #foryoupage",
       createTime: 1564234358,
       author: { uniqueId: "scout2015", nickname: "Scout, Suki & Stella" },
-      video: { cover: "https://p16.tiktokcdn-us.com/cover.image", originCover: "https://p16.tiktokcdn-us.com/origin.image" },
+      video: {
+        cover: "https://p16.tiktokcdn-us.com/cover.image",
+        originCover: "https://p16.tiktokcdn-us.com/origin.image",
+        playAddr: "https://v16.tiktokcdn-us.com/play.mp4",
+        bitrateInfo: [{ PlayAddr: { UrlList: ["https://v16.tiktokcdn-us.com/play.mp4", "https://v19.tiktokcdn-us.com/play.mp4"] } }, {}],
+      },
     });
     expect(data).toEqual({
       variables: {
@@ -78,6 +83,7 @@ describe("tiktokData", () => {
       },
       cover: ["https://p16.tiktokcdn-us.com/cover.image", "https://p16.tiktokcdn-us.com/origin.image"],
       images: [],
+      video: ["https://v16.tiktokcdn-us.com/play.mp4", "https://v19.tiktokcdn-us.com/play.mp4"],
     });
   });
 
@@ -103,6 +109,7 @@ describe("tiktokData", () => {
     expect(data.cover).toEqual(["https://p16.tiktokcdn-us.com/cover.jpeg", "https://p19.example/other.jpeg"]);
     expect(data.variables.tiktok_images).toBe(`![[${fileMarker("tiktok_image_1")}]]\n![[${fileMarker("tiktok_image_2")}]]`);
     expect(data.variables.tiktok_image_count).toBe("2");
+    expect(data.video).toEqual([]);
     // TikTok's player swipes through photo posts too.
     expect(data.variables.tiktok_embed).toBe(videoEmbed(post.id));
   });

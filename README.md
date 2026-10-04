@@ -28,7 +28,7 @@ your vault as deduplicated bookmark notes. See the
    ```
 
    Check it: `curl -H "Authorization: Bearer desktop-token" http://127.0.0.1:8787/health`
-   should return `{"status":"ok","apiVersion":5,...}`.
+   should return `{"status":"ok","apiVersion":6,...}`.
 
 2. **Install the plugin** with [BRAT](https://github.com/TfTHacker/obsidian42-brat):
    in BRAT's settings choose **Add beta plugin** and enter `dillguill/obsidian-bookmarks`.
@@ -55,6 +55,8 @@ your vault as deduplicated bookmark notes. See the
    property, even one this plugin didn't make) and lets you pick which
    properties to add, replace or add to a list, whether to add the page content,
    and which images to save, placed before or after the note's body or in place of it.
+   On a note with a TikTok player, **Save TikTok offline** swaps the player for
+   the video (or a carousel's photos) saved in the vault.
 
 4. **Capture from elsewhere** (the phone path): with Obsidian closed, enqueue a URL
 
@@ -112,7 +114,8 @@ server, so every device and every phone Shortcut uses the same settings:
   `{{tiktok_author}}`, `{{tiktok_author_handle}}`, `{{tiktok_id}}`,
   `{{tiktok_embed}}` (a player that plays in the note, or swipes through a photo
   carousel) and `{{tiktok_thumbnail}}` (the cover saved in the vault, since its link
-  expires). Photo carousels also save each photo: `{{tiktok_images}}` embeds them
+  expires). `{{tiktok_video}}` saves the video itself (`note-tiktok-video.mp4`;
+  `![[{{tiktok_video}}]]` plays it in the note, offline). Photo carousels also save each photo: `{{tiktok_images}}` embeds them
   all, `{{tiktok_image_1}}`… are their paths and `{{tiktok_image_count}}` counts
   them. `{{tiktok_transcript}}` is what's said, from TikTok's captions in the
   language spoken, and `{{tiktok_transcript_timestamps}}` the same one line per

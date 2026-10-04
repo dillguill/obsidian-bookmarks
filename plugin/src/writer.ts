@@ -1,4 +1,4 @@
-import { CAPTURE_FILES, fileMarker, type CaptureFile, type Job, type RenderedNote } from "./api";
+import { CAPTURE_FILES, fileExt, fileMarker, type CaptureFile, type Job, type RenderedNote } from "./api";
 import type { DedupIndex } from "./dedup";
 import type { PageData } from "./page-data";
 import { cleanUrl } from "./url";
@@ -110,7 +110,7 @@ export function fillFiles(text: string, saved: SavedFiles): string {
   }, text);
 }
 
-/** Saves capture files in the assets folder: <note>.jpg for the page, <note>-banner.jpg, <note>-banner-dark.jpg and so on, <note>.pdf, <note>-image.jpg. */
+/** Saves capture files in the assets folder: <note>.jpg for the page, <note>-banner.jpg, <note>-banner-dark.jpg and so on, <note>.pdf, <note>-image.jpg, <note>-tiktok-video.mp4. */
 export async function saveCaptureFiles(
   vault: VaultPort,
   assetsFolder: string,
@@ -121,7 +121,7 @@ export async function saveCaptureFiles(
   const saved: SavedFiles = {};
   for (const kind of CAPTURE_FILES) {
     const data = files?.[kind];
-    const ext = kind === "pdf_page" ? "pdf" : screenshotExt;
+    const ext = fileExt(kind, screenshotExt);
     if (!data || !ext) continue;
     // screenshot_page -> note, screenshot_banner_dark -> note-banner-dark, screenshot_page_dark -> note-dark, image_local -> note-image.
     const suffix = kind.replace(/^(screenshot|pdf)_/, "").replace(/^page_?/, "").replace(/_local$/, "").replace(/_/g, "-");
