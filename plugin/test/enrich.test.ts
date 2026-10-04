@@ -105,6 +105,12 @@ describe("insertBlock", () => {
     expect(insertBlock("", "New.", "prepend", 0)).toBe("New.\n");
     expect(insertBlock(text, "", "append", end)).toBe(text);
   });
+
+  it("replaces the body, keeping the frontmatter", () => {
+    expect(insertBlock(text, "New.", "replace", end)).toBe("---\ntitle: x\n---\nNew.\n");
+    expect(insertBlock("Old body.\n", "New.", "replace", 0)).toBe("New.\n");
+    expect(insertBlock(text, "", "replace", end)).toBe(text);
+  });
 });
 
 describe("TikTok photos", () => {

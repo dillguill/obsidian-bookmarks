@@ -67,8 +67,8 @@ export interface EnrichSelection {
   properties: Record<string, PropertyMode>;
   body: boolean;
   images: CaptureFile[];
-  /** Where the body and images go: before the note's body (after its properties) or after it. */
-  position: "prepend" | "append";
+  /** Where the body and images go: before the note's body (after its properties), after it, or in place of it. */
+  position: "prepend" | "append" | "replace";
 }
 
 /** Splits "---\n…\n---\n" into the YAML between the fences. */
@@ -167,7 +167,7 @@ export function bodyBlock(choices: EnrichChoices, selection: EnrichSelection, sa
   return [...embeds, body].filter(Boolean).join("\n\n");
 }
 
-/** Puts `block` right after the note's frontmatter, or at its end. */
+/** Puts `block` right after the note's frontmatter, at its end, or in place of its body (the frontmatter stays). */
 export function insertBlock(text: string, block: string, position: EnrichSelection["position"], frontmatterEnd: number): string {
   if (!block) return text;
   if (position === "append") {
@@ -175,7 +175,7 @@ export function insertBlock(text: string, block: string, position: EnrichSelecti
     return `${head}${head ? "\n\n" : ""}${block}\n`;
   }
   const front = text.slice(0, frontmatterEnd);
-  const rest = text.slice(frontmatterEnd).replace(/^\s+/, "");
+  const rest = position === "replace" ? "" : text.slice(frontmatterEnd).replace(/^\s+/, "");
   const lead = front && !front.endsWith("\n") ? `${front}\n` : front;
   return `${lead}${block}\n${rest ? `\n${rest}` : ""}`;
 }

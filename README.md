@@ -54,7 +54,7 @@ your vault as deduplicated bookmark notes. See the
    into current note** fetches the open note's page again (any note with a URL
    property, even one this plugin didn't make) and lets you pick which
    properties to add, replace or add to a list, whether to add the page content,
-   and which images to save, before or after the note's body.
+   and which images to save, placed before or after the note's body or in place of it.
 
 4. **Capture from elsewhere** (the phone path): with Obsidian closed, enqueue a URL
 
