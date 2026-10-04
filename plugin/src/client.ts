@@ -93,4 +93,9 @@ export class ServerClient {
   async delivered(id: string): Promise<void> {
     await this.request("POST", `/jobs/${id}/delivered`);
   }
+
+  /** Stops a capture that hasn't finished; the server throws its result away. */
+  async cancel(id: string): Promise<void> {
+    await this.request("POST", `/jobs/${id}/cancel`);
+  }
 }

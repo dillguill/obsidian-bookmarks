@@ -1,7 +1,7 @@
 // Wire types for the HTTP API. plugin/src/api.ts mirrors these; bump
 // API_VERSION on any breaking change so a mismatched pair says which side to
 // update (design §5.3).
-export const API_VERSION = 6;
+export const API_VERSION = 7;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -156,4 +156,6 @@ export interface ClipperTemplate {
   properties: TemplateProperty[];
   /** URL prefixes or `/regex/`; the first template whose trigger matches is used, else the first template. */
   triggers?: string[];
+  /** False hides the template from "Update note from source"; missing means shown. Not part of Web Clipper's format. */
+  updateFromSource?: boolean;
 }

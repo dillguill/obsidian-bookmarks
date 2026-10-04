@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { CAPTURE_FILES, fileExt, type AssetKind, type Job } from "./api.js";
+import { CAPTURE_FILES, fileExt, type AssetKind, type Job, type PageMeta } from "./api.js";
 import { BlockedError, type CaptureEngine } from "./capture.js";
 import type { JobStore } from "./db.js";
 import { renderRequest } from "./render.js";
@@ -45,26 +45,49 @@ export class Worker extends EventEmitter {
   private async run(job: Job): Promise<void> {
     try {
       const settings = this.store.getSettings();
-      const result = await this.engine.capture(job.url, renderRequest(settings, job.template, job.id, job.files));
-      await mkdir(join(this.dataDir, "jobs", job.id), { recursive: true });
+      const dir = join(this.dataDir, "jobs", job.id);
+      await mkdir(dir, { recursive: true });
+      // Each piece is written and listed as soon as it's made, so the plugin can
+      // show the note while the screenshots are still being taken.
       const assets: AssetKind[] = [];
+      let ext: Job["screenshotExt"] = null;
+      let writes = Promise.resolve();
+      const save = (kind: AssetKind, data: string | Buffer, meta: PageMeta | null = null) => {
+        writes = writes.then(async () => {
+          // Nothing more to keep once a job is cancelled.
+          if (assets.includes(kind) || this.store.get(job.id)?.status !== "running") return;
+          await writeFile(assetPath(this.dataDir, job.id, kind, ext), data);
+          assets.push(kind);
+          this.store.progress(job.id, meta, assets, ext);
+        }).catch((err: unknown) => {
+          if (this.store.get(job.id)?.status === "running") throw err;
+        });
+      };
+      const result = await this.engine.capture(job.url, renderRequest(settings, job.template, job.id, job.files), {
+        page: (meta, markdown, note) => {
+          save("markdown", markdown, meta);
+          if (note) save("note", JSON.stringify(note));
+        },
+        file: (kind, data, fileExt) => {
+          ext = fileExt;
+          save(kind, data);
+        },
+      });
+      ext = result.screenshotExt;
       for (const kind of CAPTURE_FILES) {
         const data = result.files[kind];
-        if (!data) continue;
-        await writeFile(assetPath(this.dataDir, job.id, kind, result.screenshotExt), data);
-        assets.push(kind);
+        if (data) save(kind, data);
       }
-      await writeFile(assetPath(this.dataDir, job.id, "markdown", null), result.markdown);
-      assets.push("markdown");
-      if (result.note) {
-        await writeFile(assetPath(this.dataDir, job.id, "note", null), JSON.stringify(result.note));
-        assets.push("note");
-      }
+      save("markdown", result.markdown);
+      if (result.note) save("note", JSON.stringify(result.note));
+      await writes;
       this.store.finish(job.id, result.meta, assets, result.screenshotExt);
     } catch (err) {
       const message = String((err as Error)?.message ?? err).split("\n")[0] ?? "capture failed";
       this.store.fail(job.id, message, err instanceof BlockedError ? err.meta : null);
     }
+    // Cancelled while running: the result isn't wanted.
+    if (this.store.get(job.id)?.error === "cancelled") await rm(join(this.dataDir, "jobs", job.id), { recursive: true, force: true });
   }
 
   /** Resolves when the job settles or `timeoutMs` passes, with its latest state. */
@@ -88,6 +111,20 @@ export class Worker extends EventEmitter {
       };
       this.on("settled", onSettled);
     });
+  }
+
+  /** Cancels a job that hasn't finished (see {@link JobStore.cancel}); false when it had. */
+  async cancel(id: string): Promise<boolean> {
+    if (!this.store.cancel(id)) return false;
+    await rm(join(this.dataDir, "jobs", id), { recursive: true, force: true });
+    this.emit("settled", id);
+    return true;
+  }
+
+  /** Removes a job's files now (a cancelled job, or an update the plugin has collected). */
+  async discard(id: string): Promise<void> {
+    this.store.discard(id);
+    await rm(join(this.dataDir, "jobs", id), { recursive: true, force: true });
   }
 
   async prune(retentionDays: number): Promise<void> {

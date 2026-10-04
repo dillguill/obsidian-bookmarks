@@ -106,15 +106,41 @@ export class JobStore {
     return row ? toJob(row) : null;
   }
 
+  /** Records what a running capture has made so far; its assets can be read before it's done. */
+  progress(id: string, meta: PageMeta | null, assets: AssetKind[], screenshotExt: Job["screenshotExt"]): void {
+    this.db
+      .prepare(
+        "UPDATE jobs SET meta = COALESCE(?, meta), assets = ?, screenshot_ext = COALESCE(?, screenshot_ext), updated_at = ? WHERE id = ? AND status = 'running'",
+      )
+      .run(meta ? JSON.stringify(meta) : null, JSON.stringify(assets), screenshotExt, new Date().toISOString(), id);
+  }
+
+  /**
+   * Stops a job that hasn't finished: it fails as cancelled and its assets are
+   * dropped. A running capture still runs to its end, but its result is thrown
+   * away. Returns false when the job had already finished.
+   */
+  cancel(id: string): boolean {
+    const result = this.db
+      .prepare("UPDATE jobs SET status = 'failed', error = 'cancelled', assets = '[]', updated_at = ? WHERE id = ? AND status IN ('pending', 'running')")
+      .run(new Date().toISOString(), id);
+    return result.changes > 0;
+  }
+
+  /** Drops a finished job's assets now, once whoever asked for it has what they need. */
+  discard(id: string): void {
+    this.db.prepare("UPDATE jobs SET assets = '[]', updated_at = ? WHERE id = ?").run(new Date().toISOString(), id);
+  }
+
   finish(id: string, meta: PageMeta, assets: AssetKind[], screenshotExt: Job["screenshotExt"]): void {
     this.db
-      .prepare("UPDATE jobs SET status = 'done', error = NULL, meta = ?, assets = ?, screenshot_ext = ?, updated_at = ? WHERE id = ?")
+      .prepare("UPDATE jobs SET status = 'done', error = NULL, meta = ?, assets = ?, screenshot_ext = ?, updated_at = ? WHERE id = ? AND status = 'running'")
       .run(JSON.stringify(meta), JSON.stringify(assets), screenshotExt, new Date().toISOString(), id);
   }
 
   fail(id: string, error: string, meta: PageMeta | null): void {
     this.db
-      .prepare("UPDATE jobs SET status = 'failed', error = ?, meta = ?, assets = '[]', updated_at = ? WHERE id = ?")
+      .prepare("UPDATE jobs SET status = 'failed', error = ?, meta = ?, assets = '[]', updated_at = ? WHERE id = ? AND status = 'running'")
       .run(error, meta ? JSON.stringify(meta) : null, new Date().toISOString(), id);
   }
 

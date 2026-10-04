@@ -7,18 +7,19 @@ import { CAPTURE_FILES, fileMarker, type CaptureFile, type RenderedNote } from "
 import { fillFiles, type SavedFiles } from "./writer";
 
 /**
- * Images an enrich capture asks for on top of the ones the template uses, so
- * there's something to pick from even when the template has no screenshot.
+ * Files an enrich capture asks for on top of the ones the template uses: cheap
+ * ones, so the first capture stays quick. Other screenshots are captured on demand.
  */
 export const ENRICH_FILES: readonly CaptureFile[] = [
   "image_local",
   "tiktok_thumbnail",
   "tiktok_video",
   ...CAPTURE_FILES.filter((kind) => kind.startsWith("tiktok_image_")),
-  "screenshot_banner",
   "screenshot_thumbnail",
-  "screenshot_page",
 ];
+
+/** Files an update can ask the server to capture later, when the user adds one the first capture didn't make. */
+export const ON_DEMAND_FILES: readonly CaptureFile[] = CAPTURE_FILES.filter((kind) => kind.startsWith("screenshot_") || kind === "pdf_page");
 
 const FILE_LABELS: Partial<Record<CaptureFile, string>> = {
   screenshot_page: "Full page screenshot",

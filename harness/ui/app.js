@@ -413,6 +413,7 @@ function renderTemplate() {
   $("t-triggers").value = (t.triggers || []).join("\n");
   $("t-note-name").value = t.noteNameFormat;
   $("t-path").value = t.path;
+  $("t-update").checked = t.updateFromSource !== false;
   $("t-content").value = t.noteContentFormat;
   $("template-delete").disabled = settings.templates.length === 1;
   $("template-duplicate").textContent = "Duplicate";
@@ -510,6 +511,12 @@ bindText("t-triggers", (t, v) => (t.triggers = lines(v)));
 bindText("t-note-name", (t, v) => (t.noteNameFormat = v));
 bindText("t-path", (t, v) => (t.path = v));
 bindText("t-content", (t, v) => (t.noteContentFormat = v));
+$("t-update").addEventListener("change", (e) => {
+  const t = current();
+  if (e.target.checked) delete t.updateFromSource;
+  else t.updateFromSource = false;
+  scheduleSave();
+});
 
 $("t-add-property").addEventListener("click", () => {
   current().properties.push({ name: "", value: "", type: "text" });

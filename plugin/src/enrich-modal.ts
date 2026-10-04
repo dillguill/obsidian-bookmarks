@@ -27,6 +27,21 @@ function isEmpty(value: unknown): boolean {
 const CUSTOM = "\u0000custom";
 const POSITION_LABELS: Record<Placement["position"], string> = { prepend: "Prepend", append: "Append", replace: "Replace" };
 
+export interface EnrichFiles {
+  /** Files made so far. */
+  available(): CaptureFile[];
+  /** Files being captured because the user added them. */
+  pending(): CaptureFile[];
+  /** Files that can be captured when added. */
+  onDemand: readonly CaptureFile[];
+  /** Every capture has finished. */
+  ready(): boolean;
+  data(kind: CaptureFile): Promise<ArrayBuffer | null>;
+  imageType(): string;
+  request(kind: CaptureFile): void;
+  drop(kind: CaptureFile): void;
+}
+
 export interface EnrichModalOptions {
   noteName: string;
   /** Templates the update can start from; picking one captures the page again with it. */
@@ -41,9 +56,8 @@ export interface EnrichModalOptions {
   frontmatter: Record<string, unknown>;
   /** Variables + Content offers, with their values (capture file markers still in them). */
   variables: { name: string; value: string }[];
-  /** Image data by capture file, for previews. */
-  images: Partial<Record<CaptureFile, ArrayBuffer>>;
-  imageType: string;
+  /** The captures behind the update, which keep making files while the modal is open. */
+  files: EnrichFiles;
   /** Files that can replace the note's TikTok player; empty when it has none. */
   offline: CaptureFile[];
   onTemplate: (name: string) => void;
@@ -67,6 +81,9 @@ export class EnrichModal extends Modal {
   private propsEl!: HTMLElement;
   private contentEl2!: HTMLElement;
   private dragging: ContentRow | null = null;
+  private statusEl!: HTMLElement;
+  private applyButton!: HTMLButtonElement;
+  private staleContent = false;
 
   constructor(
     app: App,
@@ -92,6 +109,8 @@ export class EnrichModal extends Modal {
       });
       this.templateSelect = dropdown.selectEl;
     });
+
+    this.statusEl = contentEl.createEl("p", { cls: "setting-item-description" });
 
     new Setting(contentEl).setName("Properties").setHeading();
     this.propsEl = contentEl.createDiv();
@@ -121,7 +140,8 @@ export class EnrichModal extends Modal {
 
     new Setting(contentEl)
       .addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
-      .addButton((button) =>
+      .addButton((button) => {
+        this.applyButton = button.buttonEl;
         button
           .setButtonText("Apply")
           .setCta()
@@ -129,11 +149,32 @@ export class EnrichModal extends Modal {
             this.submitted = true;
             this.close();
             o.onSubmit(this.selection);
-          }),
-      );
+          });
+      });
 
     this.renderProperties();
     this.renderContent();
+    this.renderStatus();
+  }
+
+  /** Shows files the captures made since the modal opened. */
+  refresh(): void {
+    this.renderStatus();
+    // Don't pull a text box out from under the user's typing; redraw when they leave it.
+    const active = document.activeElement;
+    if (active instanceof HTMLTextAreaElement && this.contentEl2.contains(active)) {
+      if (!this.staleContent) active.addEventListener("blur", () => this.renderContent(), { once: true });
+      this.staleContent = true;
+      return;
+    }
+    this.renderContent();
+  }
+
+  private renderStatus(): void {
+    const ready = this.o.files.ready();
+    this.statusEl.setText(ready ? "" : this.o.files.pending().length ? "Capturing the screenshots you added…" : "Still capturing screenshots…");
+    this.statusEl.toggle(!ready);
+    this.applyButton?.setText(ready ? "Apply" : "Apply when ready");
   }
 
   override onClose(): void {
@@ -234,6 +275,7 @@ export class EnrichModal extends Modal {
   }
 
   private renderContent(): void {
+    this.staleContent = false;
     const el = this.contentEl2;
     el.empty();
     const rows = this.selection.content;
@@ -301,6 +343,7 @@ export class EnrichModal extends Modal {
     const remove = line.createEl("button", { text: "×", attr: { "aria-label": "Remove" } });
     remove.onclick = () => {
       this.selection.content = this.selection.content.filter((r) => r !== row);
+      if (row.item.kind === "file" && this.o.files.pending().includes(row.item.file)) this.o.files.drop(row.item.file);
       this.custom();
       this.renderContent();
     };
@@ -308,15 +351,24 @@ export class EnrichModal extends Modal {
 
   private renderItem(el: HTMLElement, item: ContentItem): void {
     if (item.kind === "file") {
-      const data = this.o.images[item.file];
-      if (data && fileExt(item.file, null) === null) {
-        let url = this.urls.get(item.file);
-        if (!url) {
-          url = URL.createObjectURL(new Blob([data], { type: this.o.imageType }));
-          this.urls.set(item.file, url);
-        }
-        const img = el.createEl("img", { attr: { src: url, alt: fileLabel(item.file) } });
+      const kind = item.file;
+      if (!this.o.files.available().includes(kind)) {
+        el.createSpan({ text: fileLabel(kind) });
+        el.createSpan({ text: this.o.files.pending().includes(kind) ? "Capturing…" : "Not captured", cls: "setting-item-description" });
+        return;
+      }
+      if (fileExt(kind, null) === null) {
+        const img = el.createEl("img", { attr: { alt: fileLabel(kind) } });
         Object.assign(img.style, { width: "64px", height: "40px", objectFit: "cover", objectPosition: "top", borderRadius: "4px", flex: "none" });
+        const known = this.urls.get(kind);
+        if (known) img.src = known;
+        else
+          void this.o.files.data(kind).then((data) => {
+            if (!data) return img.remove();
+            const url = this.urls.get(kind) ?? URL.createObjectURL(new Blob([data], { type: this.o.files.imageType() }));
+            this.urls.set(kind, url);
+            img.src = url;
+          });
       }
       el.createSpan({ text: fileLabel(item.file) });
     } else if (item.kind === "variable") {
@@ -342,10 +394,22 @@ export class EnrichModal extends Modal {
       this.custom();
       this.renderContent();
     };
-    const files = this.o.choices.images.filter((kind) => !picked.some((i) => i.kind === "file" && i.file === kind));
+    const made = this.o.files.available();
+    const capturing = this.o.files.pending();
+    const files = [...made, ...this.o.files.onDemand.filter((kind) => !made.includes(kind))].filter(
+      (kind) => !picked.some((i) => i.kind === "file" && i.file === kind),
+    );
     if (files.length) {
       menu.addItem((item) => item.setTitle("Screenshots and files").setDisabled(true));
-      for (const kind of files) menu.addItem((item) => item.setTitle(fileLabel(kind)).onClick(() => add({ kind: "file", file: kind })));
+      for (const kind of files) {
+        const later = !made.includes(kind) && !capturing.includes(kind);
+        menu.addItem((item) =>
+          item.setTitle(later ? `${fileLabel(kind)} (capture)` : fileLabel(kind)).onClick(() => {
+            if (later) this.o.files.request(kind);
+            add({ kind: "file", file: kind });
+          }),
+        );
+      }
       menu.addSeparator();
     }
     const vars = this.o.variables.filter((v) => !picked.some((i) => i.kind === "variable" && i.name === v.name));

@@ -13,10 +13,12 @@ import {
   placeContent,
   TEMPLATE_CONTENT,
   offlineFiles,
+  ON_DEMAND_FILES,
   replaceTikTokPlayer,
   type EnrichSelection,
 } from "./enrich";
 import { EnrichModal } from "./enrich-modal";
+import { EnrichSession } from "./enrich-session";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
 import { DEFAULT_TEMPLATE, captureIdPropertyName, chooseTemplate, urlPropertyName } from "./template";
 import { findUrl, normalizeUrl } from "./url";
@@ -24,8 +26,6 @@ import { saveCaptureFiles, writeBookmark, type VaultPort, type WriteMode, type W
 
 // Server jobs are pruned a few days after delivery, so a few hundred covers any redelivery.
 const WRITTEN_CAPTURES_KEPT = 500;
-/** How long to keep checking on an enrich capture the server didn't finish within its wait cap. */
-const ENRICH_TIMEOUT_MS = 3 * 60_000;
 /**
  * Vault-scoped localStorage key for the token's secret name. Secrets live in each
  * device's own SecretStorage, so the name that points at one is per-device too and
@@ -331,7 +331,11 @@ export default class BookmarksPlugin extends Plugin {
     return typeof url === "string" ? url : null;
   }
 
-  /** Captures a note's page again and lets the user pick which properties, content and images to pull into it. */
+  /**
+   * Captures a note's page again and lets the user pick which properties, content
+   * and files to pull into it. The modal opens once the note is rendered; the
+   * screenshots keep arriving while it's open.
+   */
   async enrich(file: TFile, templateName: string | null = null): Promise<void> {
     const url = this.noteUrl(file);
     if (!url) {
@@ -339,31 +343,21 @@ export default class BookmarksPlugin extends Plugin {
       return;
     }
     const progress = new Notice("Fetching page…", 0);
-    let job: Job | null = null;
+    let session: EnrichSession | null = null;
     const client = this.client();
     try {
       const problem = await this.checkServer();
       if (problem) throw new Error(problem);
       await this.syncShared().catch((err: unknown) => console.warn("bookmarks: couldn't fetch shared settings", err));
-      job = await client.capture(url, "enrich", true, templateName, ENRICH_FILES);
-      const deadline = Date.now() + ENRICH_TIMEOUT_MS;
-      while (job.status === "pending" || job.status === "running") {
-        if (Date.now() > deadline) throw new Error("the server is still capturing the page. Try again in a minute.");
-        await new Promise((resolve) => window.setTimeout(resolve, 2000));
-        job = await client.job(job.id);
-      }
-      if (job.status === "failed") throw new Error(job.error ?? "unknown error");
-      if (!job.assets.includes("note")) throw new Error("the server didn't render the page. Update bookmarks-server.");
+      session = new EnrichSession(client, await client.capture(url, "enrich", false, templateName, ENRICH_FILES), url, templateName);
+      const job = await session.waitForNote();
       const note = JSON.parse(await client.assetText(job.id, "note")) as RenderedNote;
-      const available = CAPTURE_FILES.filter((kind) => job!.assets.includes(kind));
-      const images: Partial<Record<CaptureFile, ArrayBuffer>> = {};
-      // The video is only downloaded if it's picked.
-      for (const kind of available) if (kind !== "tiktok_video") images[kind] = await client.assetBinary(job.id, kind);
       const template = this.templates.find((t) => t.name === note.template) ?? DEFAULT_TEMPLATE;
       const current = { ...(this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) } as Record<string, unknown>;
-      const choices = enrichChoices(note, current, parseYaml, available, captureIdPropertyName(template));
+      // Files the template uses count as on offer even before they're made.
+      const choices = enrichChoices(note, current, parseYaml, CAPTURE_FILES, captureIdPropertyName(template));
+      choices.images = session.available();
       const text = await this.app.vault.read(file);
-      const offline = hasTikTokPlayer(text) ? offlineFiles(choices.images) : [];
       const markdown = job.assets.includes("markdown") ? await client.assetText(job.id, "markdown").catch(() => "") : "";
       const meta = job.meta;
       const variables = [
@@ -377,53 +371,56 @@ export default class BookmarksPlugin extends Plugin {
         { name: "{{url}}", value: url },
       ].filter((v) => v.value.trim());
       progress.hide();
-      const settled = job;
-      const done = () => void client.delivered(settled.id).catch(() => {});
-      new EnrichModal(this.app, {
+      const live = session;
+      const tiktok = hasTikTokPlayer(text);
+      const modal = new EnrichModal(this.app, {
         noteName: file.basename,
-        templates: this.templates.map((t) => t.name),
+        templates: this.templates.filter((t) => t.updateFromSource !== false || t.name === template.name).map((t) => t.name),
         template: template.name,
         choices,
         defaults: defaultSelection(choices),
         body: text.slice(getFrontMatterInfo(text).contentStart),
         frontmatter: current,
         variables,
-        images,
-        imageType: settled.screenshotExt === "png" ? "image/png" : "image/jpeg",
-        offline,
+        files: {
+          available: () => live.available(),
+          pending: () => live.pending(),
+          onDemand: ON_DEMAND_FILES,
+          ready: () => live.ready(),
+          data: (kind) => live.file(kind),
+          imageType: () => (live.screenshotExt() === "png" ? "image/png" : "image/jpeg"),
+          request: (kind) => void live.request(kind).catch((err: unknown) => new Notice(`Couldn't capture ${kind}: ${String(err)}`)),
+          drop: (kind) => void live.drop(kind),
+        },
+        offline: tiktok ? offlineFiles(choices.images) : [],
         onTemplate: (name) => {
-          done();
+          live.close();
           void this.enrich(file, name);
         },
-        onSubmit: (selection) => void this.applyEnrich(file, settled, choices, images, selection).finally(done),
-        onDone: done,
-      }).open();
+        onSubmit: (selection) => void this.applyEnrich(file, live, choices, selection).finally(() => live.close()),
+        onDone: () => live.close(),
+      });
+      live.onChange = () => modal.refresh();
+      modal.open();
     } catch (err) {
       progress.hide();
-      if (job && (job.status === "done" || job.status === "failed")) void client.delivered(job.id).catch(() => {});
+      session?.close();
       new Notice(`Couldn't fetch the page: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  private async applyEnrich(
-    file: TFile,
-    job: Job,
-    choices: ReturnType<typeof enrichChoices>,
-    images: Partial<Record<CaptureFile, ArrayBuffer>>,
-    selection: EnrichSelection,
-  ): Promise<void> {
+  private async applyEnrich(file: TFile, session: EnrichSession, choices: ReturnType<typeof enrichChoices>, selection: EnrichSelection): Promise<void> {
     try {
-      const wanted = filesToSave(choices, selection);
-      if (wanted.includes("tiktok_video") && !images.tiktok_video) {
-        const progress = new Notice("Downloading video…", 0);
-        try {
-          images.tiktok_video = await this.client().assetBinary(job.id, "tiktok_video");
-        } finally {
-          progress.hide();
-        }
+      if (!session.ready()) {
+        const waiting = new Notice("Updating the note once the screenshots are captured…", 0);
+        await session.whenReady();
+        waiting.hide();
       }
-      const files = Object.fromEntries(wanted.map((kind) => [kind, images[kind] ?? null]));
-      const saved = await saveCaptureFiles(this.vaultPort(), this.settings.assetsFolder, files, job.screenshotExt, file.basename);
+      choices.images = session.available();
+      const wanted = filesToSave(choices, selection);
+      const files: Partial<Record<CaptureFile, ArrayBuffer | null>> = {};
+      for (const kind of wanted) files[kind] = await session.file(kind);
+      const saved = await saveCaptureFiles(this.vaultPort(), this.settings.assetsFolder, files, session.screenshotExt(), file.basename);
       const offline = selection.offline ? offlineFiles(choices.images) : [];
       let changed = false;
       if (selection.content.length || offline.length) {

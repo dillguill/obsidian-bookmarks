@@ -63,8 +63,14 @@ export class BlockedError extends Error {
   }
 }
 
+/** Called as a capture goes: once with the page's text and rendered note, then with each capture file as it's made. */
+export interface CaptureProgress {
+  page(meta: PageMeta, markdown: string, note: RenderedNote | null): void;
+  file(kind: CaptureFile, data: Buffer, ext: "jpg" | "png"): void;
+}
+
 export interface CaptureEngine {
-  capture(url: string, render?: RenderRequest | null): Promise<CaptureResult>;
+  capture(url: string, render?: RenderRequest | null, progress?: CaptureProgress): Promise<CaptureResult>;
   close(): Promise<void>;
 }
 
@@ -109,6 +115,19 @@ function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => void):
 
 // networkidle fires before client-side renders that run on timers, so also wait
 // until the DOM stops changing for a quiet window (capped).
+/** A capture file map that reports each file to `progress` as it's set. */
+function reportFiles(progress: CaptureProgress | undefined, ext: "jpg" | "png"): Partial<Record<CaptureFile, Buffer>> {
+  const files: Partial<Record<CaptureFile, Buffer>> = {};
+  if (!progress) return files;
+  return new Proxy(files, {
+    set(target, kind, data) {
+      (target as Record<string | symbol, unknown>)[kind] = data;
+      if (typeof kind === "string" && Buffer.isBuffer(data)) progress.file(kind as CaptureFile, data, ext);
+      return true;
+    },
+  });
+}
+
 async function waitForDomQuiet(page: Page, quietMs = 500, maxMs = 5000): Promise<void> {
   await page.evaluate(
     ({ quiet, max }) =>
@@ -420,7 +439,7 @@ export class PlaywrightEngine implements CaptureEngine {
     return this.browser;
   }
 
-  async capture(url: string, render: RenderRequest | null = null): Promise<CaptureResult> {
+  async capture(url: string, render: RenderRequest | null = null, progress?: CaptureProgress): Promise<CaptureResult> {
     const browser = await this.getBrowser();
     const context = await browser.newContext({
       viewport: VIEWPORT,
@@ -439,10 +458,13 @@ export class PlaywrightEngine implements CaptureEngine {
     try {
       // A timed-out page can leave Chromium wedged for every later context, so
       // restart the browser rather than just closing this context.
-      const { video, ...result } = await withTimeout(this.run(context, url, render), this.options.captureTimeoutMs, () => void this.restart());
+      const { video, ...result } = await withTimeout(this.run(context, url, render, progress), this.options.captureTimeoutMs, () => void this.restart());
       // Outside the capture timeout: a long video can take a while to download.
       const videoData = video?.length ? await videoFile(context, video, this.options.allowPrivateNetworks) : null;
-      if (videoData) result.files.tiktok_video = videoData;
+      if (videoData) {
+        result.files.tiktok_video = videoData;
+        progress?.file("tiktok_video", videoData, result.screenshotExt ?? "jpg");
+      }
       return result;
     } finally {
       await context.close().catch(() => {});
@@ -450,7 +472,12 @@ export class PlaywrightEngine implements CaptureEngine {
   }
 
   /** The capture, plus the TikTok video's URLs when the note wants it saved. */
-  private async run(context: BrowserContext, url: string, render: RenderRequest | null): Promise<CaptureResult & { video?: string[] }> {
+  private async run(
+    context: BrowserContext,
+    url: string,
+    render: RenderRequest | null,
+    progress?: CaptureProgress,
+  ): Promise<CaptureResult & { video?: string[] }> {
     const { allowPrivateNetworks, maxHeight, scrollBudgetMs, screenshotFormat } = this.options;
     // Re-check every document the page loads (redirects, iframes), so a public
     // URL can't bounce the browser into the private network (design §8).
@@ -573,14 +600,15 @@ export class PlaywrightEngine implements CaptureEngine {
     const note = render
       ? await renderNote(page, { ...render, extra: { ...render.extra, ...(tiktok?.variables ?? noTikTokVariables()) } }, bookmarkUrl(meta))
       : null;
+    progress?.page(meta, markdown, note);
     const wanted = filesWanted(note, render?.files);
-    const files: Partial<Record<CaptureFile, Buffer>> = {};
-    if (wanted.size === 0) return { meta, markdown, files, screenshotExt: null, note };
+    if (wanted.size === 0) return { meta, markdown, files: {}, screenshotExt: null, note };
 
     await hideOverlays(page);
     const type = screenshotFormat;
     const format = type === "jpeg" ? { type, quality: 80 } : { type };
     const ext = type === "jpeg" ? "jpg" : "png";
+    const files = reportFiles(progress, ext);
     // At the original viewport size even if it was grown for an inner scroller.
     const firstScreen = async () => {
       await page.evaluate(() => window.scrollTo(0, 0));
