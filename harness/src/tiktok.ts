@@ -16,6 +16,7 @@ export const TIKTOK_VARIABLES = [
   "tiktok_author_handle",
   "tiktok_embed",
   "tiktok_images",
+  "tiktok_save",
   "tiktok_image_count",
   "tiktok_transcript",
   "tiktok_transcript_timestamps",
@@ -186,6 +187,8 @@ export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript
   const video = images.length
     ? []
     : [...new Set([item?.video?.playAddr ?? "", ...(item?.video?.bitrateInfo ?? []).flatMap((rate) => rate.PlayAddr?.UrlList ?? [])].filter(Boolean))];
+  // Each marker becomes the saved file's vault path, as with any capture file.
+  const photos = images.map((_, i) => `![[${fileMarker(`tiktok_image_${i + 1}`)}]]`).join("\n");
   return {
     variables: {
       tiktok_id: post.id,
@@ -195,8 +198,9 @@ export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript
       tiktok_author: item?.author?.nickname?.trim() ?? "",
       tiktok_author_handle: item?.author?.uniqueId?.trim() || post.handle,
       tiktok_embed: videoEmbed(post.id),
-      // Each marker becomes the saved photo's vault path, as with any capture file.
-      tiktok_images: images.map((_, i) => `![[${fileMarker(`tiktok_image_${i + 1}`)}]]`).join("\n"),
+      tiktok_images: photos,
+      // The post saved in the vault: its video, or a carousel's photos.
+      tiktok_save: video.length ? `![[${fileMarker("tiktok_video")}]]` : photos,
       tiktok_image_count: images.length ? String(images.length) : "",
       tiktok_transcript: transcript.map((cue) => cue.text).join(" "),
       tiktok_transcript_timestamps: transcript.map((cue) => `[${clock(cue.start)}] ${cue.text}`).join("\n"),

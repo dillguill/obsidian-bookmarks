@@ -77,6 +77,7 @@ describe("tiktokData", () => {
         tiktok_author_handle: "scout2015",
         tiktok_embed: videoEmbed(post.id),
         tiktok_images: "",
+        tiktok_save: `![[${fileMarker("tiktok_video")}]]`,
         tiktok_image_count: "",
         tiktok_transcript: "",
         tiktok_transcript_timestamps: "",
@@ -94,6 +95,7 @@ describe("tiktokData", () => {
     expect(variables.tiktok_title).toBe("");
     expect(variables.tiktok_author_handle).toBe("scout2015");
     expect(cover).toEqual([]);
+    expect(variables.tiktok_save).toBe("");
   });
 
   it("lists a photo post's carousel and embeds each saved photo", () => {
@@ -110,6 +112,7 @@ describe("tiktokData", () => {
     expect(data.variables.tiktok_images).toBe(`![[${fileMarker("tiktok_image_1")}]]\n![[${fileMarker("tiktok_image_2")}]]`);
     expect(data.variables.tiktok_image_count).toBe("2");
     expect(data.video).toEqual([]);
+    expect(data.variables.tiktok_save).toBe(data.variables.tiktok_images);
     // TikTok's player swipes through photo posts too.
     expect(data.variables.tiktok_embed).toBe(videoEmbed(post.id));
   });

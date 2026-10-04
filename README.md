@@ -114,10 +114,10 @@ server, so every device and every phone Shortcut uses the same settings:
   `{{tiktok_author}}`, `{{tiktok_author_handle}}`, `{{tiktok_id}}`,
   `{{tiktok_embed}}` (a player that plays in the note, or swipes through a photo
   carousel) and `{{tiktok_thumbnail}}` (the cover saved in the vault, since its link
-  expires). `{{tiktok_video}}` saves the video itself (`note-tiktok-video.mp4`;
-  `![[{{tiktok_video}}]]` plays it in the note, offline). Photo carousels also save each photo: `{{tiktok_images}}` embeds them
-  all, `{{tiktok_image_1}}`… are their paths and `{{tiktok_image_count}}` counts
-  them. `{{tiktok_transcript}}` is what's said, from TikTok's captions in the
+  expires). `{{tiktok_save}}` saves the post in the vault and embeds it, so it
+  plays offline: the video (`note-tiktok-video.mp4`, path in `{{tiktok_video}}`)
+  or a carousel's photos (paths in `{{tiktok_image_1}}`…, counted by
+  `{{tiktok_image_count}}`; `{{tiktok_images}}` embeds only photos). `{{tiktok_transcript}}` is what's said, from TikTok's captions in the
   language spoken, and `{{tiktok_transcript_timestamps}}` the same one line per
   caption with its time (`[0:03] …`); empty when TikTok has no captions, as for
   videos without speech. They're empty on other sites. [docs/templates/tiktok.json](docs/templates/tiktok.json) is a template to import.
