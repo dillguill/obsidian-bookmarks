@@ -6,8 +6,8 @@ export interface BookmarksSettings {
   /** Base URL of the bookmarks-server container, e.g. https://bookmarks.tailnet.ts.net */
   serverUrl: string;
   /**
-   * Name of the SecretStorage entry holding the API token. The token itself is
-   * never written to data.json (design §8).
+   * Name of the SecretStorage entry holding the API token. Per-device: kept in
+   * the vault's localStorage, never in data.json (design §8).
    */
   tokenSecretName: string;
   /** Legacy: the notes folder is now each template's note location; migrated to the server once. */
@@ -62,13 +62,13 @@ export class BookmarksSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("API token")
-      .setDesc("Stored in Obsidian's secret storage, not in plugin data.")
+      .setDesc("Stored in Obsidian's secret storage on this device, not in plugin data. Choose it once on each device.")
       .addComponent((el) =>
         new SecretComponent(this.app, el)
           .setValue(this.plugin.settings.tokenSecretName)
-          .onChange(async (value) => {
-            this.plugin.settings.tokenSecretName = value;
-            await this.plugin.saveSettings();
+          .onChange((value) => {
+            this.plugin.setTokenSecretName(value);
+            this.plugin.schedulePoll();
           }),
       );
 

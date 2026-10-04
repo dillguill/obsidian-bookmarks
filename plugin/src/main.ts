@@ -25,6 +25,12 @@ import { saveCaptureFiles, writeBookmark, type VaultPort, type WriteMode, type W
 const WRITTEN_CAPTURES_KEPT = 500;
 /** How long to keep checking on an enrich capture the server didn't finish within its wait cap. */
 const ENRICH_TIMEOUT_MS = 3 * 60_000;
+/**
+ * Vault-scoped localStorage key for the token's secret name. Secrets live in each
+ * device's own SecretStorage, so the name that points at one is per-device too and
+ * stays out of data.json, which sync services share between devices.
+ */
+const TOKEN_SECRET_KEY = "obsidian-bookmarker-token-secret";
 
 export default class BookmarksPlugin extends Plugin {
   override settings: BookmarksSettings = DEFAULT_SETTINGS;
@@ -94,8 +100,34 @@ export default class BookmarksPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<BookmarksSettings>) };
+    const data = ((await this.loadData()) ?? {}) as Partial<BookmarksSettings>;
+    const local: unknown = this.app.loadLocalStorage(TOKEN_SECRET_KEY);
+    this.settings = { ...DEFAULT_SETTINGS, ...data, tokenSecretName: typeof local === "string" ? local : "" };
+    // Versions before 0.1.9 kept the secret name in data.json; adopt it once on this device.
+    if (typeof local !== "string" && data.tokenSecretName) {
+      this.app.saveLocalStorage(TOKEN_SECRET_KEY, data.tokenSecretName);
+      this.settings.tokenSecretName = data.tokenSecretName;
+    }
     if (this.settings.templatesCache?.length) this.templates = this.settings.templatesCache;
+  }
+
+  /** Another device (through a sync service) changed data.json; reload so we don't write stale settings back over it. */
+  override async onExternalSettingsChange(): Promise<void> {
+    await this.loadSettings();
+    this.buildIndex();
+    this.schedulePoll();
+  }
+
+  /** Sets the per-device secret name for the API token. */
+  setTokenSecretName(name: string): void {
+    this.settings.tokenSecretName = name;
+    this.app.saveLocalStorage(TOKEN_SECRET_KEY, name);
+  }
+
+  /** Writes data.json without the per-device token secret name. */
+  private async persist(): Promise<void> {
+    const { tokenSecretName: _local, ...shared } = this.settings;
+    await this.saveData(shared);
   }
 
   /** The server's settings page, where capture settings and templates are edited. */
@@ -129,12 +161,12 @@ export default class BookmarksPlugin extends Plugin {
     this.templates = shared.templates;
     this.settings.templatesCache = shared.templates;
     this.settings.hideCaptureId = shared.hideCaptureId ?? false;
-    await this.saveData(this.settings);
+    await this.persist();
     if (changed) this.buildIndex();
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData(this.settings);
+    await this.persist();
     this.schedulePoll();
   }
 
@@ -230,7 +262,7 @@ export default class BookmarksPlugin extends Plugin {
     const entries = Object.entries(this.settings.writtenCaptures ?? {}).filter(([key]) => key !== id);
     entries.push([id, path]);
     this.settings.writtenCaptures = Object.fromEntries(entries.slice(-WRITTEN_CAPTURES_KEPT));
-    await this.saveData(this.settings);
+    await this.persist();
   }
 
   // ---- entry points ----
