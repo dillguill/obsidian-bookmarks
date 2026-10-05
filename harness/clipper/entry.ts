@@ -23,6 +23,9 @@ interface ClipPageOptions {
   propertyTypes: Record<string, string>;
 }
 
+/** Variables left out of the list "Update note from source" offers: raw HTML too large to pick from. */
+const BULKY = new Set(["{{fullHtml}}", "{{contentHtml}}", "{{selectionHtml}}"]);
+
 async function clipPage({ templates, templateName, url, extra, propertyTypes }: ClipPageOptions) {
   const doc = document;
   const parsed = new DefuddleClass(doc, { url }).parse();
@@ -67,6 +70,7 @@ async function clipPage({ templates, templateName, url, extra, propertyTypes }: 
     path: await compile(template.path || ""),
     frontmatter: generateFrontmatter(properties, typeMap),
     content: await compile(template.noteContentFormat),
+    variables: Object.fromEntries(Object.entries(variables).filter(([name, value]) => value.trim() && !BULKY.has(name))),
   };
 }
 

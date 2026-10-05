@@ -1,7 +1,9 @@
 import { App, Menu, Modal, Setting } from "obsidian";
-import { fileExt, type CaptureFile } from "./api";
+import { CAPTURE_FILES, fileExt, fileMarker, type CaptureFile } from "./api";
 import {
   fileLabel,
+  filesIn,
+  fileVariable,
   noteHeadings,
   placementOrder,
   samePlacement,
@@ -11,6 +13,9 @@ import {
   type EnrichSelection,
   type Placement,
   type PropertyChoice,
+  rowFiles,
+  TEMPLATE_CONTENT,
+  variableProperty,
 } from "./enrich";
 
 function preview(value: unknown, max = 160): string {
@@ -20,11 +25,40 @@ function preview(value: unknown, max = 160): string {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
+type VariableItem = Extract<ContentItem, { kind: "variable" }>;
+type FileItem = Extract<ContentItem, { kind: "file" }>;
+
+/** A menu entry showing a variable's name with its value after it. */
+function entryTitle(name: string, value: string): DocumentFragment {
+  const frag = createFragment();
+  frag.createSpan({ text: name });
+  Object.assign(frag.createSpan({ text: value }).style, { color: "var(--text-muted)", marginLeft: "0.75em" });
+  return frag;
+}
+
+const startedMenus = new WeakSet<Menu>();
+
+/** A section heading in a menu, after a separator unless it's the first. */
+function section(menu: Menu, title: string): void {
+  if (startedMenus.has(menu)) menu.addSeparator();
+  startedMenus.add(menu);
+  menu.addItem((item) => {
+    item.setTitle(title);
+    // Labels are newer than the oldest Obsidian the plugin supports.
+    if (typeof item.setIsLabel === "function") item.setIsLabel(true);
+    else item.setDisabled(true);
+  });
+}
+
 function isEmpty(value: unknown): boolean {
   return value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
 }
 
 const CUSTOM = "\u0000custom";
+
+function startingPicks(o: EnrichModalOptions): EnrichSelection {
+  return { properties: { ...o.defaults.properties }, content: o.defaults.content.map((row) => ({ ...row })), offline: o.defaults.offline };
+}
 const POSITION_LABELS: Record<Placement["position"], string> = { prepend: "Prepend", append: "Append", replace: "Replace" };
 
 export interface EnrichFiles {
@@ -44,7 +78,7 @@ export interface EnrichFiles {
 
 export interface EnrichModalOptions {
   noteName: string;
-  /** Templates the update can start from; picking one captures the page again with it. */
+  /** Templates the update can start from; picking one captures the page again with it, and the modal shows that capture via switchTo. */
   templates: string[];
   template: string;
   choices: EnrichChoices;
@@ -54,6 +88,8 @@ export interface EnrichModalOptions {
   body: string;
   /** The note's frontmatter now, for property targets and current values. */
   frontmatter: Record<string, unknown>;
+  /** Properties used anywhere in the vault, which variables can go into. */
+  vaultProperties: string[];
   /** Variables + Content offers, with their values (capture file markers still in them). */
   variables: { name: string; value: string }[];
   /** The captures behind the update, which keep making files while the modal is open. */
@@ -76,7 +112,7 @@ export class EnrichModal extends Modal {
   private readonly urls = new Map<CaptureFile, string>();
   private submitted = false;
   // Not "selection": Obsidian's Modal stores its own selection there when it opens.
-  private readonly picks: EnrichSelection;
+  private picks: EnrichSelection;
   private readonly noteHeads;
   private templateSelect!: HTMLSelectElement;
   private propsEl!: HTMLElement;
@@ -85,27 +121,60 @@ export class EnrichModal extends Modal {
   private statusEl!: HTMLElement;
   private applyButton!: HTMLButtonElement;
   private staleContent = false;
+  /** Template whose capture is on its way, while switching. */
+  private pendingTemplate: string | null = null;
 
   constructor(
     app: App,
-    private readonly o: EnrichModalOptions,
+    private o: EnrichModalOptions,
   ) {
     super(app);
-    this.picks = { properties: { ...o.defaults.properties }, content: o.defaults.content.map((row) => ({ ...row })), offline: o.defaults.offline };
+    this.picks = startingPicks(o);
     this.noteHeads = noteHeadings(o.body);
   }
 
   override onOpen(): void {
+    this.setTitle(`Update ${this.o.noteName} from source`);
+    this.build();
+  }
+
+  /** Shows a capture made with another template, starting over from what it sets up. */
+  switchTo(o: EnrichModalOptions): void {
+    for (const url of this.urls.values()) URL.revokeObjectURL(url);
+    this.urls.clear();
+    this.o = o;
+    this.pendingTemplate = null;
+    this.picks = startingPicks(o);
+    this.contentEl.empty();
+    this.build();
+  }
+
+  /** Waits on another template's capture, keeping the current one on screen until it's ready. */
+  switching(name: string): void {
+    this.pendingTemplate = name;
+    this.templateSelect.disabled = true;
+    this.applyButton.disabled = true;
+    this.renderStatus();
+  }
+
+  /** The other template's capture failed: back to the current one. */
+  switchFailed(): void {
+    this.pendingTemplate = null;
+    this.templateSelect.value = this.o.template;
+    this.templateSelect.disabled = false;
+    this.applyButton.disabled = false;
+    this.renderStatus();
+  }
+
+  private build(): void {
     const { contentEl, o } = this;
-    this.setTitle(`Update ${o.noteName} from source`);
 
     new Setting(contentEl).setName("Template").addDropdown((dropdown) => {
       for (const name of o.templates) dropdown.addOption(name, name);
       dropdown.addOption(CUSTOM, "Custom");
       dropdown.setValue(o.template).onChange((value) => {
         if (value === CUSTOM) return;
-        this.submitted = true;
-        this.close();
+        this.switching(value);
         o.onTemplate(value);
       });
       this.templateSelect = dropdown.selectEl;
@@ -149,7 +218,7 @@ export class EnrichModal extends Modal {
           .onClick(() => {
             this.submitted = true;
             this.close();
-            o.onSubmit(this.picks);
+            this.o.onSubmit(this.picks);
           });
       });
 
@@ -172,6 +241,11 @@ export class EnrichModal extends Modal {
   }
 
   private renderStatus(): void {
+    if (this.pendingTemplate !== null) {
+      this.statusEl.setText(`Fetching the page with ${this.pendingTemplate}…`);
+      this.statusEl.toggle(true);
+      return;
+    }
     const ready = this.o.files.ready();
     this.statusEl.setText(ready ? "" : this.o.files.pending().length ? "Capturing the screenshots you added…" : "Still capturing screenshots…");
     this.statusEl.toggle(!ready);
@@ -196,7 +270,8 @@ export class EnrichModal extends Modal {
     el.empty();
     const picked = this.o.choices.properties.filter((p) => this.picks.properties[p.name]);
     if (!picked.length) el.createEl("p", { cls: "setting-item-description", text: "No properties picked." });
-    const names = Object.keys(this.o.frontmatter);
+    const inNote = Object.keys(this.o.frontmatter);
+    const inVault = this.o.vaultProperties.filter((name) => !inNote.includes(name));
     for (const property of picked) {
       const pick = this.picks.properties[property.name]!;
       const setting = new Setting(el).setName(property.name);
@@ -204,7 +279,17 @@ export class EnrichModal extends Modal {
       if (!isEmpty(now)) setting.descEl.createDiv({ text: `Now: ${preview(now)}` });
       setting.descEl.createDiv({ text: `${isEmpty(now) ? "Value" : "New"}: ${preview(property.value)}` });
       setting.addDropdown((dropdown) => {
-        for (const name of new Set([property.name, ...names])) dropdown.addOption(name, name);
+        const select = dropdown.selectEl;
+        if (!pick.target) select.createEl("option", { text: "Choose a property…", value: "" });
+        // A template property can always go into its own name.
+        if (property.target === undefined && !inNote.includes(property.name) && !inVault.includes(property.name)) select.createEl("option", { text: property.name, value: property.name });
+        const group = (label: string, names: string[]) => {
+          if (!names.length) return;
+          const el = select.createEl("optgroup", { attr: { label } });
+          for (const name of names) el.createEl("option", { text: name, value: name });
+        };
+        group("In this note", inNote);
+        group("In the vault", inVault);
         dropdown.setValue(pick.target).onChange((value) => {
           pick.target = value;
           if (pick.mode === "merge" && !this.canMerge(property, value)) pick.mode = "replace";
@@ -226,6 +311,7 @@ export class EnrichModal extends Modal {
           .setTooltip("Remove")
           .onClick(() => {
             delete this.picks.properties[property.name];
+            filesIn(property.value).forEach((kind) => this.dropIfUnused(kind));
             this.custom();
             this.renderProperties();
           }),
@@ -240,18 +326,79 @@ export class EnrichModal extends Modal {
 
   private propertyMenu(evt: MouseEvent): void {
     const menu = new Menu();
-    const left = this.o.choices.properties.filter((p) => !this.picks.properties[p.name]);
-    if (!left.length) menu.addItem((item) => item.setTitle("Nothing else on this page").setDisabled(true));
-    for (const property of left) {
-      menu.addItem((item) =>
-        item.setTitle(property.name).onClick(() => {
-          this.picks.properties[property.name] = { mode: this.canMerge(property, property.name) ? "merge" : "replace", target: property.name };
-          this.custom();
-          this.renderProperties();
-        }),
-      );
+    const fromTemplate = this.o.choices.properties.filter((p) => p.target === undefined && !this.picks.properties[p.name]);
+    const pick = (property: PropertyChoice) => {
+      if (!this.o.choices.properties.some((p) => p.name === property.name)) this.o.choices.properties.push(property);
+      const target = property.target ?? property.name;
+      this.picks.properties[property.name] = { mode: this.canMerge(property, target) ? "merge" : "replace", target };
+      this.custom();
+      this.renderProperties();
+    };
+    if (fromTemplate.length) {
+      section(menu, "Template");
+      for (const property of fromTemplate) menu.addItem((item) => item.setTitle(entryTitle(property.name, preview(property.value, 60))).onClick(() => pick(property)));
     }
+    // The template's whole body makes no sense as a property.
+    this.offerSources(menu, (name) => name === TEMPLATE_CONTENT || !!this.picks.properties[name], (source) => {
+      if (source.kind === "file") this.requestIfNeeded(source.file);
+      pick(variableProperty(source, this.o.frontmatter, this.o.vaultProperties));
+    });
     menu.showAtMouseEvent(evt);
+  }
+
+  /**
+   * Adds every variable and capture file to a menu in TikTok, Screenshots and
+   * Variables sections, each entry showing its name and value. `taken` says
+   * which names (as "{{name}}") are already used.
+   */
+  private offerSources(menu: Menu, taken: (name: string) => boolean, choose: (source: VariableItem | FileItem) => void): void {
+    const made = this.o.files.available();
+    const capturing = this.o.files.pending();
+    const files = [...made, ...this.o.files.onDemand.filter((kind) => !made.includes(kind))].filter((kind) => !taken(fileVariable(kind)));
+    const fileEntry = (kind: CaptureFile) => {
+      const later = !made.includes(kind) && !capturing.includes(kind);
+      menu.addItem((item) => item.setTitle(entryTitle(fileVariable(kind), later ? `${fileLabel(kind)} (capture)` : fileLabel(kind))).onClick(() => choose({ kind: "file", file: kind })));
+    };
+    // Variables that only hold a capture file are offered as that file.
+    const vars = this.o.variables.filter((v) => !taken(v.name) && !CAPTURE_FILES.some((kind) => v.name === fileVariable(kind)));
+    const varEntry = (v: { name: string; value: string }) =>
+      menu.addItem((item) => item.setTitle(entryTitle(v.name, preview(v.value, 60))).onClick(() => choose({ kind: "variable", name: v.name, value: v.value })));
+    const isTikTok = (name: string) => name.startsWith("{{tiktok_");
+    const tiktokFiles = files.filter((kind) => kind.startsWith("tiktok_"));
+    const tiktokVars = vars.filter((v) => isTikTok(v.name));
+    if (tiktokFiles.length || tiktokVars.length) {
+      section(menu, "TikTok");
+      tiktokVars.forEach(varEntry);
+      tiktokFiles.forEach(fileEntry);
+    }
+    const shots = files.filter((kind) => !kind.startsWith("tiktok_"));
+    if (shots.length) {
+      section(menu, "Screenshots");
+      shots.forEach(fileEntry);
+    }
+    const rest = vars.filter((v) => !isTikTok(v.name));
+    if (rest.length) {
+      section(menu, "Variables");
+      rest.forEach(varEntry);
+    }
+  }
+
+  /** Starts capturing a file the main capture didn't make. */
+  private requestIfNeeded(kind: CaptureFile): void {
+    if (!this.o.files.available().includes(kind) && !this.o.files.pending().includes(kind)) this.o.files.request(kind);
+  }
+
+  /** A file is still wanted by some property or content row. */
+  private fileWanted(kind: CaptureFile): boolean {
+    const marker = fileMarker(kind);
+    return (
+      this.picks.content.some((row) => (row.item.kind === "file" ? row.item.file === kind : row.item.kind === "variable" && row.item.value.includes(marker))) ||
+      this.o.choices.properties.some((p) => this.picks.properties[p.name] && JSON.stringify(p.value ?? "").includes(marker))
+    );
+  }
+
+  private dropIfUnused(kind: CaptureFile): void {
+    if (this.o.files.pending().includes(kind) && !this.fileWanted(kind)) this.o.files.drop(kind);
   }
 
   // ---- content ----
@@ -344,7 +491,7 @@ export class EnrichModal extends Modal {
     const remove = line.createEl("button", { text: "×", attr: { "aria-label": "Remove" } });
     remove.onclick = () => {
       this.picks.content = this.picks.content.filter((r) => r !== row);
-      if (row.item.kind === "file" && this.o.files.pending().includes(row.item.file)) this.o.files.drop(row.item.file);
+      rowFiles(row.item).forEach((kind) => this.dropIfUnused(kind));
       this.custom();
       this.renderContent();
     };
@@ -395,30 +542,12 @@ export class EnrichModal extends Modal {
       this.custom();
       this.renderContent();
     };
-    const made = this.o.files.available();
-    const capturing = this.o.files.pending();
-    const files = [...made, ...this.o.files.onDemand.filter((kind) => !made.includes(kind))].filter(
-      (kind) => !picked.some((i) => i.kind === "file" && i.file === kind),
-    );
-    if (files.length) {
-      menu.addItem((item) => item.setTitle("Screenshots and files").setDisabled(true));
-      for (const kind of files) {
-        const later = !made.includes(kind) && !capturing.includes(kind);
-        menu.addItem((item) =>
-          item.setTitle(later ? `${fileLabel(kind)} (capture)` : fileLabel(kind)).onClick(() => {
-            if (later) this.o.files.request(kind);
-            add({ kind: "file", file: kind });
-          }),
-        );
-      }
-      menu.addSeparator();
-    }
-    const vars = this.o.variables.filter((v) => !picked.some((i) => i.kind === "variable" && i.name === v.name));
-    if (vars.length) {
-      menu.addItem((item) => item.setTitle("Variables").setDisabled(true));
-      for (const v of vars) menu.addItem((item) => item.setTitle(v.name).onClick(() => add({ kind: "variable", name: v.name, value: v.value })));
-      menu.addSeparator();
-    }
+    const taken = (name: string) => picked.some((i) => (i.kind === "file" ? fileVariable(i.file) === name : i.kind === "variable" && i.name === name));
+    this.offerSources(menu, taken, (source) => {
+      if (source.kind === "file") this.requestIfNeeded(source.file);
+      add(source);
+    });
+    section(menu, "Text");
     menu.addItem((item) => item.setTitle("Text").onClick(() => add({ kind: "text", text: "" })));
     menu.showAtMouseEvent(evt);
   }

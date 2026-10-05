@@ -51,6 +51,35 @@ export interface PropertyChoice {
   current: unknown;
   /** Either side is a list, so the values can be merged instead of replaced. */
   mergeable: boolean;
+  /**
+   * Set for variables added as properties: the existing property it goes into
+   * unless the user picks another, or "" until they pick one. Unset, a template
+   * property goes into the property of its own name.
+   */
+  target?: string;
+}
+
+/** Name of the variable a capture file is, as templates write it. */
+export function fileVariable(kind: CaptureFile): string {
+  return `{{${kind}}}`;
+}
+
+/**
+ * A variable (or capture file, linked) offered as a property. It goes into an
+ * existing property: the note's or vault's property of the same name when there
+ * is one ({{author}} into author), otherwise one the user picks.
+ */
+export function variableProperty(
+  item: { kind: "variable"; name: string; value: string } | { kind: "file"; file: CaptureFile },
+  frontmatter: Record<string, unknown>,
+  known: readonly string[],
+): PropertyChoice {
+  const name = item.kind === "file" ? fileVariable(item.file) : item.name;
+  const value = item.kind === "file" ? `[[${fileMarker(item.file)}]]` : item.value;
+  const bare = name.replace(/^\{\{|\}\}$/g, "").trim();
+  const target = bare in frontmatter || known.includes(bare) ? bare : "";
+  const current = target ? frontmatter[target] : undefined;
+  return { name, value, current, mergeable: !isEmpty(current) && Array.isArray(current), target };
 }
 
 export interface EnrichChoices {
@@ -172,7 +201,7 @@ export function enrichChoices(
 }
 
 /** Capture files a content row shows. */
-function rowFiles(item: ContentItem): CaptureFile[] {
+export function rowFiles(item: ContentItem): CaptureFile[] {
   if (item.kind === "file") return [item.file];
   return item.kind === "variable" ? filesIn(item.value) : [];
 }
@@ -196,7 +225,8 @@ export function applyProperties(frontmatter: Record<string, unknown>, choices: E
     if (!pick) continue;
     const value = fillValue(property.value, saved);
     if (isEmpty(value)) continue;
-    const target = pick.target || property.name;
+    const target = property.target === undefined ? pick.target || property.name : pick.target;
+    if (!target) continue;
     const now = frontmatter[target];
     if (pick.mode === "merge" && !isEmpty(now)) {
       const merged = asList(now);

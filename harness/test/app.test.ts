@@ -133,7 +133,12 @@ describe("http app", () => {
 
   it("records blocked pages as failed with the reason", async () => {
     const res = await post("/capture?wait=1", { url: "https://example.com/blocked" });
-    const { job } = (await res.json()) as { job: Job };
+    let { job } = (await res.json()) as { job: Job };
+    // The wait cap is short, so a busy runner can answer before the job settles.
+    for (let i = 0; i < 50 && (job.status === "pending" || job.status === "running"); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      job = ((await (await fetch(`${base}/jobs/${job.id}`, { headers: auth })).json()) as { job: Job }).job;
+    }
     expect(job.status).toBe("failed");
     expect(job.error).toContain("Blocked by site");
     expect(job.meta?.title).toBe("Example");
