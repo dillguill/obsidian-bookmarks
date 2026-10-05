@@ -1,4 +1,4 @@
-import { App, Menu, Modal, Setting, setIcon } from "obsidian";
+import { App, Modal, Setting, setIcon } from "obsidian";
 import { CAPTURE_FILES, fileExt, fileMarker, type CaptureFile } from "./api";
 import {
   fileLabel,
@@ -301,8 +301,8 @@ export class EnrichModal extends Modal {
       main.style.alignItems = "stretch";
       main.style.gap = "0";
       clipped(main, property.name).style.fontWeight = "600";
-      const change = isEmpty(now) ? preview(property.value, 80) : `${preview(now, 40)} → ${preview(property.value, 40)}`;
-      clipped(main, change, true).title = change;
+      const value = preview(property.value, 120);
+      clipped(main, value, true).title = isEmpty(now) ? value : `Now: ${preview(now, 120)}`;
 
       const target = smallSelect(line);
       if (!pick.target) target.createEl("option", { text: "Choose…", value: "" });
@@ -447,57 +447,51 @@ export class EnrichModal extends Modal {
     for (const group of groups) {
       const items = rows.filter((row) => samePlacement(row, group));
       const box = el.createDiv();
-      box.style.borderRadius = "6px";
-      box.style.padding = "2px 4px";
-      box.style.marginBottom = "6px";
-      if (!items.length) box.style.border = "1px dashed var(--background-modifier-border)";
       box.dataset.heading = String(group.heading);
       box.dataset.position = group.position;
-      box.createDiv({ text: this.placementLabel(group), cls: "setting-item-description" }).style.fontWeight = "600";
+      // Each row names its own placement; the groups only show as drop targets while dragging.
+      if (this.dragging) {
+        Object.assign(box.style, { borderRadius: "6px", padding: "2px 4px", marginBottom: "6px", border: "1px dashed var(--background-modifier-border)" });
+        box.createDiv({ text: this.placementLabel(group), cls: "setting-item-description" }).style.fontWeight = "600";
+      }
       for (const row of items) this.renderRow(box, row);
     }
   }
 
   private renderRow(parent: HTMLElement, row: ContentRow): void {
     const { line, main } = rowLine(parent);
-    Object.assign(line.style, {
-      padding: "4px 6px",
-      marginBottom: "4px",
-      border: "1px solid var(--background-modifier-border)",
-      borderRadius: "6px",
-      background: "var(--background-secondary)",
-      opacity: this.dragging === row ? "0.4" : "1",
-    });
+    line.style.borderBottom = "1px solid var(--background-modifier-border)";
+    line.style.opacity = this.dragging === row ? "0.4" : "1";
     line.dataset.row = String(this.picks.content.indexOf(row));
 
-    const handle = line.createSpan({ text: "⋮⋮", attr: { "aria-label": "Drag to move" } });
+    const handle = line.createSpan({ text: "⋮⋮", attr: { "aria-label": "Drag to reorder" } });
     Object.assign(handle.style, { cursor: "grab", touchAction: "none", color: "var(--text-muted)", userSelect: "none", flex: "none" });
     handle.onpointerdown = (evt) => this.startDrag(evt, row);
     line.prepend(handle);
     this.renderItem(main, row.item);
 
-    iconButton(line, "corner-down-right", "Move to…", (evt) => {
-      const menu = new Menu();
-      const targets: (number | null)[] = [null, ...this.noteHeads.map((_, i) => i)];
-      const placements = targets.flatMap((heading) => (["prepend", "append", "replace"] as const).map((position): Placement => ({ heading, position })));
-      for (const p of placements) {
-        if (p.position === "prepend" && p !== placements[0]) menu.addSeparator();
-        menu.addItem((item) =>
-          item
-            .setTitle(this.placementLabel(p))
-            .setChecked(samePlacement(p, row))
-            .onClick(() => {
-              row.heading = p.heading;
-              row.position = p.position;
-              // Moved rows go last in their new group.
-              this.picks.content = [...this.picks.content.filter((r) => r !== row), row];
-              this.custom();
-              this.renderContent();
-            }),
-        );
-      }
-      menu.showAtMouseEvent(evt);
-    });
+    const move = () => {
+      // Moved rows go last in their new spot.
+      this.picks.content = [...this.picks.content.filter((r) => r !== row), row];
+      this.custom();
+      this.renderContent();
+    };
+    const target = smallSelect(line);
+    target.createEl("option", { text: "Note body", value: "" });
+    this.noteHeads.forEach((h, i) => target.createEl("option", { text: `${"#".repeat(h.level)} ${h.text}`, value: String(i) }));
+    target.value = row.heading === null ? "" : String(row.heading);
+    target.onchange = () => {
+      row.heading = target.value === "" ? null : Number(target.value);
+      move();
+    };
+    const position = smallSelect(line);
+    for (const [value, text] of Object.entries(POSITION_LABELS)) position.createEl("option", { text, value });
+    position.value = row.position;
+    position.onchange = () => {
+      row.position = position.value as Placement["position"];
+      move();
+    };
+
     iconButton(line, "x", "Remove", () => {
       this.picks.content = this.picks.content.filter((r) => r !== row);
       rowFiles(row.item).forEach((kind) => this.dropIfUnused(kind));
@@ -507,16 +501,15 @@ export class EnrichModal extends Modal {
   }
 
   private renderItem(el: HTMLElement, item: ContentItem): void {
+    const text = el.createDiv();
+    Object.assign(text.style, { minWidth: "0", flex: "1 1 auto", display: "flex", flexDirection: "column" });
+    const name = (value: string) => (clipped(text, value).style.fontWeight = "600");
     if (item.kind === "file") {
       const kind = item.file;
-      if (!this.o.files.available().includes(kind)) {
-        el.createSpan({ text: fileLabel(kind) });
-        el.createSpan({ text: this.o.files.pending().includes(kind) ? "Capturing…" : "Not captured", cls: "setting-item-description" });
-        return;
-      }
-      if (fileExt(kind, null) === null) {
+      const made = this.o.files.available().includes(kind);
+      if (made && fileExt(kind, null) === null) {
         const img = el.createEl("img", { attr: { alt: fileLabel(kind) } });
-        Object.assign(img.style, { width: "64px", height: "40px", objectFit: "cover", objectPosition: "top", borderRadius: "4px", flex: "none" });
+        Object.assign(img.style, { width: "40px", height: "28px", objectFit: "cover", objectPosition: "top", borderRadius: "4px", flex: "none", order: "-1" });
         const known = this.urls.get(kind);
         if (known) img.src = known;
         else
@@ -527,15 +520,15 @@ export class EnrichModal extends Modal {
             img.src = url;
           });
       }
-      el.createSpan({ text: fileLabel(item.file) });
+      name(fileLabel(kind));
+      clipped(text, made ? fileVariable(kind) : this.o.files.pending().includes(kind) ? "Capturing…" : "Not captured", true);
     } else if (item.kind === "variable") {
-      const name = el.createSpan({ text: item.name });
-      Object.assign(name.style, { fontWeight: "600", flex: "none", maxWidth: "50%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-      clipped(el, preview(item.value, 80), true);
+      name(item.name);
+      clipped(text, preview(item.value, 120), true);
     } else {
-      const input = el.createEl("textarea", { attr: { rows: "2", placeholder: "A heading or note" } });
+      const input = text.createEl("textarea", { attr: { rows: "1", placeholder: "A heading or note" } });
       input.value = item.text;
-      input.style.width = "100%";
+      Object.assign(input.style, { width: "100%", resize: "vertical" });
       input.oninput = () => {
         item.text = input.value;
         this.custom();
