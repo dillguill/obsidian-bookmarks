@@ -1,4 +1,4 @@
-import { App, Menu, Modal, Setting } from "obsidian";
+import { App, Menu, Modal, Setting, setIcon } from "obsidian";
 import { CAPTURE_FILES, fileExt, fileMarker, type CaptureFile } from "./api";
 import {
   fileLabel,
@@ -34,6 +34,48 @@ function entryTitle(name: string, value: string): DocumentFragment {
   frag.createSpan({ text: name });
   Object.assign(frag.createSpan({ text: value }).style, { color: "var(--text-muted)", marginLeft: "0.75em" });
   return frag;
+}
+
+/** A section heading with its add button on the same line. */
+function sectionHead(parent: HTMLElement, title: string, add: string, onAdd: (evt: MouseEvent) => void): void {
+  const head = parent.createDiv();
+  Object.assign(head.style, { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "12px 0 4px" });
+  head.createSpan({ text: title }).style.fontWeight = "600";
+  const button = head.createEl("button", { text: add, cls: "mod-muted" });
+  Object.assign(button.style, { fontSize: "var(--font-ui-smaller)", padding: "2px 8px", height: "auto" });
+  button.onclick = onAdd;
+}
+
+/** A small icon button. */
+function iconButton(parent: HTMLElement, icon: string, label: string, onClick: (evt: MouseEvent) => void): HTMLElement {
+  const button = parent.createDiv({ cls: "clickable-icon", attr: { "aria-label": label } });
+  setIcon(button, icon);
+  button.style.flex = "none";
+  button.onclick = onClick;
+  return button;
+}
+
+/** A select sized for a row rather than a settings line. */
+function smallSelect(parent: HTMLElement): HTMLSelectElement {
+  const select = parent.createEl("select", { cls: "dropdown" });
+  Object.assign(select.style, { fontSize: "var(--font-ui-smaller)", height: "auto", padding: "2px 24px 2px 8px", maxWidth: "11em" });
+  return select;
+}
+
+/** One line: what it is on the left (shrinking first), controls on the right. */
+function rowLine(parent: HTMLElement): { line: HTMLElement; main: HTMLElement } {
+  const line = parent.createDiv();
+  Object.assign(line.style, { display: "flex", alignItems: "center", gap: "6px", padding: "4px 0" });
+  const main = line.createDiv();
+  Object.assign(main.style, { flex: "1 1 auto", minWidth: "0", display: "flex", alignItems: "center", gap: "8px" });
+  return { line, main };
+}
+
+/** Text that cuts off with an ellipsis instead of wrapping. */
+function clipped(parent: HTMLElement, text: string, muted = false): HTMLElement {
+  const span = parent.createSpan({ text, cls: muted ? "setting-item-description" : undefined });
+  Object.assign(span.style, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: "0", padding: "0" });
+  return span;
 }
 
 const startedMenus = new WeakSet<Menu>();
@@ -134,7 +176,7 @@ export class EnrichModal extends Modal {
   }
 
   override onOpen(): void {
-    this.setTitle(`Update ${this.o.noteName} from source`);
+    this.setTitle("Update from source");
     this.build();
   }
 
@@ -182,18 +224,16 @@ export class EnrichModal extends Modal {
 
     this.statusEl = contentEl.createEl("p", { cls: "setting-item-description" });
 
-    new Setting(contentEl).setName("Properties").setHeading();
+    sectionHead(contentEl, "Properties", "+ Property", (evt) => this.propertyMenu(evt));
     this.propsEl = contentEl.createDiv();
-    const addProperty = contentEl.createEl("button", { text: "+ Property" });
-    addProperty.onclick = (evt) => this.propertyMenu(evt);
     if (o.choices.unchanged.length > 0) {
-      contentEl.createEl("p", { cls: "setting-item-description", text: `Already up to date: ${o.choices.unchanged.join(", ")}` });
+      const details = contentEl.createEl("details", { cls: "setting-item-description" });
+      details.createEl("summary", { text: `${o.choices.unchanged.length} already up to date` });
+      details.createDiv({ text: o.choices.unchanged.join(", ") });
     }
 
-    new Setting(contentEl).setName("Content").setHeading();
+    sectionHead(contentEl, "Content", "+ Content", (evt) => this.contentMenu(evt));
     this.contentEl2 = contentEl.createDiv();
-    const addContent = contentEl.createEl("button", { text: "+ Content" });
-    addContent.onclick = (evt) => this.contentMenu(evt);
 
     if (o.offline.length > 0) {
       const video = o.offline.includes("tiktok_video");
@@ -274,48 +314,49 @@ export class EnrichModal extends Modal {
     const inVault = this.o.vaultProperties.filter((name) => !inNote.includes(name));
     for (const property of picked) {
       const pick = this.picks.properties[property.name]!;
-      const setting = new Setting(el).setName(property.name);
       const now = this.o.frontmatter[pick.target];
-      if (!isEmpty(now)) setting.descEl.createDiv({ text: `Now: ${preview(now)}` });
-      setting.descEl.createDiv({ text: `${isEmpty(now) ? "Value" : "New"}: ${preview(property.value)}` });
-      setting.addDropdown((dropdown) => {
-        const select = dropdown.selectEl;
-        if (!pick.target) select.createEl("option", { text: "Choose a property…", value: "" });
-        // A template property can always go into its own name.
-        if (property.target === undefined && !inNote.includes(property.name) && !inVault.includes(property.name)) select.createEl("option", { text: property.name, value: property.name });
-        const group = (label: string, names: string[]) => {
-          if (!names.length) return;
-          const el = select.createEl("optgroup", { attr: { label } });
-          for (const name of names) el.createEl("option", { text: name, value: name });
-        };
-        group("In this note", inNote);
-        group("In the vault", inVault);
-        dropdown.setValue(pick.target).onChange((value) => {
-          pick.target = value;
-          if (pick.mode === "merge" && !this.canMerge(property, value)) pick.mode = "replace";
-          this.custom();
-          this.renderProperties();
-        });
+      const { line, main } = rowLine(el);
+      main.style.flexDirection = "column";
+      main.style.alignItems = "stretch";
+      main.style.gap = "0";
+      clipped(main, property.name).style.fontWeight = "600";
+      const change = isEmpty(now) ? preview(property.value, 80) : `${preview(now, 40)} → ${preview(property.value, 40)}`;
+      clipped(main, change, true).title = change;
+
+      const target = smallSelect(line);
+      if (!pick.target) target.createEl("option", { text: "Choose…", value: "" });
+      // A template property can always go into its own name.
+      if (property.target === undefined && !inNote.includes(property.name) && !inVault.includes(property.name)) target.createEl("option", { text: property.name, value: property.name });
+      const group = (label: string, names: string[]) => {
+        if (!names.length) return;
+        const og = target.createEl("optgroup", { attr: { label } });
+        for (const name of names) og.createEl("option", { text: name, value: name });
+      };
+      group("In this note", inNote);
+      group("In the vault", inVault);
+      target.value = pick.target;
+      target.onchange = () => {
+        pick.target = target.value;
+        if (pick.mode === "merge" && !this.canMerge(property, pick.target)) pick.mode = "replace";
+        this.custom();
+        this.renderProperties();
+      };
+
+      const mode = smallSelect(line);
+      mode.createEl("option", { text: isEmpty(now) ? "Add" : "Replace", value: "replace" });
+      if (this.canMerge(property, pick.target)) mode.createEl("option", { text: "Merge", value: "merge" });
+      mode.value = pick.mode;
+      mode.onchange = () => {
+        pick.mode = mode.value as typeof pick.mode;
+        this.custom();
+      };
+
+      iconButton(line, "x", "Remove", () => {
+        delete this.picks.properties[property.name];
+        filesIn(property.value).forEach((kind) => this.dropIfUnused(kind));
+        this.custom();
+        this.renderProperties();
       });
-      setting.addDropdown((dropdown) => {
-        dropdown.addOption("replace", isEmpty(now) ? "Add" : "Replace");
-        if (this.canMerge(property, pick.target)) dropdown.addOption("merge", "Merge");
-        dropdown.setValue(pick.mode).onChange((value) => {
-          pick.mode = value as typeof pick.mode;
-          this.custom();
-        });
-      });
-      setting.addExtraButton((button) =>
-        button
-          .setIcon("x")
-          .setTooltip("Remove")
-          .onClick(() => {
-            delete this.picks.properties[property.name];
-            filesIn(property.value).forEach((kind) => this.dropIfUnused(kind));
-            this.custom();
-            this.renderProperties();
-          }),
-      );
     }
   }
 
@@ -447,13 +488,9 @@ export class EnrichModal extends Modal {
   }
 
   private renderRow(parent: HTMLElement, row: ContentRow): void {
-    const line = parent.createDiv();
+    const { line, main } = rowLine(parent);
     Object.assign(line.style, {
-      display: "flex",
-      flexWrap: "wrap",
-      alignItems: "center",
-      gap: "8px",
-      padding: "6px 8px",
+      padding: "4px 6px",
       marginBottom: "4px",
       border: "1px solid var(--background-modifier-border)",
       borderRadius: "6px",
@@ -463,38 +500,39 @@ export class EnrichModal extends Modal {
     line.dataset.row = String(this.picks.content.indexOf(row));
 
     const handle = line.createSpan({ text: "⋮⋮", attr: { "aria-label": "Drag to move" } });
-    Object.assign(handle.style, { cursor: "grab", touchAction: "none", color: "var(--text-muted)", userSelect: "none" });
+    Object.assign(handle.style, { cursor: "grab", touchAction: "none", color: "var(--text-muted)", userSelect: "none", flex: "none" });
     handle.onpointerdown = (evt) => this.startDrag(evt, row);
-
-    const main = line.createDiv();
-    Object.assign(main.style, { flex: "1 1 200px", minWidth: "0", display: "flex", alignItems: "center", gap: "8px" });
+    line.prepend(handle);
     this.renderItem(main, row.item);
 
-    const target = line.createEl("select", { cls: "dropdown" });
-    target.createEl("option", { text: "Note body", value: "" });
-    this.noteHeads.forEach((h, i) => target.createEl("option", { text: `${"  ".repeat(h.level - 1)}${"#".repeat(h.level)} ${h.text}`, value: String(i) }));
-    target.value = row.heading === null ? "" : String(row.heading);
-    const position = line.createEl("select", { cls: "dropdown" });
-    for (const [value, text] of Object.entries(POSITION_LABELS)) position.createEl("option", { text, value });
-    position.value = row.position;
-    const move = () => {
-      row.heading = target.value === "" ? null : Number(target.value);
-      row.position = position.value as Placement["position"];
-      // Moved rows go last in their new group.
-      this.picks.content = [...this.picks.content.filter((r) => r !== row), row];
-      this.custom();
-      this.renderContent();
-    };
-    target.onchange = move;
-    position.onchange = move;
-
-    const remove = line.createEl("button", { text: "×", attr: { "aria-label": "Remove" } });
-    remove.onclick = () => {
+    iconButton(line, "corner-down-right", "Move to…", (evt) => {
+      const menu = new Menu();
+      const targets: (number | null)[] = [null, ...this.noteHeads.map((_, i) => i)];
+      const placements = targets.flatMap((heading) => (["prepend", "append", "replace"] as const).map((position): Placement => ({ heading, position })));
+      for (const p of placements) {
+        if (p.position === "prepend" && p !== placements[0]) menu.addSeparator();
+        menu.addItem((item) =>
+          item
+            .setTitle(this.placementLabel(p))
+            .setChecked(samePlacement(p, row))
+            .onClick(() => {
+              row.heading = p.heading;
+              row.position = p.position;
+              // Moved rows go last in their new group.
+              this.picks.content = [...this.picks.content.filter((r) => r !== row), row];
+              this.custom();
+              this.renderContent();
+            }),
+        );
+      }
+      menu.showAtMouseEvent(evt);
+    });
+    iconButton(line, "x", "Remove", () => {
       this.picks.content = this.picks.content.filter((r) => r !== row);
       rowFiles(row.item).forEach((kind) => this.dropIfUnused(kind));
       this.custom();
       this.renderContent();
-    };
+    });
   }
 
   private renderItem(el: HTMLElement, item: ContentItem): void {
@@ -520,9 +558,9 @@ export class EnrichModal extends Modal {
       }
       el.createSpan({ text: fileLabel(item.file) });
     } else if (item.kind === "variable") {
-      el.createSpan({ text: item.name }).style.fontWeight = "600";
-      const value = el.createSpan({ text: preview(item.value, 80), cls: "setting-item-description" });
-      Object.assign(value.style, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+      const name = el.createSpan({ text: item.name });
+      Object.assign(name.style, { fontWeight: "600", flex: "none", maxWidth: "50%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
+      clipped(el, preview(item.value, 80), true);
     } else {
       const input = el.createEl("textarea", { attr: { rows: "2", placeholder: "A heading or note" } });
       input.value = item.text;
