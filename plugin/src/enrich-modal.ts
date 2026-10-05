@@ -56,13 +56,18 @@ function smallSelect(parent: HTMLElement): HTMLSelectElement {
   return select;
 }
 
-/** One line: what it is on the left (shrinking first), controls on the right. */
-function rowLine(parent: HTMLElement): { line: HTMLElement; main: HTMLElement } {
+/**
+ * A row: what it is on the left, controls on the right. When the row is too
+ * narrow for both (phones), the controls wrap onto their own line underneath.
+ */
+function rowLine(parent: HTMLElement): { line: HTMLElement; main: HTMLElement; controls: HTMLElement } {
   const line = parent.createDiv();
-  Object.assign(line.style, { display: "flex", alignItems: "center", gap: "6px", padding: "4px 0" });
+  Object.assign(line.style, { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px 6px", padding: "6px 0" });
   const main = line.createDiv();
-  Object.assign(main.style, { flex: "1 1 auto", minWidth: "0", display: "flex", alignItems: "center", gap: "8px" });
-  return { line, main };
+  Object.assign(main.style, { flex: "1 1 12em", minWidth: "0", display: "flex", alignItems: "center", gap: "8px" });
+  const controls = line.createDiv();
+  Object.assign(controls.style, { flex: "1 0 auto", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" });
+  return { line, main, controls };
 }
 
 /** Text that cuts off with an ellipsis instead of wrapping. */
@@ -296,7 +301,7 @@ export class EnrichModal extends Modal {
     for (const property of picked) {
       const pick = this.picks.properties[property.name]!;
       const now = this.o.frontmatter[pick.target];
-      const { line, main } = rowLine(el);
+      const { main, controls } = rowLine(el);
       main.style.flexDirection = "column";
       main.style.alignItems = "stretch";
       main.style.gap = "0";
@@ -304,7 +309,7 @@ export class EnrichModal extends Modal {
       const value = preview(property.value, 120);
       clipped(main, value, true).title = isEmpty(now) ? value : `Now: ${preview(now, 120)}`;
 
-      const target = smallSelect(line);
+      const target = smallSelect(controls);
       if (!pick.target) target.createEl("option", { text: "Choose…", value: "" });
       // A template property can always go into its own name.
       if (property.target === undefined && !inNote.includes(property.name) && !inVault.includes(property.name)) target.createEl("option", { text: property.name, value: property.name });
@@ -323,7 +328,7 @@ export class EnrichModal extends Modal {
         this.renderProperties();
       };
 
-      const mode = smallSelect(line);
+      const mode = smallSelect(controls);
       mode.createEl("option", { text: isEmpty(now) ? "Add" : "Replace", value: "replace" });
       if (this.canMerge(property, pick.target)) mode.createEl("option", { text: "Merge", value: "merge" });
       mode.value = pick.mode;
@@ -332,7 +337,7 @@ export class EnrichModal extends Modal {
         this.custom();
       };
 
-      iconButton(line, "x", "Remove", () => {
+      iconButton(controls, "x", "Remove", () => {
         delete this.picks.properties[property.name];
         filesIn(property.value).forEach((kind) => this.dropIfUnused(kind));
         this.custom();
@@ -459,7 +464,7 @@ export class EnrichModal extends Modal {
   }
 
   private renderRow(parent: HTMLElement, row: ContentRow): void {
-    const { line, main } = rowLine(parent);
+    const { line, main, controls } = rowLine(parent);
     line.style.borderBottom = "1px solid var(--background-modifier-border)";
     line.style.opacity = this.dragging === row ? "0.4" : "1";
     line.dataset.row = String(this.picks.content.indexOf(row));
@@ -476,7 +481,7 @@ export class EnrichModal extends Modal {
       this.custom();
       this.renderContent();
     };
-    const target = smallSelect(line);
+    const target = smallSelect(controls);
     target.createEl("option", { text: "Note body", value: "" });
     this.noteHeads.forEach((h, i) => target.createEl("option", { text: `${"#".repeat(h.level)} ${h.text}`, value: String(i) }));
     target.value = row.heading === null ? "" : String(row.heading);
@@ -484,7 +489,7 @@ export class EnrichModal extends Modal {
       row.heading = target.value === "" ? null : Number(target.value);
       move();
     };
-    const position = smallSelect(line);
+    const position = smallSelect(controls);
     for (const [value, text] of Object.entries(POSITION_LABELS)) position.createEl("option", { text, value });
     position.value = row.position;
     position.onchange = () => {
@@ -492,7 +497,7 @@ export class EnrichModal extends Modal {
       move();
     };
 
-    iconButton(line, "x", "Remove", () => {
+    iconButton(controls, "x", "Remove", () => {
       this.picks.content = this.picks.content.filter((r) => r !== row);
       rowFiles(row.item).forEach((kind) => this.dropIfUnused(kind));
       this.custom();
