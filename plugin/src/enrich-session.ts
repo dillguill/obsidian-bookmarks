@@ -41,8 +41,10 @@ export class EnrichSession {
   /** Polls until the main capture has rendered its note (or failed). */
   async waitForNote(): Promise<Job> {
     while (!this.main.assets.includes("note") && !settled(this.main)) {
+      if (this.closed) throw new Error("cancelled");
       if (Date.now() - this.started > TIMEOUT_MS) throw new Error("the server is still capturing the page. Try again in a minute.");
       await new Promise((resolve) => window.setTimeout(resolve, POLL_MS));
+      if (this.closed) throw new Error("cancelled");
       this.main = await this.client.job(this.main.id);
     }
     if (this.main.status === "failed") throw new Error(this.main.error ?? "unknown error");
