@@ -5,6 +5,7 @@ import {
   ENRICH_FILES,
   enrichChoices,
   fileLabel,
+  filterSources,
   filesToSave,
   hasTikTokPlayer,
   noteHeadings,
@@ -227,5 +228,22 @@ describe("saving TikTok offline", () => {
     const thumb: ContentRow = { item: { kind: "file", file: "tiktok_thumbnail" }, heading: null, position: "append" };
     expect(filesToSave(tiktok, select({ offline: true, content: [thumb] }))).toEqual(["tiktok_video", "tiktok_thumbnail"]);
     expect(filesToSave(tiktok, select({ offline: true }))).toEqual(["tiktok_video"]);
+  });
+});
+
+describe("searching variables", () => {
+  const entry = (section: string, name: string, detail: string, searchText?: string) => ({ section, name, detail, searchText, choose: () => {} });
+  const entries = [
+    entry("TikTok", "{{tiktok_author}}", "Marc"),
+    entry("Screenshots", "{{screenshot_page}}", "Full page"),
+    entry("Variables", "{{description}}", "A short…", "A short look at fashion brands"),
+  ];
+
+  it("matches names, sections and full values, every word", () => {
+    expect(filterSources(entries, "").length).toBe(3);
+    expect(filterSources(entries, "AUTHOR").map((e) => e.name)).toEqual(["{{tiktok_author}}"]);
+    expect(filterSources(entries, "screenshots").map((e) => e.name)).toEqual(["{{screenshot_page}}"]);
+    expect(filterSources(entries, "fashion brands").map((e) => e.name)).toEqual(["{{description}}"]);
+    expect(filterSources(entries, "fashion marc")).toEqual([]);
   });
 });

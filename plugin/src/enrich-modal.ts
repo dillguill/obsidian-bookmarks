@@ -1,4 +1,4 @@
-import { App, Menu, Modal, Setting, setIcon } from "obsidian";
+import { App, Modal, Setting, setIcon } from "obsidian";
 import { CAPTURE_FILES, fileExt, fileMarker, type CaptureFile } from "./api";
 import {
   fileLabel,
@@ -14,9 +14,11 @@ import {
   type Placement,
   type PropertyChoice,
   rowFiles,
+  type SourceEntry,
   TEMPLATE_CONTENT,
   variableProperty,
 } from "./enrich";
+import { SourcePicker } from "./source-picker";
 
 function preview(value: unknown, max = 160): string {
   if (value === undefined || value === null || value === "") return "(none)";
@@ -27,14 +29,6 @@ function preview(value: unknown, max = 160): string {
 
 type VariableItem = Extract<ContentItem, { kind: "variable" }>;
 type FileItem = Extract<ContentItem, { kind: "file" }>;
-
-/** A menu entry showing a variable's name with its value after it. */
-function entryTitle(name: string, value: string): DocumentFragment {
-  const frag = createFragment();
-  frag.createSpan({ text: name });
-  Object.assign(frag.createSpan({ text: value }).style, { color: "var(--text-muted)", marginLeft: "0.75em" });
-  return frag;
-}
 
 /** A section heading with its add button on the same line. */
 function sectionHead(parent: HTMLElement, title: string, add: string, onAdd: (evt: MouseEvent) => void): void {
@@ -78,19 +72,6 @@ function clipped(parent: HTMLElement, text: string, muted = false): HTMLElement 
   return span;
 }
 
-const startedMenus = new WeakSet<Menu>();
-
-/** A section heading in a menu, after a separator unless it's the first. */
-function section(menu: Menu, title: string): void {
-  if (startedMenus.has(menu)) menu.addSeparator();
-  startedMenus.add(menu);
-  menu.addItem((item) => {
-    item.setTitle(title);
-    // Labels are newer than the oldest Obsidian the plugin supports.
-    if (typeof item.setIsLabel === "function") item.setIsLabel(true);
-    else item.setDisabled(true);
-  });
-}
 
 function isEmpty(value: unknown): boolean {
   return value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
@@ -224,7 +205,7 @@ export class EnrichModal extends Modal {
 
     this.statusEl = contentEl.createEl("p", { cls: "setting-item-description" });
 
-    sectionHead(contentEl, "Properties", "+ Property", (evt) => this.propertyMenu(evt));
+    sectionHead(contentEl, "Properties", "+ Property", () => this.propertyMenu());
     this.propsEl = contentEl.createDiv();
     if (o.choices.unchanged.length > 0) {
       const details = contentEl.createEl("details", { cls: "setting-item-description" });
@@ -232,7 +213,7 @@ export class EnrichModal extends Modal {
       details.createDiv({ text: o.choices.unchanged.join(", ") });
     }
 
-    sectionHead(contentEl, "Content", "+ Content", (evt) => this.contentMenu(evt));
+    sectionHead(contentEl, "Content", "+ Content", () => this.contentMenu());
     this.contentEl2 = contentEl.createDiv();
 
     if (o.offline.length > 0) {
@@ -320,8 +301,8 @@ export class EnrichModal extends Modal {
       main.style.alignItems = "stretch";
       main.style.gap = "0";
       clipped(main, property.name).style.fontWeight = "600";
-      const change = isEmpty(now) ? preview(property.value, 80) : `${preview(now, 40)} → ${preview(property.value, 40)}`;
-      clipped(main, change, true).title = change;
+      const value = preview(property.value, 120);
+      clipped(main, value, true).title = isEmpty(now) ? value : `Now: ${preview(now, 120)}`;
 
       const target = smallSelect(line);
       if (!pick.target) target.createEl("option", { text: "Choose…", value: "" });
@@ -365,9 +346,7 @@ export class EnrichModal extends Modal {
     return !isEmpty(now) && (Array.isArray(now) || Array.isArray(property.value));
   }
 
-  private propertyMenu(evt: MouseEvent): void {
-    const menu = new Menu();
-    const fromTemplate = this.o.choices.properties.filter((p) => p.target === undefined && !this.picks.properties[p.name]);
+  private propertyMenu(): void {
     const pick = (property: PropertyChoice) => {
       if (!this.o.choices.properties.some((p) => p.name === property.name)) this.o.choices.properties.push(property);
       const target = property.target ?? property.name;
@@ -375,53 +354,45 @@ export class EnrichModal extends Modal {
       this.custom();
       this.renderProperties();
     };
-    if (fromTemplate.length) {
-      section(menu, "Template");
-      for (const property of fromTemplate) menu.addItem((item) => item.setTitle(entryTitle(property.name, preview(property.value, 60))).onClick(() => pick(property)));
-    }
+    const fromTemplate: SourceEntry[] = this.o.choices.properties
+      .filter((p) => p.target === undefined && !this.picks.properties[p.name])
+      .map((property) => ({ section: "Template", name: property.name, detail: preview(property.value, 100), searchText: JSON.stringify(property.value ?? ""), choose: () => pick(property) }));
     // The template's whole body makes no sense as a property.
-    this.offerSources(menu, (name) => name === TEMPLATE_CONTENT || !!this.picks.properties[name], (source) => {
+    const sources = this.sources((name) => name === TEMPLATE_CONTENT || !!this.picks.properties[name], (source) => {
       if (source.kind === "file") this.requestIfNeeded(source.file);
       pick(variableProperty(source, this.o.frontmatter, this.o.vaultProperties));
     });
-    menu.showAtMouseEvent(evt);
+    new SourcePicker(this.app, [...fromTemplate, ...sources], "Search properties and variables…").open();
   }
 
   /**
-   * Adds every variable and capture file to a menu in TikTok, Screenshots and
-   * Variables sections, each entry showing its name and value. `taken` says
-   * which names (as "{{name}}") are already used.
+   * Every variable and capture file not yet `taken` (by "{{name}}"), in TikTok,
+   * Screenshots and Variables sections, each with its name and value.
    */
-  private offerSources(menu: Menu, taken: (name: string) => boolean, choose: (source: VariableItem | FileItem) => void): void {
+  private sources(taken: (name: string) => boolean, choose: (source: VariableItem | FileItem) => void): SourceEntry[] {
     const made = this.o.files.available();
     const capturing = this.o.files.pending();
     const files = [...made, ...this.o.files.onDemand.filter((kind) => !made.includes(kind))].filter((kind) => !taken(fileVariable(kind)));
-    const fileEntry = (kind: CaptureFile) => {
+    const fileEntry = (section: string) => (kind: CaptureFile): SourceEntry => {
       const later = !made.includes(kind) && !capturing.includes(kind);
-      menu.addItem((item) => item.setTitle(entryTitle(fileVariable(kind), later ? `${fileLabel(kind)} (capture)` : fileLabel(kind))).onClick(() => choose({ kind: "file", file: kind })));
+      return { section, name: fileVariable(kind), detail: later ? `${fileLabel(kind)} (capture)` : fileLabel(kind), choose: () => choose({ kind: "file", file: kind }) };
     };
     // Variables that only hold a capture file are offered as that file.
     const vars = this.o.variables.filter((v) => !taken(v.name) && !CAPTURE_FILES.some((kind) => v.name === fileVariable(kind)));
-    const varEntry = (v: { name: string; value: string }) =>
-      menu.addItem((item) => item.setTitle(entryTitle(v.name, preview(v.value, 60))).onClick(() => choose({ kind: "variable", name: v.name, value: v.value })));
+    const varEntry = (section: string) => (v: { name: string; value: string }): SourceEntry => ({
+      section,
+      name: v.name,
+      detail: preview(v.value, 100),
+      searchText: v.value,
+      choose: () => choose({ kind: "variable", name: v.name, value: v.value }),
+    });
     const isTikTok = (name: string) => name.startsWith("{{tiktok_");
-    const tiktokFiles = files.filter((kind) => kind.startsWith("tiktok_"));
-    const tiktokVars = vars.filter((v) => isTikTok(v.name));
-    if (tiktokFiles.length || tiktokVars.length) {
-      section(menu, "TikTok");
-      tiktokVars.forEach(varEntry);
-      tiktokFiles.forEach(fileEntry);
-    }
-    const shots = files.filter((kind) => !kind.startsWith("tiktok_"));
-    if (shots.length) {
-      section(menu, "Screenshots");
-      shots.forEach(fileEntry);
-    }
-    const rest = vars.filter((v) => !isTikTok(v.name));
-    if (rest.length) {
-      section(menu, "Variables");
-      rest.forEach(varEntry);
-    }
+    return [
+      ...vars.filter((v) => isTikTok(v.name)).map(varEntry("TikTok")),
+      ...files.filter((kind) => kind.startsWith("tiktok_")).map(fileEntry("TikTok")),
+      ...files.filter((kind) => !kind.startsWith("tiktok_")).map(fileEntry("Screenshots")),
+      ...vars.filter((v) => !isTikTok(v.name)).map(varEntry("Variables")),
+    ];
   }
 
   /** Starts capturing a file the main capture didn't make. */
@@ -476,57 +447,51 @@ export class EnrichModal extends Modal {
     for (const group of groups) {
       const items = rows.filter((row) => samePlacement(row, group));
       const box = el.createDiv();
-      box.style.borderRadius = "6px";
-      box.style.padding = "2px 4px";
-      box.style.marginBottom = "6px";
-      if (!items.length) box.style.border = "1px dashed var(--background-modifier-border)";
       box.dataset.heading = String(group.heading);
       box.dataset.position = group.position;
-      box.createDiv({ text: this.placementLabel(group), cls: "setting-item-description" }).style.fontWeight = "600";
+      // Each row names its own placement; the groups only show as drop targets while dragging.
+      if (this.dragging) {
+        Object.assign(box.style, { borderRadius: "6px", padding: "2px 4px", marginBottom: "6px", border: "1px dashed var(--background-modifier-border)" });
+        box.createDiv({ text: this.placementLabel(group), cls: "setting-item-description" }).style.fontWeight = "600";
+      }
       for (const row of items) this.renderRow(box, row);
     }
   }
 
   private renderRow(parent: HTMLElement, row: ContentRow): void {
     const { line, main } = rowLine(parent);
-    Object.assign(line.style, {
-      padding: "4px 6px",
-      marginBottom: "4px",
-      border: "1px solid var(--background-modifier-border)",
-      borderRadius: "6px",
-      background: "var(--background-secondary)",
-      opacity: this.dragging === row ? "0.4" : "1",
-    });
+    line.style.borderBottom = "1px solid var(--background-modifier-border)";
+    line.style.opacity = this.dragging === row ? "0.4" : "1";
     line.dataset.row = String(this.picks.content.indexOf(row));
 
-    const handle = line.createSpan({ text: "⋮⋮", attr: { "aria-label": "Drag to move" } });
+    const handle = line.createSpan({ text: "⋮⋮", attr: { "aria-label": "Drag to reorder" } });
     Object.assign(handle.style, { cursor: "grab", touchAction: "none", color: "var(--text-muted)", userSelect: "none", flex: "none" });
     handle.onpointerdown = (evt) => this.startDrag(evt, row);
     line.prepend(handle);
     this.renderItem(main, row.item);
 
-    iconButton(line, "corner-down-right", "Move to…", (evt) => {
-      const menu = new Menu();
-      const targets: (number | null)[] = [null, ...this.noteHeads.map((_, i) => i)];
-      const placements = targets.flatMap((heading) => (["prepend", "append", "replace"] as const).map((position): Placement => ({ heading, position })));
-      for (const p of placements) {
-        if (p.position === "prepend" && p !== placements[0]) menu.addSeparator();
-        menu.addItem((item) =>
-          item
-            .setTitle(this.placementLabel(p))
-            .setChecked(samePlacement(p, row))
-            .onClick(() => {
-              row.heading = p.heading;
-              row.position = p.position;
-              // Moved rows go last in their new group.
-              this.picks.content = [...this.picks.content.filter((r) => r !== row), row];
-              this.custom();
-              this.renderContent();
-            }),
-        );
-      }
-      menu.showAtMouseEvent(evt);
-    });
+    const move = () => {
+      // Moved rows go last in their new spot.
+      this.picks.content = [...this.picks.content.filter((r) => r !== row), row];
+      this.custom();
+      this.renderContent();
+    };
+    const target = smallSelect(line);
+    target.createEl("option", { text: "Note body", value: "" });
+    this.noteHeads.forEach((h, i) => target.createEl("option", { text: `${"#".repeat(h.level)} ${h.text}`, value: String(i) }));
+    target.value = row.heading === null ? "" : String(row.heading);
+    target.onchange = () => {
+      row.heading = target.value === "" ? null : Number(target.value);
+      move();
+    };
+    const position = smallSelect(line);
+    for (const [value, text] of Object.entries(POSITION_LABELS)) position.createEl("option", { text, value });
+    position.value = row.position;
+    position.onchange = () => {
+      row.position = position.value as Placement["position"];
+      move();
+    };
+
     iconButton(line, "x", "Remove", () => {
       this.picks.content = this.picks.content.filter((r) => r !== row);
       rowFiles(row.item).forEach((kind) => this.dropIfUnused(kind));
@@ -536,16 +501,15 @@ export class EnrichModal extends Modal {
   }
 
   private renderItem(el: HTMLElement, item: ContentItem): void {
+    const text = el.createDiv();
+    Object.assign(text.style, { minWidth: "0", flex: "1 1 auto", display: "flex", flexDirection: "column" });
+    const name = (value: string) => (clipped(text, value).style.fontWeight = "600");
     if (item.kind === "file") {
       const kind = item.file;
-      if (!this.o.files.available().includes(kind)) {
-        el.createSpan({ text: fileLabel(kind) });
-        el.createSpan({ text: this.o.files.pending().includes(kind) ? "Capturing…" : "Not captured", cls: "setting-item-description" });
-        return;
-      }
-      if (fileExt(kind, null) === null) {
+      const made = this.o.files.available().includes(kind);
+      if (made && fileExt(kind, null) === null) {
         const img = el.createEl("img", { attr: { alt: fileLabel(kind) } });
-        Object.assign(img.style, { width: "64px", height: "40px", objectFit: "cover", objectPosition: "top", borderRadius: "4px", flex: "none" });
+        Object.assign(img.style, { width: "40px", height: "28px", objectFit: "cover", objectPosition: "top", borderRadius: "4px", flex: "none", order: "-1" });
         const known = this.urls.get(kind);
         if (known) img.src = known;
         else
@@ -556,15 +520,15 @@ export class EnrichModal extends Modal {
             img.src = url;
           });
       }
-      el.createSpan({ text: fileLabel(item.file) });
+      name(fileLabel(kind));
+      clipped(text, made ? fileVariable(kind) : this.o.files.pending().includes(kind) ? "Capturing…" : "Not captured", true);
     } else if (item.kind === "variable") {
-      const name = el.createSpan({ text: item.name });
-      Object.assign(name.style, { fontWeight: "600", flex: "none", maxWidth: "50%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-      clipped(el, preview(item.value, 80), true);
+      name(item.name);
+      clipped(text, preview(item.value, 120), true);
     } else {
-      const input = el.createEl("textarea", { attr: { rows: "2", placeholder: "A heading or note" } });
+      const input = text.createEl("textarea", { attr: { rows: "1", placeholder: "A heading or note" } });
       input.value = item.text;
-      input.style.width = "100%";
+      Object.assign(input.style, { width: "100%", resize: "vertical" });
       input.oninput = () => {
         item.text = input.value;
         this.custom();
@@ -572,8 +536,7 @@ export class EnrichModal extends Modal {
     }
   }
 
-  private contentMenu(evt: MouseEvent): void {
-    const menu = new Menu();
+  private contentMenu(): void {
     const picked = this.picks.content.map((row) => row.item);
     const add = (item: ContentItem) => {
       this.picks.content.push({ item, heading: null, position: "append" });
@@ -581,14 +544,14 @@ export class EnrichModal extends Modal {
       this.renderContent();
     };
     const taken = (name: string) => picked.some((i) => (i.kind === "file" ? fileVariable(i.file) === name : i.kind === "variable" && i.name === name));
-    this.offerSources(menu, taken, (source) => {
+    const sources = this.sources(taken, (source) => {
       if (source.kind === "file") this.requestIfNeeded(source.file);
       add(source);
     });
-    section(menu, "Text");
-    menu.addItem((item) => item.setTitle("Text").onClick(() => add({ kind: "text", text: "" })));
-    menu.showAtMouseEvent(evt);
+    const text: SourceEntry = { section: "Text", name: "Text", detail: "A heading or note you type", choose: () => add({ kind: "text", text: "" }) };
+    new SourcePicker(this.app, [...sources, text], "Search variables, screenshots or text…").open();
   }
+
 
   // ---- drag to move ----
 

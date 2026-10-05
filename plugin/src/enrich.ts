@@ -362,3 +362,25 @@ export function defaultSelection(choices: EnrichChoices): EnrichSelection {
   const content: ContentRow[] = choices.body ? [{ item: { kind: "variable", name: TEMPLATE_CONTENT, value: choices.body }, heading: null, position: "append" }] : [];
   return { properties, content, offline: false };
 }
+
+/** Something + Property or + Content can add, as the picker lists it. */
+export interface SourceEntry {
+  /** TikTok, Screenshots, Variables, Template or Text. */
+  section: string;
+  name: string;
+  /** Short preview shown under the name. */
+  detail: string;
+  /** Extra text a search matches, such as a variable's full value. */
+  searchText?: string;
+  choose: () => void;
+}
+
+/** Entries matching every word of the query in their name, section, preview or value, in their original order. */
+export function filterSources(entries: readonly SourceEntry[], query: string): SourceEntry[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [...entries];
+  return entries.filter((entry) => {
+    const text = `${entry.name}\n${entry.section}\n${entry.detail}\n${entry.searchText ?? ""}`.toLowerCase();
+    return words.every((word) => text.includes(word));
+  });
+}
