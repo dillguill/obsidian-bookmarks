@@ -31,10 +31,11 @@ type VariableItem = Extract<ContentItem, { kind: "variable" }>;
 type FileItem = Extract<ContentItem, { kind: "file" }>;
 
 /** A section heading with its add button on the same line. */
-function sectionHead(parent: HTMLElement, title: string, add: string, onAdd: (evt: MouseEvent) => void): void {
+function sectionHead(parent: HTMLElement, title: string, add?: string, onAdd?: (evt: MouseEvent) => void): void {
   const head = parent.createDiv();
   Object.assign(head.style, { display: "flex", alignItems: "center", justifyContent: "space-between", margin: "12px 0 4px" });
   head.createSpan({ text: title }).style.fontWeight = "600";
+  if (!add || !onAdd) return;
   const button = head.createEl("button", { text: add, cls: "mod-muted" });
   Object.assign(button.style, { fontSize: "var(--font-ui-smaller)", padding: "2px 8px", height: "auto" });
   button.onclick = onAdd;
@@ -68,6 +69,38 @@ function rowLine(parent: HTMLElement): { line: HTMLElement; main: HTMLElement; c
   const controls = line.createDiv();
   Object.assign(controls.style, { flex: "1 0 auto", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" });
   return { line, main, controls };
+}
+
+/** Fades an element in and out until it's removed. */
+function pulse(el: HTMLElement, duration = 1000): void {
+  el.animate([{ opacity: 1 }, { opacity: 0.35 }, { opacity: 1 }], { duration, iterations: Infinity });
+}
+
+/** A status line, with a pulsing dot while something is on its way. */
+function statusLine(el: HTMLElement, text: string, busy: boolean): void {
+  el.empty();
+  Object.assign(el.style, { display: "flex", alignItems: "center", gap: "6px" });
+  if (busy) {
+    const dot = el.createSpan();
+    Object.assign(dot.style, { width: "8px", height: "8px", borderRadius: "50%", background: "var(--interactive-accent)", flex: "none" });
+    pulse(dot);
+  }
+  el.createSpan({ text });
+}
+
+/** A grey stand-in for a row that hasn't arrived yet. */
+function placeholderRow(parent: HTMLElement, width: number): void {
+  const { main, controls } = rowLine(parent);
+  Object.assign(main.style, { flexDirection: "column", alignItems: "flex-start", gap: "5px" });
+  const block = (into: HTMLElement, w: number, h: number) => {
+    const el = into.createDiv();
+    Object.assign(el.style, { width: `${w}px`, maxWidth: "100%", height: `${h}px`, borderRadius: "4px", background: "var(--background-modifier-border)" });
+    pulse(el, 1400);
+  };
+  block(main, width, 12);
+  block(main, width + 90, 10);
+  block(controls, 84, 22);
+  block(controls, 62, 22);
 }
 
 /** Text that cuts off with an ellipsis instead of wrapping. */
@@ -106,7 +139,7 @@ export interface EnrichFiles {
 
 export interface EnrichModalOptions {
   noteName: string;
-  /** Templates the update can start from; picking one captures the page again with it, and the modal shows that capture via switchTo. */
+  /** Templates the update can start from. */
   templates: string[];
   template: string;
   choices: EnrichChoices;
@@ -124,7 +157,13 @@ export interface EnrichModalOptions {
   files: EnrichFiles;
   /** Files that can replace the note's TikTok player; empty when it has none. */
   offline: CaptureFile[];
+}
+
+export interface EnrichHandlers {
+  /** Picking a template captures the page again with it; the modal shows that capture via show. */
   onTemplate: (name: string) => void;
+  /** Fetches the page again after a failed first fetch. */
+  onRetry: () => void;
   onSubmit: (selection: EnrichSelection) => void;
   onDone: () => void;
 }
@@ -135,13 +174,19 @@ export interface EnrichModalOptions {
  * and content rows (screenshots, variables and typed text), each put before, after
  * or in place of the note body or one of its headings. Content rows are grouped by
  * where they land, in note order; dragging a row into another group moves it there.
+ * It opens while the page is still being fetched, with stand-in rows until show.
  */
 export class EnrichModal extends Modal {
   private readonly urls = new Map<CaptureFile, string>();
   private submitted = false;
   // Not "selection": Obsidian's Modal stores its own selection there when it opens.
-  private picks: EnrichSelection;
-  private readonly noteHeads;
+  private picks: EnrichSelection = { properties: {}, content: [], offline: false };
+  private noteHeads: ReturnType<typeof noteHeadings> = [];
+  /** The capture on show; unset while the first fetch is on its way. */
+  private o!: EnrichModalOptions;
+  private loaded = false;
+  /** The first fetch failed with this message. */
+  private failure: string | null = null;
   private templateSelect!: HTMLSelectElement;
   private propsEl!: HTMLElement;
   private contentEl2!: HTMLElement;
@@ -154,27 +199,85 @@ export class EnrichModal extends Modal {
 
   constructor(
     app: App,
-    private o: EnrichModalOptions,
+    private readonly handlers: EnrichHandlers,
+    /** Templates to list while the first fetch is on its way, and the one it uses (null: the server picks). */
+    private readonly waiting: { templates: string[]; template: string | null },
   ) {
     super(app);
-    this.picks = startingPicks(o);
-    this.noteHeads = noteHeadings(o.body);
   }
 
   override onOpen(): void {
     this.setTitle("Update from source");
-    this.build();
+    this.redraw();
   }
 
-  /** Shows a capture made with another template, starting over from what it sets up. */
-  switchTo(o: EnrichModalOptions): void {
+  /** Shows a capture, starting over from what its template sets up. */
+  show(o: EnrichModalOptions): void {
     for (const url of this.urls.values()) URL.revokeObjectURL(url);
     this.urls.clear();
     this.o = o;
+    this.loaded = true;
+    this.failure = null;
     this.pendingTemplate = null;
     this.picks = startingPicks(o);
+    this.noteHeads = noteHeadings(o.body);
+    this.redraw();
+  }
+
+  /** The first fetch failed: says why, with Retry. */
+  failed(message: string): void {
+    this.failure = message;
+    this.redraw();
+  }
+
+  /** Back to waiting on the first fetch. */
+  retrying(): void {
+    this.failure = null;
+    this.redraw();
+  }
+
+  private redraw(): void {
     this.contentEl.empty();
-    this.build();
+    if (this.loaded) this.build(this.o);
+    else this.buildWaiting();
+  }
+
+  /** Before the first capture arrives: the template, a status line and stand-in rows. */
+  private buildWaiting(): void {
+    const { contentEl } = this;
+    const { templates, template } = this.waiting;
+    new Setting(contentEl).setName("Template").addDropdown((dropdown) => {
+      if (template === null) dropdown.addOption("", "Matching…");
+      for (const name of templates) dropdown.addOption(name, name);
+      dropdown.setValue(template ?? "").setDisabled(true);
+    });
+
+    if (this.failure !== null) {
+      const box = contentEl.createDiv({ text: this.failure });
+      Object.assign(box.style, {
+        color: "var(--text-error)",
+        border: "1px solid var(--text-error)",
+        borderRadius: "var(--radius-s)",
+        padding: "8px 10px",
+        margin: "8px 0",
+        fontSize: "var(--font-ui-small)",
+      });
+      new Setting(contentEl)
+        .addButton((button) => button.setButtonText("Close").onClick(() => this.close()))
+        .addButton((button) => button.setButtonText("Retry").setCta().onClick(() => this.handlers.onRetry()));
+      return;
+    }
+
+    statusLine(contentEl.createEl("p", { cls: "setting-item-description" }), "Fetching page…", true);
+    sectionHead(contentEl, "Properties");
+    const props = contentEl.createDiv();
+    for (const width of [70, 90, 60]) placeholderRow(props, width);
+    sectionHead(contentEl, "Content");
+    const content = contentEl.createDiv();
+    for (const width of [110, 80]) placeholderRow(content, width);
+    new Setting(contentEl)
+      .addButton((button) => button.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton((button) => button.setButtonText("Apply").setCta().setDisabled(true));
   }
 
   /** Waits on another template's capture, keeping the current one on screen until it's ready. */
@@ -188,14 +291,14 @@ export class EnrichModal extends Modal {
   /** The other template's capture failed: back to the current one. */
   switchFailed(): void {
     this.pendingTemplate = null;
-    this.templateSelect.value = this.o.template;
+    this.templateSelect.value = this.loaded ? this.o.template : "";
     this.templateSelect.disabled = false;
     this.applyButton.disabled = false;
     this.renderStatus();
   }
 
-  private build(): void {
-    const { contentEl, o } = this;
+  private build(o: EnrichModalOptions): void {
+    const { contentEl } = this;
 
     new Setting(contentEl).setName("Template").addDropdown((dropdown) => {
       for (const name of o.templates) dropdown.addOption(name, name);
@@ -203,7 +306,7 @@ export class EnrichModal extends Modal {
       dropdown.setValue(o.template).onChange((value) => {
         if (value === CUSTOM) return;
         this.switching(value);
-        o.onTemplate(value);
+        this.handlers.onTemplate(value);
       });
       this.templateSelect = dropdown.selectEl;
     });
@@ -244,7 +347,7 @@ export class EnrichModal extends Modal {
           .onClick(() => {
             this.submitted = true;
             this.close();
-            this.o.onSubmit(this.picks);
+            this.handlers.onSubmit(this.picks);
           });
       });
 
@@ -255,6 +358,7 @@ export class EnrichModal extends Modal {
 
   /** Shows files the captures made since the modal opened. */
   refresh(): void {
+    if (!this.loaded) return;
     this.renderStatus();
     // Don't pull a text box out from under the user's typing; redraw when they leave it.
     const active = document.activeElement;
@@ -267,13 +371,14 @@ export class EnrichModal extends Modal {
   }
 
   private renderStatus(): void {
+    if (!this.loaded) return;
     if (this.pendingTemplate !== null) {
-      this.statusEl.setText(`Fetching the page with ${this.pendingTemplate}…`);
+      statusLine(this.statusEl, `Fetching the page with ${this.pendingTemplate}…`, true);
       this.statusEl.toggle(true);
       return;
     }
     const ready = this.o.files.ready();
-    this.statusEl.setText(ready ? "" : this.o.files.pending().length ? "Capturing the screenshots you added…" : "Still capturing screenshots…");
+    statusLine(this.statusEl, ready ? "" : this.o.files.pending().length ? "Capturing the screenshots you added…" : "Still capturing screenshots…", !ready);
     this.statusEl.toggle(!ready);
     this.applyButton?.setText(ready ? "Apply" : "Apply when ready");
   }
@@ -281,7 +386,7 @@ export class EnrichModal extends Modal {
   override onClose(): void {
     for (const url of this.urls.values()) URL.revokeObjectURL(url);
     this.contentEl.empty();
-    if (!this.submitted) this.o.onDone();
+    if (!this.submitted) this.handlers.onDone();
   }
 
   /** Any change makes the selection the user's own. */

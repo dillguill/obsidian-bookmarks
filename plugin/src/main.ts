@@ -36,7 +36,7 @@ const TOKEN_SECRET_KEY = "obsidian-bookmarker-token-secret";
 /** A capture for "Update note from source" and what the modal shows of it. */
 interface LoadedEnrich {
   session: EnrichSession;
-  options: Omit<EnrichModalOptions, "onTemplate" | "onSubmit" | "onDone">;
+  options: EnrichModalOptions;
 }
 
 export default class BookmarksPlugin extends Plugin {
@@ -73,7 +73,7 @@ export default class BookmarksPlugin extends Plugin {
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== "md" || !this.noteUrl(file)) return false;
-        if (!checking) void this.enrich(file);
+        if (!checking) this.enrich(file);
         return true;
       },
     });
@@ -339,65 +339,86 @@ export default class BookmarksPlugin extends Plugin {
 
   /**
    * Captures a note's page again and lets the user pick which properties, content
-   * and files to pull into it. The modal opens once the note is rendered; the
-   * screenshots keep arriving while it's open.
+   * and files to pull into it. The modal opens straight away and fills in once the
+   * note is rendered; the screenshots keep arriving while it's open.
    */
-  async enrich(file: TFile): Promise<void> {
+  enrich(file: TFile): void {
     const url = this.noteUrl(file);
     if (!url) {
       new Notice("This note has no URL property to fetch.");
       return;
     }
-    const progress = new Notice("Fetching page…", 0);
-    try {
+    let current: LoadedEnrich | null = null;
+    /** The capture being waited on, until it renders. */
+    let loading: EnrichSession | null = null;
+    let ended = false;
+    let requested: string | null = null;
+    const load = async (name: string | null): Promise<LoadedEnrich> => {
       const problem = await this.checkServer();
       if (problem) throw new Error(problem);
       await this.syncShared().catch((err: unknown) => console.warn("bookmarks: couldn't fetch shared settings", err));
-      let current = await this.loadEnrich(file, url, null);
-      progress.hide();
-      let ended = false;
-      const end = () => {
-        ended = true;
-        current.session.close();
-      };
-      const options = (loaded: LoadedEnrich): EnrichModalOptions => ({
-        ...loaded.options,
-        onTemplate: (name) => {
-          // The current capture stays on screen until the new one is ready.
-          this.loadEnrich(file, url, name).then(
-            (next) => {
-              if (ended) return next.session.close();
-              current.session.close();
-              current = next;
-              next.session.onChange = () => modal.refresh();
-              modal.switchTo(options(next));
-            },
-            (err: unknown) => {
-              if (ended) return;
-              new Notice(`Couldn't fetch the page with ${name}: ${err instanceof Error ? err.message : String(err)}`);
-              modal.switchFailed();
-            },
-          );
+      return this.loadEnrich(file, url, name, (session) => {
+        if (ended) session.close();
+        else loading = session;
+      });
+    };
+    const start = (name: string | null) => {
+      requested = name;
+      load(name).then(
+        (next) => {
+          loading = null;
+          if (ended) return next.session.close();
+          current?.session.close();
+          current = next;
+          next.session.onChange = () => modal.refresh();
+          modal.show(next.options);
+        },
+        (err: unknown) => {
+          loading = null;
+          if (ended) return;
+          const message = err instanceof Error ? err.message : String(err);
+          if (!current) return modal.failed(`Couldn't fetch the page: ${message}`);
+          // The current capture stays on screen.
+          new Notice(`Couldn't fetch the page with ${name}: ${message}`);
+          modal.switchFailed();
+        },
+      );
+    };
+    const modal = new EnrichModal(
+      this.app,
+      {
+        onTemplate: start,
+        onRetry: () => {
+          modal.retrying();
+          start(requested);
         },
         onSubmit: (selection) => {
           ended = true;
+          const loaded = current!;
           void this.applyEnrich(file, loaded.session, loaded.options.choices, selection).finally(() => loaded.session.close());
         },
-        onDone: end,
-      });
-      const modal = new EnrichModal(this.app, options(current));
-      current.session.onChange = () => modal.refresh();
-      modal.open();
-    } catch (err) {
-      progress.hide();
-      new Notice(`Couldn't fetch the page: ${err instanceof Error ? err.message : String(err)}`);
-    }
+        onDone: () => {
+          ended = true;
+          current?.session.close();
+          (loading as EnrichSession | null)?.close();
+        },
+      },
+      { templates: this.updateTemplates(null), template: null },
+    );
+    modal.open();
+    start(null);
+  }
+
+  /** Templates an update can start from: those not switched off for it, plus the note's own. */
+  private updateTemplates(own: string | null): string[] {
+    return this.templates.filter((t) => t.updateFromSource !== false || t.name === own).map((t) => t.name);
   }
 
   /** Captures the note's page with a template and works out what it offers; the session is closed if that fails. */
-  private async loadEnrich(file: TFile, url: string, templateName: string | null): Promise<LoadedEnrich> {
+  private async loadEnrich(file: TFile, url: string, templateName: string | null, started: (session: EnrichSession) => void): Promise<LoadedEnrich> {
     const client = this.client();
     const session = new EnrichSession(client, await client.capture(url, "enrich", false, templateName, ENRICH_FILES), url, templateName);
+    started(session);
     try {
       const job = await session.waitForNote();
       const note = JSON.parse(await client.assetText(job.id, "note")) as RenderedNote;
@@ -413,7 +434,7 @@ export default class BookmarksPlugin extends Plugin {
         session,
         options: {
           noteName: file.basename,
-          templates: this.templates.filter((t) => t.updateFromSource !== false || t.name === template.name).map((t) => t.name),
+          templates: this.updateTemplates(template.name),
           template: template.name,
           choices,
           defaults: defaultSelection(choices),
