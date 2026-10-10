@@ -10,7 +10,7 @@ import {
   type MergeNote,
   type PropertyChoice,
 } from "./merge";
-import { clipped, preview, rowLine, sectionHead, smallSelect } from "./modal-ui";
+import { clipped, iconButton, preview, rowLine, sectionHead, smallSelect } from "./modal-ui";
 import { PropertySuggest } from "./property-suggest";
 
 const DISPOSITIONS: { value: Disposition; text: string }[] = [
@@ -99,7 +99,7 @@ export class MergeModal extends Modal {
     this.primary = buttons.createEl("button", { cls: "mod-cta" });
     this.primary.onclick = () => {
       this.close();
-      this.handlers.onApply(this.selection());
+      this.handlers.onApply(this.currentSelection());
     };
     this.renderNotes();
     this.update();
@@ -109,7 +109,8 @@ export class MergeModal extends Modal {
     this.contentEl.empty();
   }
 
-  private selection(): MergeSelection {
+  // Not `selection`: Obsidian's Modal keeps the text selection under that name.
+  private currentSelection(): MergeSelection {
     return { state: this.state, choices: this.choices, picks: this.picks, removeFiles: this.removeFiles };
   }
 
@@ -166,7 +167,7 @@ export class MergeModal extends Modal {
   /** Recounts the unused files and redraws the file option and the button. */
   private refresh(): void {
     try {
-      this.unused = this.handlers.unusedCount(this.selection());
+      this.unused = this.handlers.unusedCount(this.currentSelection());
       this.unusedError = null;
     } catch (err) {
       console.error("bookmarks: couldn't count unused files", err);
@@ -204,9 +205,15 @@ export class MergeModal extends Modal {
       item.title = preview(option.value, 2000);
     });
     select.createEl("option", { text: "Keep all as a list", value: "list" });
-    select.createEl("option", { text: "Keep each value…", value: "each" });
+    select.createEl("option", { text: "Rename / keep each…", value: "each" });
     const pick = this.picks[choice.name] ?? { kind: "value", option: 0 };
     select.value = pick.kind === "value" ? `value:${pick.option}` : pick.kind;
+    // Renaming is the "keep each" mode: every value gets a name box, the kept note's value first.
+    iconButton(controls, "pencil", "Rename", () => {
+      if (select.value === "each") return;
+      select.value = "each";
+      select.onchange?.(new Event("change"));
+    });
     select.onchange = () => {
       if (select.value === "list") this.picks[choice.name] = { kind: "list" };
       // The kept note's value keeps the name; the others get a name to edit (empty drops one).
