@@ -150,20 +150,25 @@ it reuses `modal-ui.ts`.
 ## R10. Merge order and failure handling (FR-021)
 
 **Decision**: `applyMerge` runs these steps in order and stops at the first
-failure, reporting what was done:
+failure, reporting the step that failed:
 
 1. Re-read the group from the caches; abort if a note is gone.
-2. `processFrontMatter(kept)`: combined values, case variants removed, aliases.
-3. `vault.process(kept)`: append bodies (the Merge notes' bodies are read with
-   `vault.cachedRead` just before).
-4. Redirect links in each source note, including the kept note and the Merge
-   bodies that are now inside it.
+2. Redirect links in every source note, including the kept note and the Merge
+   notes, whose bodies then carry the redirected links.
+3. `processFrontMatter(kept)`: combined values, case variants removed, aliases.
+4. `vault.process(kept)`: append the bodies, read fresh with `vault.read`.
 5. Save the Separate marks.
 6. Trash the removed notes.
 7. Trash the unused files.
 
-Redirecting links before trashing means that if trashing fails, links are
-already correct and the removed notes simply still exist.
-
-**Rationale**: Every step that could lose data comes after the steps that
-preserve it.
+**Rationale**:
+- Links are redirected *before* the kept note is rewritten, because the link
+  positions come from the metadata cache. Once a note changes, its cache is out
+  of date until Obsidian re-parses it.
+- Redirected links only point at the kept note, which already exists, so a later
+  failure leaves the vault consistent.
+- Each span is checked against the current text before splicing, so a note
+  edited since the cache was read is never corrupted.
+- Every step that could lose data (6 and 7) comes after the steps that preserve
+  it. This keeps the spirit of FR-021: nothing is trashed until the kept note is
+  written and links are redirected.

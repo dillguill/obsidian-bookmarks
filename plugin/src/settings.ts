@@ -1,6 +1,8 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import type { ClipperTemplate } from "./api";
 import type BookmarksPlugin from "./main";
+import { PropertySuggest } from "./property-suggest";
+import { urlPropertyName } from "./template";
 
 export interface BookmarksSettings {
   /** Base URL of the bookmarks-server container, e.g. https://bookmarks.tailnet.ts.net */
@@ -26,6 +28,10 @@ export interface BookmarksSettings {
   hideCaptureId?: boolean;
   /** capture_id -> note path for recent captures this device wrote, so idempotency holds when capture_id is hidden. */
   writtenCaptures?: Record<string, string>;
+  /** The property holding a note's web address; templates' URL properties are read too. */
+  urlProperty: string;
+  /** Normalized URL -> paths of notes that share it on purpose, so they aren't offered as duplicates. */
+  separateNotes?: Record<string, string[]>;
 }
 
 export const DEFAULT_SETTINGS: BookmarksSettings = {
@@ -33,6 +39,7 @@ export const DEFAULT_SETTINGS: BookmarksSettings = {
   tokenSecretName: "",
   assetsFolder: "Bookmarks/assets",
   pollIntervalSeconds: 60,
+  urlProperty: "source",
 };
 
 export class BookmarksSettingTab extends PluginSettingTab {
@@ -106,6 +113,36 @@ export class BookmarksSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }),
       );
+
+    const urlSetting = new Setting(containerEl).setName("URL property");
+    const describeUrl = () => {
+      urlSetting.descEl.empty();
+      urlSetting.descEl.appendText("The property that holds a note's web address. Used to find duplicates and to update notes from their source.");
+      // Notes the plugin writes keep their template's URL property, so those are read as well.
+      for (const template of this.plugin.settings.templatesCache ?? []) {
+        const name = urlPropertyName(template);
+        if (name === this.plugin.settings.urlProperty) continue;
+        const line = urlSetting.descEl.createDiv();
+        line.appendText(`Template ${template.name} saves the URL in `);
+        line.createEl("code", { text: name });
+        line.appendText("; those notes are found too.");
+      }
+    };
+    describeUrl();
+    urlSetting.addText((text) => {
+      const save = async (value: string) => {
+        const name = value.trim() || DEFAULT_SETTINGS.urlProperty;
+        text.setValue(name);
+        if (name === this.plugin.settings.urlProperty) return;
+        this.plugin.settings.urlProperty = name;
+        await this.plugin.saveSettings();
+        this.plugin.rebuildIndex();
+        describeUrl();
+      };
+      text.setPlaceholder(DEFAULT_SETTINGS.urlProperty).setValue(this.plugin.settings.urlProperty);
+      new PropertySuggest(this.app, text.inputEl, () => this.plugin.vaultProperties(), (name) => void save(name));
+      text.inputEl.addEventListener("blur", () => void save(text.getValue()));
+    });
 
     new Setting(containerEl)
       .setName("Poll interval (seconds)")

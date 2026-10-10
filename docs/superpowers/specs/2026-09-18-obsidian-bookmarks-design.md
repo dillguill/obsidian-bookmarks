@@ -192,6 +192,10 @@ On capture, before writing:
 - **Match (later)** -> the notice gains **Replace** / **Update** (refresh
   screenshot + markdown + captured timestamp, keep tags/status/manual edits) /
   **Merge** options, plus a setting for the default action on drained jobs.
+  *Shipped:* Replace, Update (as "Update note from source") and Merge (as
+  "Merge duplicates", see `specs/001-merge-duplicate-bookmarks/spec.md`). The
+  property the URL is read from is a plugin setting (default `source`), read
+  alongside each template's URL property.
 
 The container may do a cheap `GET /precheck?url=` dup hint for early phone-side
 warning, but the plugin is the authority.
@@ -347,7 +351,7 @@ Each phase is independently useful with a concrete exit.
 6. **Capture output:** full-page screenshot + readable markdown.
 7. **Dedup:** normalized-URL match (computed, not stored). MVP: non-blocking
    "Already saved" notice, drained duplicates skipped; Replace / Update / Merge
-   later (2026-10-02).
+   later (2026-10-02). Merge shipped as "Merge duplicates" (2026-10-10).
 8. **Capture stack:** Playwright + Chromium + Defuddle + Turndown; SQLite queue.
 9. **Browse UI:** optional custom plugin view, **not** an Obsidian `.base`;
    deferred.

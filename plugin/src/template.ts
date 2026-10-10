@@ -141,6 +141,11 @@ export function urlPropertyName(template: ClipperTemplate): string {
   return template.properties.find((p) => p.value === URL_VARIABLE)?.name ?? "source";
 }
 
+/** Properties a note's URL is read from, in order: the URL property setting, then each template's URL property. */
+export function urlPropertyNames(setting: string, templates: readonly ClipperTemplate[]): string[] {
+  return [...new Set([setting.trim() || "source", ...templates.map(urlPropertyName)])];
+}
+
 export function captureIdPropertyName(template: ClipperTemplate): string {
   return template.properties.find((p) => p.value === CAPTURE_ID_VARIABLE)?.name ?? "capture_id";
 }

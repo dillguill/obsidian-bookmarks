@@ -47,7 +47,9 @@ your vault as deduplicated bookmark notes. See the
 
    Enable **Bookmarker** under Settings → Community plugins, then in its settings set
    the server URL (`http://127.0.0.1:8787`), add the API key (saved in Obsidian's
-   secrets on that device), and press **Test**.
+   secrets on that device), and press **Test**. **URL property** (default `source`)
+   is the property that holds a note's web address; type to pick one of your
+   vault's properties. Templates' own URL properties are read too.
 
 3. **Capture from Obsidian**: copy a URL, run **Bookmarks: Capture URL** from the
    command palette (or the ribbon icon). The note opens when the capture finishes,
@@ -61,6 +63,17 @@ your vault as deduplicated bookmark notes. See the
    and which images to save, placed before or after the note's body or in place of it.
    On a note with a TikTok player, **Save TikTok offline** swaps the player for
    the video (or a carousel's photos) saved in the vault.
+
+   **Bookmarks: Find duplicate bookmarks** lists notes that point at the same page
+   (http or https, `www.`, tracking params and trailing slashes don't matter), and
+   **Merge duplicates of this note** opens the open note's group. Mark each note
+   **Keep** (one note survives, under its own name), **Merge** (its properties and
+   body go into the kept note), **Delete** or **Separate** (notes that share a URL on
+   purpose, such as sections of one page; they're remembered and stop showing up).
+   Properties that agree or are lists combine by themselves; for the rest you pick
+   a value. Links to the removed notes are pointed at the kept note, their names
+   become aliases, and screenshots only they used can be trashed with them. The
+   "Already saved" notice offers **Merge duplicates** too when a page has copies.
 
 4. **Capture from elsewhere** (the phone path): with Obsidian closed, enqueue a URL
 

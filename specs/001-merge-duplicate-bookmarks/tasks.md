@@ -37,9 +37,9 @@ description: "Task list for Merge duplicate bookmarks"
 
 **Purpose**: Move the duplicated helpers so the new code reuses them, not copies them. Existing tests must stay green.
 
-- [ ] T001 [P] Create `plugin/src/values.ts` with `isEmpty`, `asList` and `same`, moved from `plugin/src/enrich.ts`. `isEmpty` keeps enrich.ts's semantics (null, undefined, `""`, or an array of only empty values). Export all three. In `plugin/src/enrich.ts`, delete the local copies and import them from `./values`.
-- [ ] T002 [P] Create `plugin/src/modal-ui.ts` by moving these module-private helpers out of `plugin/src/enrich-modal.ts`: `preview`, `sectionHead`, `iconButton`, `smallSelect`, `rowLine`, `pulse`, `statusLine`, `placeholderRow`, `clipped`. Export each one unchanged. In `plugin/src/enrich-modal.ts`, import them from `./modal-ui`, delete its local `isEmpty`, and import `isEmpty` from `./values` (depends on T001 only for that import).
-- [ ] T003 Run `npm test -w plugin && npm run typecheck -w plugin` and confirm there are no failures and no behaviour change in `plugin/test/enrich.test.ts`.
+- [X] T001 [P] Create `plugin/src/values.ts` with `isEmpty`, `asList` and `same`, moved from `plugin/src/enrich.ts`. `isEmpty` keeps enrich.ts's semantics (null, undefined, `""`, or an array of only empty values). Export all three. In `plugin/src/enrich.ts`, delete the local copies and import them from `./values`.
+- [X] T002 [P] Create `plugin/src/modal-ui.ts` by moving these module-private helpers out of `plugin/src/enrich-modal.ts`: `preview`, `sectionHead`, `iconButton`, `smallSelect`, `rowLine`, `pulse`, `statusLine`, `placeholderRow`, `clipped`. Export each one unchanged. In `plugin/src/enrich-modal.ts`, import them from `./modal-ui`, delete its local `isEmpty`, and import `isEmpty` from `./values` (depends on T001 only for that import).
+- [X] T003 Run `npm test -w plugin && npm run typecheck -w plugin` and confirm there are no failures and no behaviour change in `plugin/test/enrich.test.ts`.
 
 **Checkpoint**: The helpers are shared. The update modal looks and behaves the same.
 
@@ -51,14 +51,14 @@ description: "Task list for Merge duplicate bookmarks"
 
 ### Tests for Phase 2
 
-- [ ] T004 [P] Create `plugin/test/dedup.test.ts`. Cover:
+- [X] T004 [P] Create `plugin/test/dedup.test.ts`. Cover:
   - `DedupIndex.groups()` puts `https://www.example.com/page?utm_source=x`, `http://example.com/page/` and `https://example.com/page` in one group;
   - a URL with one note isn't a group;
   - `keyOf(path)` returns the normalized key, and null for unknown paths;
   - `paths(key)` lists every path;
   - `rename` moves a path within its group;
   - `remove` drops it, and the group disappears at one note.
-- [ ] T005 [P] Add `describe("urlPropertyNames")` to `plugin/test/template.test.ts`:
+- [X] T005 [P] Add `describe("urlPropertyNames")` to `plugin/test/template.test.ts`:
   - the setting comes first;
   - each template's `urlPropertyName` is appended;
   - duplicates are removed (`source` + a default template → `["source"]`);
@@ -66,28 +66,28 @@ description: "Task list for Merge duplicate bookmarks"
 
 ### Implementation for Phase 2
 
-- [ ] T006 [P] In `plugin/src/dedup.ts`, add three methods, each with a doc comment:
+- [X] T006 [P] In `plugin/src/dedup.ts`, add three methods, each with a doc comment:
   - `keyOf(path: string): string | null` (from `entries`);
   - `paths(key: string): string[]` (from `byUrl`);
   - `groups(): { key: string; paths: string[] }[]` (only keys with more than one path).
-- [ ] T007 [P] In `plugin/src/template.ts`, add `export function urlPropertyNames(setting: string, templates: ClipperTemplate[]): string[]`: the trimmed setting (or `"source"` if empty) followed by `templates.map(urlPropertyName)`, deduplicated, order kept.
-- [ ] T008 In `plugin/src/settings.ts`, add the settings fields from `data-model.md`:
+- [X] T007 [P] In `plugin/src/template.ts`, add `export function urlPropertyNames(setting: string, templates: ClipperTemplate[]): string[]`: the trimmed setting (or `"source"` if empty) followed by `templates.map(urlPropertyName)`, deduplicated, order kept.
+- [X] T008 In `plugin/src/settings.ts`, add the settings fields from `data-model.md`:
   - to `BookmarksSettings`: `urlProperty: string` (doc: the property holding a note's web address) and `separateNotes?: Record<string, string[]>` (doc: normalized URL → paths marked Separate);
   - to `DEFAULT_SETTINGS`: `urlProperty: "source"`.
-- [ ] T009 [P] Create `plugin/src/property-suggest.ts`: `export class PropertySuggest extends AbstractInputSuggest<string>`.
+- [X] T009 [P] Create `plugin/src/property-suggest.ts`: `export class PropertySuggest extends AbstractInputSuggest<string>`.
   - Constructor: `(app, inputEl, names: () => string[], onPick: (name: string) => void)`.
   - `getSuggestions(query)` filters `names()` case-insensitively by substring, with prefix matches first.
   - `renderSuggestion` sets the text.
   - `selectSuggestion` calls `setValue(name)`, `onPick(name)` and `close()`.
-- [ ] T010 In `plugin/src/main.ts`, replace the three URL lookups with one:
+- [X] T010 In `plugin/src/main.ts`, replace the three URL lookups with one:
   - Add `private urlNames(): string[]` returning `urlPropertyNames(this.settings.urlProperty, this.templates)`.
   - Change `noteUrl(file)` to read the first of `urlNames()` whose value is a string that `normalizeUrl` accepts. Drop the hard-coded `"url", "source", "URL"`.
   - `indexFile` uses `noteUrl`'s property list for the URL; the capture-id lookup is unchanged.
   - `recapture()` and the `recapture` command's `checkCallback` use `noteUrl(file)`.
   - `propertyNames()` (used to decide whether to rebuild the index) includes `this.settings.urlProperty`.
   - Make `vaultProperties()` public, as plugin code reads it from `settings.ts`.
-- [ ] T011 In `plugin/src/main.ts`, add `rebuildIndex()`: it clears the index by removing every indexed path, or by reassigning a new `DedupIndex` (make `index` non-readonly if needed), then calls `buildIndex()`. Call it from `onExternalSettingsChange` in place of `buildIndex()`.
-- [ ] T012 In `plugin/src/settings.ts`, add the **URL property** setting after "Assets folder", per [contracts/commands-and-settings.md](contracts/commands-and-settings.md):
+- [X] T011 In `plugin/src/main.ts`, add `rebuildIndex()`: it clears the index by removing every indexed path, or by reassigning a new `DedupIndex` (make `index` non-readonly if needed), then calls `buildIndex()`. Call it from `onExternalSettingsChange` in place of `buildIndex()`.
+- [X] T012 In `plugin/src/settings.ts`, add the **URL property** setting after "Assets folder", per [contracts/commands-and-settings.md](contracts/commands-and-settings.md):
   - a text input with a `PropertySuggest` over `plugin.vaultProperties()`;
   - on pick or blur: trim, fall back to `"source"`, save, call `plugin.rebuildIndex()`, and redraw the description;
   - under the description, one muted line per template whose `urlPropertyName` differs from the setting: "Template *Name* saves the URL in `prop`; those notes are found too."
@@ -104,11 +104,11 @@ description: "Task list for Merge duplicate bookmarks"
 
 ### Tests for User Story 1
 
-- [ ] T013 [P] [US1] Create `plugin/test/merge.test.ts` for ranking and dispositions:
+- [X] T013 [P] [US1] Create `plugin/test/merge.test.ts` for ranking and dispositions:
   - `rankNotes`: more backlinks first; `hasCaptureId` breaks ties; then earlier `date`, with null last; then earlier `ctime`;
   - `initialDispositions`: the top-ranked note is keep, the rest merge, and notes in `separate` are separate;
   - `setDisposition`: making X keep demotes the old keep to merge; demoting the keep promotes the next-ranked non-separate note; exactly one keep always holds while two or more notes aren't separate.
-- [ ] T014 [P] [US1] Add `describe("mergeChoices")` to `plugin/test/merge.test.ts`:
+- [X] T014 [P] [US1] Add `describe("mergeChoices")` to `plugin/test/merge.test.ts`:
   - equal values fold to settled;
   - a value in one note only is settled;
   - `tags: "foo"` + `tags: ["bar","baz"]` → list `["foo","bar","baz"]` (kept note first);
@@ -119,13 +119,13 @@ description: "Task list for Merge duplicate bookmarks"
   - when the kept note has neither spelling, the `spelling()` result is used;
   - URL and capture-id names are skipped case-insensitively;
   - empty everywhere: omitted, unless the kept note has the key (FR-011b).
-- [ ] T015 [P] [US1] Add `describe("mergePlan / applyMergedProperties / appendBodies")` to `plugin/test/merge.test.ts`:
+- [X] T015 [P] [US1] Add `describe("mergePlan / applyMergedProperties / appendBodies")` to `plugin/test/merge.test.ts`:
   - the picks choose the conflict values;
   - `remove` lists the variant spellings;
   - aliases get the removed basenames, deduplicated case-insensitively against existing `aliases` (a string or a list);
   - empty bodies are dropped;
   - `appendBodies` adds `# A\n\nAlpha` after the body in listed order, with one blank line between parts and the frontmatter unchanged.
-- [ ] T016 [P] [US1] Create `plugin/test/links.test.ts`:
+- [X] T016 [P] [US1] Create `plugin/test/links.test.ts`:
   - `spliceSpans` applies several spans on one line from the end, and throws on overlapping spans;
   - `redirectedLink`, with a fake `generate` that returns `[[B${sub}|${alias}]]`:
     - `[[A]]` → alias `A`;
@@ -136,16 +136,16 @@ description: "Task list for Merge duplicate bookmarks"
 
 ### Implementation for User Story 1
 
-- [ ] T017 [P] [US1] Create `plugin/src/merge.ts` with the types `Disposition`, `MergeNote`, `PropertyChoice` and `MergePlan` from [data-model.md](data-model.md), and implement `rankNotes`, `initialDispositions`, `setDisposition` and `countsAsDuplicate` per [contracts/merge-module.md](contracts/merge-module.md). Make T013 pass.
-- [ ] T018 [US1] In `plugin/src/merge.ts`, implement `mergeChoices(notes, skip, spelling)` using `isEmpty`, `asList` and `same` from `./values`. Group keys by `toLowerCase()`, and follow the rules in data-model.md "PropertyChoice". Make T014 pass.
-- [ ] T019 [US1] In `plugin/src/merge.ts`, implement three functions:
+- [X] T017 [P] [US1] Create `plugin/src/merge.ts` with the types `Disposition`, `MergeNote`, `PropertyChoice` and `MergePlan` from [data-model.md](data-model.md), and implement `rankNotes`, `initialDispositions`, `setDisposition` and `countsAsDuplicate` per [contracts/merge-module.md](contracts/merge-module.md). Make T013 pass.
+- [X] T018 [US1] In `plugin/src/merge.ts`, implement `mergeChoices(notes, skip, spelling)` using `isEmpty`, `asList` and `same` from `./values`. Group keys by `toLowerCase()`, and follow the rules in data-model.md "PropertyChoice". Make T014 pass.
+- [X] T019 [US1] In `plugin/src/merge.ts`, implement three functions:
   - `mergePlan(input)`;
   - `applyMergedProperties(frontmatter, plan)`: delete `plan.properties.remove`, set `plan.properties.set`, and set `aliases` (as a list) when the plan adds any;
   - `appendBodies(text, plan, frontmatterEnd)`: build `{ item: { kind: "text", text: "# " + heading + "\n\n" + body }, heading: null, position: "append" }` rows and pass them to `placeContent` from `./enrich`.
 
   Make T015 pass.
-- [ ] T020 [P] [US1] Create `plugin/src/links.ts` with `spliceSpans`, `redirectedLink` and `redirectFrontmatter` per the contract, using no Obsidian imports. `redirectedLink` takes `{ original, link, displayText, embed }`; subpath = the text from the first `#` in `link`; alias = `displayText` when `original` contains `|` or is a Markdown link `[text](…)`, else `removedBasename`; it returns `(embed ? "!" : "") + generate(subpath, alias)`. Make T016 pass.
-- [ ] T021 [US1] Create `plugin/src/merge-modal.ts` with `export class MergeModal extends Modal`.
+- [X] T020 [P] [US1] Create `plugin/src/links.ts` with `spliceSpans`, `redirectedLink` and `redirectFrontmatter` per the contract, using no Obsidian imports. `redirectedLink` takes `{ original, link, displayText, embed }`; subpath = the text from the first `#` in `link`; alias = `displayText` when `original` contains `|` or is a Markdown link `[text](…)`, else `removedBasename`; it returns `(embed ? "!" : "") + generate(subpath, alias)`. Make T016 pass.
+- [X] T021 [US1] Create `plugin/src/merge-modal.ts` with `export class MergeModal extends Modal`.
   - **Constructor**: `(app, group: { url: string; notes: MergeNote[]; separate: string[] }, handlers: { onMerge(plan-inputs), onSkip?(): void, unusedCount(state): number })`. Use `rowLine`, `smallSelect`, `clipped` and `sectionHead` from `./modal-ui`.
   - **Rows and controls**:
     - the title is the URL (`wordBreak: "break-all"`);
@@ -154,7 +154,7 @@ description: "Task list for Merge duplicate bookmarks"
     - a muted line counts the automatically combined properties.
   - **Button**: label per the contract (`Merge N notes into “Name”`), disabled when nothing would change.
   - **Recompute**: on every select change, recompute `setDisposition` and `mergeChoices` and redraw the property and button sections only.
-- [ ] T022 [US1] In `plugin/src/main.ts`, add `private mergeGroup(key: string): MergeNote[]`. It builds a `MergeNote` per `index.paths(key)` file:
+- [X] T022 [US1] In `plugin/src/main.ts`, add `private mergeGroup(key: string): MergeNote[]`. It builds a `MergeNote` per `index.paths(key)` file:
   - `frontmatter` from the cache;
   - `backlinks` from one pass over `metadataCache.resolvedLinks` (count the sources per target in the group);
   - `hasCaptureId` from `this.templates.map(captureIdPropertyName)`;
@@ -162,7 +162,7 @@ description: "Task list for Merge duplicate bookmarks"
   - `ctime` from `file.stat.ctime`.
 
   Also add `private propertySpelling(): (lower: string) => string | undefined`, which counts key spellings across `getMarkdownFiles()` frontmatter and returns the most common spelling.
-- [ ] T023 [US1] In `plugin/src/main.ts`, add `private async applyMerge(key, plan): Promise<void>`, implementing research R10 steps 1–4 and 6 (Separate marks and file removal come in US2 and US4):
+- [X] T023 [US1] In `plugin/src/main.ts`, add `private async applyMerge(key, plan): Promise<void>`, implementing research R10 steps 1–4 and 6 (Separate marks and file removal come in US2 and US4):
   1. Re-resolve the group; abort with a notice if any path in the plan no longer exists.
   2. `processFrontMatter(kept, fm => applyMergedProperties(fm, plan))`.
   3. Read each Merge body (`vault.cachedRead`, sliced at `getFrontMatterInfo().contentStart`), then `vault.process(kept, text => appendBodies(text, plan, getFrontMatterInfo(text).contentStart))`.
@@ -170,7 +170,7 @@ description: "Task list for Merge duplicate bookmarks"
   6. `fileManager.trashFile` each removed note.
 
   Stop at the first failure and show the partial-failure notice from the contract. On success, show the result notice and open the kept note.
-- [ ] T024 [US1] In `plugin/src/main.ts`, register the command `merge-duplicates` / "Merge duplicates of this note". The `checkCallback` is true when the active file is Markdown and `index.paths(index.keyOf(file.path))` has two or more entries. On run, open `MergeModal` with `mergeGroup(key)`, `settings.separateNotes?.[key] ?? []`, and `onMerge` → `applyMerge`.
+- [X] T024 [US1] In `plugin/src/main.ts`, register the command `merge-duplicates` / "Merge duplicates of this note". The `checkCallback` is true when the active file is Markdown and `index.paths(index.keyOf(file.path))` has two or more entries. On run, open `MergeModal` with `mergeGroup(key)`, `settings.separateNotes?.[key] ?? []`, and `onMerge` → `applyMerge`.
 
 **Checkpoint**: Quickstart scenarios 2, 3, 4 and 6 pass with Keep/Merge only. The MVP is usable.
 
@@ -184,24 +184,24 @@ description: "Task list for Merge duplicate bookmarks"
 
 ### Tests for User Story 2
 
-- [ ] T025 [P] [US2] Add to `plugin/test/merge.test.ts`:
+- [X] T025 [P] [US2] Add to `plugin/test/merge.test.ts`:
   - `countsAsDuplicate`: 4 paths with 2 separate → true; 3 separate → false;
   - `setDisposition`: marking every note separate leaves no keep; un-marking one when no keep exists makes it keep;
   - `mergePlan` returns `separate` paths.
 
 ### Implementation for User Story 2
 
-- [ ] T026 [US2] In `plugin/src/merge-modal.ts`:
+- [X] T026 [US2] In `plugin/src/merge-modal.ts`:
   - add the Separate option to each note's select;
   - when fewer than two notes aren't separate, the primary button reads `Save`;
   - the plan passed to `onMerge` includes the separate paths.
-- [ ] T027 [US2] In `plugin/src/main.ts`, add `private async saveSeparate(key: string, paths: string[]): Promise<void>`:
+- [X] T027 [US2] In `plugin/src/main.ts`, add `private async saveSeparate(key: string, paths: string[]): Promise<void>`:
   - set `settings.separateNotes[key] = paths`, or delete the key when the list is empty;
   - prune every key's paths that no longer exist (`vault.getAbstractFileByPath`), removing keys left empty (FR-025);
   - `persist()`.
 
   Call it in `applyMerge` as step 5 (after redirecting links, before trashing). When the plan has no Merge or Delete notes (a Save), only call `saveSeparate` and show "Saved."
-- [ ] T028 [US2] In `plugin/src/main.ts`, update the existing `vault.on("rename")` handler: after `index.rename`, replace `oldPath` with `file.path` in every `settings.separateNotes` list. If anything changed, `persist()` (FR-024).
+- [X] T028 [US2] In `plugin/src/main.ts`, update the existing `vault.on("rename")` handler: after `index.rename`, replace `oldPath` with `file.path` in every `settings.separateNotes` list. If anything changed, `persist()` (FR-024).
 
 **Checkpoint**: Quickstart scenario 7 passes.
 
@@ -215,13 +215,13 @@ description: "Task list for Merge duplicate bookmarks"
 
 ### Implementation for User Story 3
 
-- [ ] T029 [US3] In `plugin/src/merge-modal.ts`, add `export class DuplicateListModal extends SuggestModal<DuplicateGroupEntry>`, where `DuplicateGroupEntry = { key, url, names: string[], active: number }`.
+- [X] T029 [US3] In `plugin/src/merge-modal.ts`, add `export class DuplicateListModal extends SuggestModal<DuplicateGroupEntry>`, where `DuplicateGroupEntry = { key, url, names: string[], active: number }`.
   - Sort by `active` (descending), then by `url`.
   - `getSuggestions` matches every query word against the URL and names (reuse `filterSources`-style matching inline).
   - `renderSuggestion`: the URL in bold with `wordBreak: break-all`, and the names joined by " · " in muted text.
   - `onChooseSuggestion(entry)` calls the handler.
-- [ ] T030 [US3] In `plugin/src/merge-modal.ts`, `MergeModal` shows a **Skip** button when `handlers.onSkip` is given. Skip closes the modal and calls `onSkip`.
-- [ ] T031 [US3] In `plugin/src/main.ts`, register the command `find-duplicates` / "Find duplicate bookmarks".
+- [X] T030 [US3] In `plugin/src/merge-modal.ts`, `MergeModal` shows a **Skip** button when `handlers.onSkip` is given. Skip closes the modal and calls `onSkip`.
+- [X] T031 [US3] In `plugin/src/main.ts`, register the command `find-duplicates` / "Find duplicate bookmarks".
   - Build the entries from `index.groups()`, keeping those where `countsAsDuplicate(paths, separateNotes[key] ?? [])`.
   - If there are none: `new Notice("No duplicate bookmarks.")`.
   - Otherwise open `DuplicateListModal`. Choosing an entry opens `MergeModal` in queue mode: after `applyMerge`, Save or Skip, it opens the next entry in the sorted list that still counts as a duplicate.
@@ -238,23 +238,23 @@ description: "Task list for Merge duplicate bookmarks"
 
 ### Tests for User Story 4
 
-- [ ] T032 [P] [US4] Add `describe("unusedFiles")` to `plugin/test/merge.test.ts`:
+- [X] T032 [P] [US4] Add `describe("unusedFiles")` to `plugin/test/merge.test.ts`:
   - a file linked by a note outside the removed set is kept;
   - a file in `carried` is kept;
   - Markdown targets are never included;
   - a file linked only by a Delete note is included;
   - a file linked only by two removed notes is included once.
-- [ ] T033 [P] [US4] Add to `plugin/test/merge.test.ts`: `mergePlan` leaves Delete notes' bodies and properties out of `bodies` and `mergeChoices`, but includes their basenames in `aliases`.
+- [X] T033 [P] [US4] Add to `plugin/test/merge.test.ts`: `mergePlan` leaves Delete notes' bodies and properties out of `bodies` and `mergeChoices`, but includes their basenames in `aliases`.
 
 ### Implementation for User Story 4
 
-- [ ] T034 [US4] In `plugin/src/merge.ts`, implement `unusedFiles(input)` per the contract. Make T032 and T033 pass.
-- [ ] T035 [US4] In `plugin/src/merge-modal.ts`:
+- [X] T034 [US4] In `plugin/src/merge.ts`, implement `unusedFiles(input)` per the contract. Make T032 and T033 pass.
+- [X] T035 [US4] In `plugin/src/merge-modal.ts`:
   - add the Delete option;
   - add the toggle "Remove N files only removed notes use" (on by default, shown only when `handlers.unusedCount(state) > 0`);
   - the button label appends ` · delete N` and ` · remove N files`;
   - the toggle state is passed in the plan inputs.
-- [ ] T036 [US4] In `plugin/src/main.ts`, add `private unusedFor(key, state, picks): string[]`, which calls `unusedFiles` with:
+- [X] T036 [US4] In `plugin/src/main.ts`, add `private unusedFor(key, state, picks): string[]`, which calls `unusedFiles` with:
   - `linksFrom` = `Object.keys(resolvedLinks[path] ?? {})`;
   - `linkedBy` = sources from one inverted pass;
   - `isNote` = an `.md` extension check;
@@ -274,8 +274,8 @@ description: "Task list for Merge duplicate bookmarks"
 
 ### Implementation for User Story 5
 
-- [ ] T037 [US5] In `plugin/src/main.ts`, extract the merge-modal opening from T024 into `private openMerge(key: string, queue?: …)`, and use it from both commands.
-- [ ] T038 [US5] In `plugin/src/main.ts` `alreadySavedNotice`, after "Save as new", add `action("Merge duplicates", () => this.openMerge(key))` when `countsAsDuplicate(index.paths(key), separateNotes[key] ?? [])`, where `key = index.keyOf(path)`.
+- [X] T037 [US5] In `plugin/src/main.ts`, extract the merge-modal opening from T024 into `private openMerge(key: string, queue?: …)`, and use it from both commands.
+- [X] T038 [US5] In `plugin/src/main.ts` `alreadySavedNotice`, after "Save as new", add `action("Merge duplicates", () => this.openMerge(key))` when `countsAsDuplicate(index.paths(key), separateNotes[key] ?? [])`, where `key = index.keyOf(path)`.
 
 **Checkpoint**: Quickstart scenario 9 passes.
 
@@ -283,11 +283,11 @@ description: "Task list for Merge duplicate bookmarks"
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T039 [P] Update `README.md` step 3 ("Capture from Obsidian"):
+- [X] T039 [P] Update `README.md` step 3 ("Capture from Obsidian"):
   - describe **Bookmarks: Find duplicate bookmarks** and **Merge duplicates of this note** (Keep / Merge / Delete / Separate, links redirected, unused files trashed), and the **Merge duplicates** notice action;
   - add **URL property** to the plugin settings sentence.
-- [ ] T040 [P] Update `docs/superpowers/specs/2026-09-18-obsidian-bookmarks-design.md`. In §4 "Match (later)" and decision 7, note that Merge shipped (link to `specs/001-merge-duplicate-bookmarks/spec.md`) and that the URL property is a plugin setting.
-- [ ] T041 Run `npm test -w plugin && npm run typecheck -w plugin && npm run build -w plugin` and confirm all pass.
+- [X] T040 [P] Update `docs/superpowers/specs/2026-09-18-obsidian-bookmarks-design.md`. In §4 "Match (later)" and decision 7, note that Merge shipped (link to `specs/001-merge-duplicate-bookmarks/spec.md`) and that the URL property is a plugin setting.
+- [X] T041 Run `npm test -w plugin && npm run typecheck -w plugin && npm run build -w plugin` and confirm all pass.
 - [ ] T042 Walk through every scenario in `specs/001-merge-duplicate-bookmarks/quickstart.md` in a scratch vault, including scenario 10 (phone width). Record any failures as new tasks.
 - [ ] T043 Run the "Real vault check" from `quickstart.md`. Once the user confirms the plugin covers it, suggest removing the vault's `_templater/duplicate-bookmarks.md` (the user decides).
 

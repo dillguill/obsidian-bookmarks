@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TEMPLATE as SERVER_DEFAULT_TEMPLATE } from "../../harness/src/template-default";
-import { DEFAULT_TEMPLATE, render, renderFrontmatter, type ClipperTemplate, chooseTemplate } from "../src/template";
+import { DEFAULT_TEMPLATE, render, renderFrontmatter, type ClipperTemplate, chooseTemplate, urlPropertyNames } from "../src/template";
 
 describe("render", () => {
   it("substitutes variables and applies filters", () => {
@@ -81,5 +81,16 @@ describe("chooseTemplate", () => {
 
   it("matches the server's built-in template", () => {
     expect(DEFAULT_TEMPLATE).toEqual(SERVER_DEFAULT_TEMPLATE);
+  });
+});
+
+describe("urlPropertyNames", () => {
+  const linkTemplate: ClipperTemplate = { ...DEFAULT_TEMPLATE, name: "Links", properties: [{ name: "link", value: "{{url}}", type: "text" }] };
+  it("reads the setting first, then each template's URL property, once each", () => {
+    expect(urlPropertyNames("url", [DEFAULT_TEMPLATE, linkTemplate])).toEqual(["url", "source", "link"]);
+    expect(urlPropertyNames("source", [DEFAULT_TEMPLATE])).toEqual(["source"]);
+  });
+  it("falls back to source when the setting is empty", () => {
+    expect(urlPropertyNames("  ", [linkTemplate])).toEqual(["source", "link"]);
   });
 });

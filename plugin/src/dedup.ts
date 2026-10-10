@@ -56,6 +56,21 @@ export class DedupIndex {
     return null;
   }
 
+  /** The normalized URL `path` is indexed under, or null. */
+  keyOf(path: string): string | null {
+    return this.entries.get(path)?.url ?? null;
+  }
+
+  /** Every note saved for a normalized URL. */
+  paths(key: string): string[] {
+    return [...(this.byUrl.get(key) ?? [])];
+  }
+
+  /** Normalized URLs saved in more than one note, with those notes. */
+  groups(): { key: string; paths: string[] }[] {
+    return [...this.byUrl].filter(([, paths]) => paths.size > 1).map(([key, paths]) => ({ key, paths: [...paths] }));
+  }
+
   findByCaptureId(id: string): string | null {
     return this.byCaptureId.get(id) ?? null;
   }

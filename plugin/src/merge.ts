@@ -1,0 +1,206 @@
+// Merging notes that point at the same page: which note survives, what
+// happens to each of the others, and which property values the survivor ends
+// up with. Kept free of Obsidian so it can be tested; the plugin reads the notes
+// from the metadata cache and applies the plan.
+
+import { placeContent, type ContentRow } from "./enrich";
+import { asList, isEmpty, same } from "./values";
+
+/** What a merge does with a note: keeps it, folds it into the kept note, trashes it, or leaves it alone for good. */
+export type Disposition = "keep" | "merge" | "delete" | "separate";
+
+export type Dispositions = Map<string, Disposition>;
+
+export interface MergeNote {
+  path: string;
+  basename: string;
+  folder: string;
+  frontmatter: Record<string, unknown>;
+  /** Number of other notes linking to this one. */
+  backlinks: number;
+  /** The plugin wrote it (a capture id is set). */
+  hasCaptureId: boolean;
+  /** From a created/date/captured property, as epoch ms; null when there's none. */
+  date: number | null;
+  ctime: number;
+}
+
+/** Notes in the order they're offered as the one to keep: most linked, plugin-written, earliest date, earliest file. */
+export function rankNotes(notes: readonly MergeNote[]): MergeNote[] {
+  return [...notes].sort(
+    (a, b) =>
+      b.backlinks - a.backlinks ||
+      Number(b.hasCaptureId) - Number(a.hasCaptureId) ||
+      (a.date ?? Infinity) - (b.date ?? Infinity) ||
+      a.ctime - b.ctime,
+  );
+}
+
+/** Starting dispositions: notes marked separate stay so, the best-ranked other note is kept, the rest merged into it. */
+export function initialDispositions(ranked: readonly MergeNote[], separate: readonly string[]): Dispositions {
+  const state: Dispositions = new Map();
+  for (const n of ranked) state.set(n.path, separate.includes(n.path) ? "separate" : "merge");
+  const first = ranked.find((n) => state.get(n.path) !== "separate");
+  if (first) state.set(first.path, "keep");
+  return state;
+}
+
+/**
+ * Changes one note's disposition, keeping exactly one note Keep while any note
+ * isn't separate: a new Keep demotes the old one to Merge, and demoting the Keep
+ * note promotes the next-ranked note that isn't separate.
+ */
+export function setDisposition(state: Dispositions, ranked: readonly MergeNote[], path: string, to: Disposition): Dispositions {
+  const next: Dispositions = new Map(state);
+  if (to === "keep") for (const [p, d] of next) if (d === "keep") next.set(p, "merge");
+  next.set(path, to);
+  if (![...next.values()].includes("keep")) {
+    const active = (p: string) => next.get(p) !== "separate";
+    const heir = ranked.find((n) => n.path !== path && active(n.path))?.path ?? (active(path) ? path : undefined);
+    if (heir) next.set(heir, "keep");
+  }
+  return next;
+}
+
+/** A group is worth offering while two or more of its notes aren't marked separate. */
+export function countsAsDuplicate(paths: readonly string[], separate: readonly string[]): boolean {
+  return paths.filter((p) => !separate.includes(p)).length >= 2;
+}
+
+/** One property across the kept and merged notes. */
+export type PropertyChoice =
+  /** Equal everywhere, or only one note has it. */
+  | { name: string; variants: string[]; kind: "settled"; value: unknown }
+  /** A list in at least one note: every item, once, in note order. */
+  | { name: string; variants: string[]; kind: "list"; value: unknown[] }
+  /** Differing single values: the user picks one. */
+  | { name: string; variants: string[]; kind: "conflict"; options: { value: unknown; from: string }[] };
+
+/**
+ * How each property combines across `notes` (the kept note first, then the
+ * notes merged into it). Names differing only by case are one property, spelled
+ * as the kept note spells it, else as the vault mostly does; the other spellings
+ * are listed in `variants` so they can be removed. Properties named in `skip`
+ * (the URL and capture id) are left out.
+ */
+export function mergeChoices(notes: readonly MergeNote[], skip: readonly string[], spelling: (lower: string) => string | undefined): PropertyChoice[] {
+  const skipped = new Set(skip.map((name) => name.toLowerCase()));
+  const found = new Map<string, { spellings: string[]; values: { value: unknown; from: string }[]; inKept: string | null; keptValue: unknown }>();
+  notes.forEach((n, i) => {
+    for (const [key, value] of Object.entries(n.frontmatter)) {
+      const lower = key.toLowerCase();
+      if (skipped.has(lower)) continue;
+      const entry = found.get(lower) ?? { spellings: [], values: [], inKept: null, keptValue: undefined };
+      found.set(lower, entry);
+      if (!entry.spellings.includes(key)) entry.spellings.push(key);
+      if (i === 0 && entry.inKept === null) {
+        entry.inKept = key;
+        entry.keptValue = value;
+      }
+      if (!isEmpty(value) && !entry.values.some((v) => v.from === n.path)) entry.values.push({ value, from: n.path });
+    }
+  });
+
+  const choices: PropertyChoice[] = [];
+  for (const [lower, entry] of found) {
+    const name = entry.inKept ?? spelling(lower) ?? entry.spellings[0]!;
+    const variants = entry.spellings.filter((s) => s !== name);
+    if (!entry.values.length) {
+      if (entry.inKept !== null) choices.push({ name, variants, kind: "settled", value: entry.keptValue });
+      continue;
+    }
+    if (entry.values.some((v) => Array.isArray(v.value))) {
+      const items: unknown[] = [];
+      for (const { value } of entry.values) for (const item of asList(value)) if (!items.some((x) => same(x, item))) items.push(item);
+      choices.push({ name, variants, kind: "list", value: items });
+      continue;
+    }
+    const options = entry.values.filter((v, i) => entry.values.findIndex((w) => same(w.value, v.value)) === i);
+    if (options.length === 1) choices.push({ name, variants, kind: "settled", value: options[0]!.value });
+    else choices.push({ name, variants, kind: "conflict", options });
+  }
+  return choices;
+}
+
+/** What applying a merge does. */
+export interface MergePlan {
+  /** The surviving note; null when only Separate marks change. */
+  kept: string | null;
+  merge: string[];
+  delete: string[];
+  separate: string[];
+  properties: { set: Record<string, unknown>; remove: string[] };
+  /** Names of the removed notes, for the kept note's aliases. */
+  aliases: string[];
+  /** Merge notes' bodies, in order, to append under a heading each. */
+  bodies: { heading: string; body: string }[];
+}
+
+/** Turns the user's choices into a plan. `picks` gives the chosen option per conflicting property (default: the first). */
+export function mergePlan(input: {
+  notes: readonly MergeNote[];
+  state: Dispositions;
+  choices: readonly PropertyChoice[];
+  picks: Record<string, number>;
+  bodies: Record<string, string>;
+}): MergePlan {
+  const having = (d: Disposition) => input.notes.filter((n) => input.state.get(n.path) === d);
+  const kept = having("keep")[0] ?? null;
+  const merge = kept ? having("merge") : [];
+  const del = kept ? having("delete") : [];
+  const set: Record<string, unknown> = {};
+  const remove: string[] = [];
+  if (kept) {
+    for (const choice of input.choices) {
+      set[choice.name] = choice.kind === "conflict" ? (choice.options[input.picks[choice.name] ?? 0] ?? choice.options[0]!).value : choice.value;
+      remove.push(...choice.variants);
+    }
+  }
+  return {
+    kept: kept?.path ?? null,
+    merge: merge.map((n) => n.path),
+    delete: del.map((n) => n.path),
+    separate: having("separate").map((n) => n.path),
+    properties: { set, remove },
+    aliases: [...merge, ...del].map((n) => n.basename),
+    bodies: merge.map((n) => ({ heading: n.basename, body: (input.bodies[n.path] ?? "").trim() })).filter((b) => b.body),
+  };
+}
+
+/** Sets the planned properties on the kept note's frontmatter (as processFrontMatter hands it over). */
+export function applyMergedProperties(frontmatter: Record<string, unknown>, plan: Pick<MergePlan, "properties" | "aliases">): void {
+  for (const name of plan.properties.remove) delete frontmatter[name];
+  Object.assign(frontmatter, plan.properties.set);
+  const aliases = asList(frontmatter.aliases);
+  const known = new Set(aliases.map((a) => String(a).toLowerCase()));
+  const added = plan.aliases.filter((a) => !known.has(a.toLowerCase()) && known.add(a.toLowerCase()));
+  if (added.length) frontmatter.aliases = [...aliases, ...added];
+}
+
+/** The kept note's text with each merged body appended under a heading with that note's name. */
+export function appendBodies(text: string, plan: Pick<MergePlan, "bodies">, frontmatterEnd: number): string {
+  const rows: ContentRow[] = plan.bodies.map((b) => ({ item: { kind: "text", text: `# ${b.heading}\n\n${b.body}` }, heading: null, position: "append" }));
+  return rows.length ? placeContent(text, rows, {}, frontmatterEnd) : text;
+}
+
+/**
+ * Files (not notes) the removed notes link to that nothing else will use: no
+ * note outside `removed` links to them, and the merge doesn't carry them into
+ * the kept note.
+ */
+export function unusedFiles(input: {
+  removed: readonly string[];
+  linksFrom: (path: string) => readonly string[];
+  linkedBy: (target: string) => readonly string[];
+  carried: readonly string[];
+  isNote: (path: string) => boolean;
+}): string[] {
+  const out: string[] = [];
+  for (const path of input.removed) {
+    for (const target of input.linksFrom(path)) {
+      if (out.includes(target) || input.isNote(target) || input.carried.includes(target)) continue;
+      if (input.linkedBy(target).every((source) => input.removed.includes(source))) out.push(target);
+    }
+  }
+  return out;
+}
