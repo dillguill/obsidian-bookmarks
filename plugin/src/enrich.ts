@@ -4,6 +4,7 @@
 // images to pull into the note. Kept free of Obsidian so it can be tested.
 
 import { CAPTURE_FILES, fileMarker, type CaptureFile, type RenderedNote } from "./api";
+import { asList, isEmpty, same } from "./values";
 import { fillFiles, type SavedFiles } from "./writer";
 
 /**
@@ -149,14 +150,6 @@ function frontmatterYaml(frontmatter: string): string {
   return frontmatter.replace(/^---\r?\n/, "").replace(/\r?\n?---\s*$/, "");
 }
 
-function isEmpty(value: unknown): boolean {
-  return value === null || value === undefined || value === "" || (Array.isArray(value) && value.every(isEmpty));
-}
-
-function same(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
 /** Capture file kinds whose markers appear in a value. */
 export function filesIn(value: unknown): CaptureFile[] {
   const text = typeof value === "string" ? value : JSON.stringify(value ?? "");
@@ -212,10 +205,6 @@ export function filesToSave(choices: EnrichChoices, selection: EnrichSelection):
   for (const property of choices.properties) if (selection.properties[property.name]) filesIn(property.value).forEach((kind) => used.add(kind));
   for (const row of selection.content) rowFiles(row.item).forEach((kind) => used.add(kind));
   return choices.images.filter((kind) => used.has(kind));
-}
-
-function asList(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : isEmpty(value) ? [] : [value];
 }
 
 /** Sets the picked properties on a note's frontmatter object (as Obsidian's processFrontMatter hands it over). */
