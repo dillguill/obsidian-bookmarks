@@ -1,11 +1,11 @@
 // Sets one lockstep version on the plugin, the server and the root manifest
 // that BRAT (and later Obsidian's community directory) reads (design §5.3).
-// Usage: node scripts/set-version.mjs 0.1.0
+// Usage: node scripts/set-version.mjs 0.1.0   (or 0.1.0-beta.1 for a BRAT beta)
 import { readFileSync, writeFileSync } from "node:fs";
 
 const version = process.argv[2];
-if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) {
-  console.error("usage: node scripts/set-version.mjs x.y.z  (no leading v)");
+if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version ?? "")) {
+  console.error("usage: node scripts/set-version.mjs x.y.z[-beta.n]  (no leading v)");
   process.exit(1);
 }
 
