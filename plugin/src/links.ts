@@ -57,3 +57,23 @@ export function redirectFrontmatter(frontmatter: Record<string, unknown>, key: s
   }
   return false;
 }
+
+const IMAGE_EXT = /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i;
+
+/**
+ * The image a property value points at, if it looks like one: a vault path
+ * (`[[x.png]]`, `![](x.png)` or a bare path with an image extension), or any web
+ * address, which may or may not turn out to be an image.
+ */
+export function imageLink(value: unknown): { vault: string } | { url: string } | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  const target = /^!?\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]$/.exec(text)?.[1] ?? /^!?\[[^\]]*\]\(<?([^)>]+)>?\)$/.exec(text)?.[1] ?? text;
+  if (/^https?:\/\//i.test(target)) return { url: target };
+  if (target.includes("\n") || !IMAGE_EXT.test(target)) return null;
+  try {
+    return { vault: decodeURI(target) };
+  } catch {
+    return { vault: target };
+  }
+}

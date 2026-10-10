@@ -19,7 +19,7 @@ import {
 } from "./enrich";
 import { EnrichModal, type EnrichModalOptions } from "./enrich-modal";
 import { EnrichSession } from "./enrich-session";
-import { redirectFrontmatter, redirectedLink, spliceSpans, type Span } from "./links";
+import { imageLink, redirectFrontmatter, redirectedLink, spliceSpans, type Span } from "./links";
 import { appendBodies, applyMergedProperties, countsAsDuplicate, keptFrom, mergeChoices, mergePlan, rankNotes, unusedFiles, type MergeNote } from "./merge";
 import { DuplicateListModal, MergeModal, type DuplicateEntry, type MergeSelection } from "./merge-modal";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
@@ -596,6 +596,7 @@ export default class BookmarksPlugin extends Plugin {
       {
         skip: this.mergeSkip(),
         propertyNames: () => this.vaultProperties(),
+        imageSrc: (value, from) => this.imageSrc(value, from),
         spelling: this.propertySpelling(),
         unusedCount: (selection) => this.unusedFor(notes, selection, sources).length,
         onApply: (selection) =>
@@ -606,6 +607,15 @@ export default class BookmarksPlugin extends Plugin {
         onSkip: queue ? next : undefined,
       },
     ).open();
+  }
+
+  /** Where a property value's image loads from, for previews: a vault file's resource path or a web address. */
+  private imageSrc(value: unknown, from: string): string | null {
+    const image = imageLink(value);
+    if (!image) return null;
+    if ("url" in image) return image.url;
+    const file = this.app.metadataCache.getFirstLinkpathDest(image.vault, from);
+    return file ? this.app.vault.getResourcePath(file) : null;
   }
 
   /** URL and capture id property names, which a merge never offers or changes. */

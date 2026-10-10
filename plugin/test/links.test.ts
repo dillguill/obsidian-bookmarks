@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { redirectFrontmatter, redirectedLink, spliceSpans } from "../src/links";
+import { imageLink, redirectFrontmatter, redirectedLink, spliceSpans } from "../src/links";
 
 describe("spliceSpans", () => {
   it("replaces several spans on one line", () => {
@@ -48,5 +48,25 @@ describe("redirectFrontmatter", () => {
     expect(redirectFrontmatter(fm, "related", "[[A]]", "[[B|A]]")).toBe(false);
     expect(redirectFrontmatter(fm, "missing", "[[A]]", "[[B|A]]")).toBe(false);
     expect(fm).toEqual({ related: "[[C]]" });
+  });
+});
+
+describe("imageLink", () => {
+  it("finds images linked from the vault", () => {
+    expect(imageLink("[[_attachments/a b.jpg]]")).toEqual({ vault: "_attachments/a b.jpg" });
+    expect(imageLink("![[shot.PNG|200]]")).toEqual({ vault: "shot.PNG" });
+    expect(imageLink("![alt](assets/x.webp)")).toEqual({ vault: "assets/x.webp" });
+    expect(imageLink("assets/plain.png")).toEqual({ vault: "assets/plain.png" });
+    expect(imageLink("![](my%20shots/a.jpg)")).toEqual({ vault: "my shots/a.jpg" });
+  });
+  it("takes web addresses as possible images", () => {
+    expect(imageLink("https://example.com/cover")).toEqual({ url: "https://example.com/cover" });
+    expect(imageLink("![x](https://example.com/a.png)")).toEqual({ url: "https://example.com/a.png" });
+  });
+  it("ignores everything else", () => {
+    expect(imageLink("[[Some note]]")).toBeNull();
+    expect(imageLink("AI Tinkerers: The Global")).toBeNull();
+    expect(imageLink(["[[a.png]]"])).toBeNull();
+    expect(imageLink(3)).toBeNull();
   });
 });

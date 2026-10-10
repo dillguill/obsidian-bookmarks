@@ -41,6 +41,8 @@ export interface MergeSelection {
 export interface MergeHandlers {
   /** URL and capture id property names, never offered. */
   skip: string[];
+  /** Where to load a value's image from (a vault resource or web address), or null when it isn't one. */
+  imageSrc: (value: unknown, from: string) => string | null;
   /** Every property name in the vault, for naming kept values. */
   propertyNames: () => string[];
   /** The vault's usual spelling of a property name, by its lowercase form. */
@@ -222,7 +224,27 @@ export class MergeModal extends Modal {
       this.renderProperties();
       this.refresh();
     };
-    if (pick.kind !== "each") return;
+    if (pick.kind !== "each") {
+      // Image values get thumbnails; tapping one picks it.
+      const images = choice.options.map((option) => this.handlers.imageSrc(option.value, option.from));
+      if (!images.some(Boolean)) return;
+      const strip = el.createDiv();
+      Object.assign(strip.style, { display: "flex", flexWrap: "wrap", gap: "8px", margin: "0 0 8px" });
+      choice.options.forEach((option, i) => {
+        const src = images[i];
+        if (!src) return;
+        const picked = pick.kind === "list" || (pick.kind === "value" && pick.option === i);
+        const item = strip.createDiv({ attr: { "aria-label": `Use the value from ${from(option.from)}` } });
+        Object.assign(item.style, { display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", cursor: "pointer", maxWidth: "96px" });
+        thumbnail(item, src, picked);
+        clipped(item, from(option.from), true).style.maxWidth = "96px";
+        item.onclick = () => {
+          select.value = `value:${i}`;
+          select.onchange?.(new Event("change"));
+        };
+      });
+      return;
+    }
     const list = el.createDiv();
     Object.assign(list.style, { paddingLeft: "12px", borderLeft: "2px solid var(--background-modifier-border)", marginBottom: "6px" });
     choice.options.forEach((option, i) => {
@@ -235,6 +257,8 @@ export class MergeModal extends Modal {
       };
       new PropertySuggest(this.app, input, this.handlers.propertyNames, set);
       input.oninput = () => set(input.value);
+      const src = this.handlers.imageSrc(option.value, option.from);
+      if (src) thumbnail(row.controls, src, false, 40);
       const value = clipped(row.controls, `${preview(option.value, 60)} — ${from(option.from)}`, true);
       value.title = preview(option.value, 2000);
     });
@@ -281,6 +305,24 @@ export class MergeModal extends Modal {
     this.primary.setText(text);
     this.primary.disabled = (merge + del === 0 && !marksChanged) || problem !== null;
   }
+}
+
+/** A small image preview, outlined when picked; hidden if the image doesn't load. */
+function thumbnail(parent: HTMLElement, src: string, picked: boolean, size = 64): HTMLImageElement {
+  const img = parent.createEl("img", { attr: { src, alt: "", loading: "lazy" } });
+  Object.assign(img.style, {
+    height: `${size}px`,
+    maxWidth: `${size * 1.5}px`,
+    objectFit: "cover",
+    borderRadius: "4px",
+    flex: "none",
+    outline: picked ? "2px solid var(--interactive-accent)" : "1px solid var(--background-modifier-border)",
+    outlineOffset: "1px",
+  });
+  img.onerror = () => {
+    img.style.display = "none";
+  };
+  return img;
 }
 
 /** A duplicate group in the vault-wide list. */

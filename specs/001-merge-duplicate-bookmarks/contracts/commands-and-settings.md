@@ -44,6 +44,10 @@ Top to bottom:
    with the property's name for the kept note's value and `<name>_2`, `<name>_3`…
    for the others; empty = don't keep). A name clash shows in red above the
    buttons and disables the primary button.
+   When values are images (a vault image link or a web address that loads as one),
+   64 px thumbnails labelled with their note sit under the row; tapping one picks
+   that value and the picked one is outlined. In "Rename / keep each", each value's
+   row shows a 40 px thumbnail. Values that fail to load show no thumbnail.
    A single line below gives the count of combined properties, e.g.
    "4 properties combined automatically (tags, aliases, …)".
 4. **Unused files**: a toggle, "Remove N files only removed notes use", on by
