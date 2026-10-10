@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile, TFolder, getFrontMatterInfo, normalizePath, parseLinktext, parseYaml } from "obsidian";
+import { Notice, Plugin, TFile, TFolder, getFrontMatterInfo, normalizePath, parseLinktext, parseYaml, stringifyYaml } from "obsidian";
 import { API_VERSION, CAPTURE_FILES, type CaptureFile, type ClipperTemplate, type Job, type RenderedNote } from "./api";
 import { CaptureModal } from "./capture-modal";
 import { ServerClient } from "./client";
@@ -21,7 +21,7 @@ import { EnrichModal, type EnrichModalOptions } from "./enrich-modal";
 import { EnrichSession } from "./enrich-session";
 import { imageLink, redirectFrontmatter, redirectedLink, spliceSpans, type Span } from "./links";
 import { appendBodies, applyMergedProperties, countsAsDuplicate, keptFrom, mergeChoices, mergePlan, rankNotes, unusedFiles, type MergeNote } from "./merge";
-import { DuplicateListModal, MergeModal, type DuplicateEntry, type MergeSelection } from "./merge-modal";
+import { DuplicateListModal, MergeModal, type DuplicateEntry, type MergePreview, type MergeSelection } from "./merge-modal";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
 import { DEFAULT_TEMPLATE, captureIdPropertyName, chooseTemplate, urlPropertyName, urlPropertyNames } from "./template";
 import { findUrl, normalizeUrl } from "./url";
@@ -597,6 +597,7 @@ export default class BookmarksPlugin extends Plugin {
         skip: this.mergeSkip(),
         propertyNames: () => this.vaultProperties(),
         imageSrc: (value, from) => this.imageSrc(value, from),
+        preview: (selection) => this.previewMerge(notes, selection, sources),
         spelling: this.propertySpelling(),
         unusedCount: (selection) => this.unusedFor(notes, selection, sources).length,
         onApply: (selection) =>
@@ -607,6 +608,42 @@ export default class BookmarksPlugin extends Plugin {
         onSkip: queue ? next : undefined,
       },
     ).open();
+  }
+
+  /**
+   * What a merge would do, for the preview: the kept note's text before and
+   * after (frontmatter written the way processFrontMatter writes it, so only
+   * real changes show), the deleted notes' text, and how many links elsewhere
+   * get pointed at the kept note.
+   */
+  private async previewMerge(notes: readonly MergeNote[], selection: MergeSelection, sources: Map<string, string[]>): Promise<MergePreview> {
+    const file = (path: string) => this.app.vault.getAbstractFileByPath(path) as TFile;
+    const read = async (path: string) => this.app.vault.cachedRead(file(path));
+    const bodyOf = (text: string) => text.slice(getFrontMatterInfo(text).contentStart);
+    const kept = notes.find((n) => selection.state.get(n.path) === "keep");
+    const having = (d: string) => notes.filter((n) => selection.state.get(n.path) === d);
+    const merged = kept ? having("merge") : [];
+    const deleted = kept ? having("delete") : [];
+    const removed = new Set([...merged, ...deleted].map((n) => n.path));
+    const redirects = [...removed].reduce((count, path) => count + (sources.get(path) ?? []).filter((source) => !removed.has(source)).length, 0);
+    const deletedText = await Promise.all(deleted.map(async (n) => ({ name: n.basename, text: await read(n.path) })));
+    if (!kept) return { kept: null, merged: [], deleted: deletedText, redirects: 0 };
+
+    const bodies: Record<string, string> = {};
+    for (const n of merged) bodies[n.path] = bodyOf(await read(n.path));
+    const plan = mergePlan({ notes, state: selection.state, choices: selection.choices, picks: selection.picks, bodies });
+    const text = await read(kept.path);
+    const before = { ...(this.app.metadataCache.getFileCache(file(kept.path))?.frontmatter ?? {}) } as Record<string, unknown>;
+    const after = JSON.parse(JSON.stringify(before)) as Record<string, unknown>;
+    applyMergedProperties(after, plan);
+    const withFrontmatter = (frontmatter: Record<string, unknown>) => (Object.keys(frontmatter).length ? `---\n${stringifyYaml(frontmatter)}---\n` : "");
+    const head = withFrontmatter(after);
+    return {
+      kept: { name: kept.basename, before: withFrontmatter(before) + bodyOf(text), after: appendBodies(head + bodyOf(text), plan, head.length) },
+      merged: merged.map((n) => n.basename),
+      deleted: deletedText,
+      redirects,
+    };
   }
 
   /** Where a property value's image loads from, for previews: a vault file's resource path or a web address. */

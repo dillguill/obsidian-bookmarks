@@ -50,9 +50,16 @@ Top to bottom:
    row shows a 40 px thumbnail. Values that fail to load show no thumbnail.
    A single line below gives the count of combined properties, e.g.
    "4 properties combined automatically (tags, aliases, …)".
-4. **Unused files**: a toggle, "Remove N files only removed notes use", on by
+4. **Changes** (collapsed by default): a header `▸ Changes  +A −R in “Kept” · N deleted ·
+   M links redirected` that opens a git-style diff panel (max 40% of the screen
+   tall, scrolls, wraps lines). It shows the kept note before vs after (frontmatter
+   written the way the merge writes it, unchanged runs folded to `⋯ N unchanged
+   lines` with 3 lines of context), then a header per merged note ("merged into
+   …, then trashed") and each deleted note in full as removed lines (first 40
+   lines, then `⋯ N more lines`). It updates with every change in the view.
+5. **Unused files**: a toggle, "Remove N files only removed notes use", on by
    default. Shown only when N > 0.
-5. **Buttons**:
+6. **Buttons**:
    - **Skip** (queue mode only).
    - The primary button, whose label follows the state:
      - `Merge 2 notes into “Name”` plus, when they apply, ` · delete 1` and

@@ -10,6 +10,7 @@ import {
   type MergeNote,
   type PropertyChoice,
 } from "./merge";
+import { collapse, diffLines, diffStats, type DiffLine } from "./diff";
 import { clipped, iconButton, preview, rowLine, sectionHead, smallSelect } from "./modal-ui";
 import { PropertySuggest } from "./property-suggest";
 
@@ -38,11 +39,24 @@ export interface MergeSelection {
   removeFiles: boolean;
 }
 
+/** What a merge would change, for the preview at the bottom of the view. */
+export interface MergePreview {
+  /** The kept note's text now and after the merge; null when only separate marks change. */
+  kept: { name: string; before: string; after: string } | null;
+  /** Notes whose bodies go into the kept note before they're trashed. */
+  merged: string[];
+  deleted: { name: string; text: string }[];
+  /** Links in other notes that will point at the kept note. */
+  redirects: number;
+}
+
 export interface MergeHandlers {
   /** URL and capture id property names, never offered. */
   skip: string[];
   /** Where to load a value's image from (a vault resource or web address), or null when it isn't one. */
   imageSrc: (value: unknown, from: string) => string | null;
+  /** What the merge would change, for the preview. */
+  preview: (selection: MergeSelection) => Promise<MergePreview>;
   /** Every property name in the vault, for naming kept values. */
   propertyNames: () => string[];
   /** The vault's usual spelling of a property name, by its lowercase form. */
@@ -68,6 +82,11 @@ export class MergeModal extends Modal {
   private propsEl!: HTMLElement;
   private filesEl!: HTMLElement;
   private problemEl!: HTMLElement;
+  private changesEl!: HTMLElement;
+  private changesOpen = false;
+  /** The preview last asked for, so a slower earlier one doesn't overwrite it. */
+  private previewRun = 0;
+  private lastPreview: MergePreview | null = null;
   private primary!: HTMLButtonElement;
 
   constructor(
@@ -88,6 +107,7 @@ export class MergeModal extends Modal {
     this.notesEl = contentEl.createDiv();
     this.propsEl = contentEl.createDiv();
     this.filesEl = contentEl.createDiv();
+    this.changesEl = contentEl.createDiv();
     this.problemEl = contentEl.createDiv();
     Object.assign(this.problemEl.style, { color: "var(--text-error)", marginTop: "8px" });
     const buttons = contentEl.createDiv();
@@ -178,6 +198,73 @@ export class MergeModal extends Modal {
     }
     this.renderFiles();
     this.renderButton();
+    void this.loadPreview();
+  }
+
+  /** Works out the preview for the current choices and shows it, unless newer choices came in meanwhile. */
+  private async loadPreview(): Promise<void> {
+    const run = ++this.previewRun;
+    try {
+      const next = await this.handlers.preview(this.currentSelection());
+      if (run !== this.previewRun) return;
+      this.lastPreview = next;
+    } catch (err) {
+      console.error("bookmarks: couldn't preview the merge", err);
+      if (run !== this.previewRun) return;
+      this.lastPreview = null;
+    }
+    this.renderChanges();
+  }
+
+  /** The Changes panel: a summary line that opens to a git-style diff of the kept note and the notes that go. */
+  private renderChanges(): void {
+    const el = this.changesEl;
+    el.empty();
+    const p = this.lastPreview;
+    if (!p) return;
+    const keptDiff = p.kept ? diffLines(p.kept.before.split("\n"), p.kept.after.split("\n")) : [];
+    const { added, removed } = diffStats(keptDiff);
+    const summary = [
+      p.kept ? `+${added} −${removed} in “${p.kept.name}”` : "only separate marks change",
+      p.deleted.length ? `${p.deleted.length} deleted` : "",
+      p.redirects ? `${p.redirects} link${p.redirects === 1 ? "" : "s"} redirected` : "",
+    ].filter(Boolean);
+
+    const head = el.createDiv();
+    Object.assign(head.style, { display: "flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap", margin: "12px 0 4px", cursor: "pointer" });
+    head.createSpan({ text: `${this.changesOpen ? "▾" : "▸"} Changes` }).style.fontWeight = "600";
+    head.createSpan({ text: summary.join(" · "), cls: "setting-item-description" });
+    head.onclick = () => {
+      this.changesOpen = !this.changesOpen;
+      this.renderChanges();
+    };
+    if (!this.changesOpen) return;
+
+    const box = el.createDiv();
+    Object.assign(box.style, {
+      maxHeight: "40vh",
+      overflowY: "auto",
+      border: "1px solid var(--background-modifier-border)",
+      borderRadius: "6px",
+      fontFamily: "var(--font-monospace)",
+      fontSize: "var(--font-ui-smaller)",
+      lineHeight: "1.45",
+    });
+    const fileHead = (text: string) => {
+      const h = box.createDiv({ text });
+      Object.assign(h.style, { fontWeight: "600", padding: "4px 8px", background: "var(--background-secondary)", borderBottom: "1px solid var(--background-modifier-border)" });
+    };
+    if (p.kept) {
+      fileHead(`${p.kept.name} (kept)`);
+      for (const line of collapse(keptDiff, 3)) diffRow(box, line);
+    }
+    for (const name of p.merged) fileHead(`${name}: merged into “${p.kept?.name ?? ""}”, then trashed`);
+    for (const note of p.deleted) {
+      fileHead(`${note.name}: deleted`);
+      const lines = note.text.split("\n");
+      for (const text of lines.slice(0, 40)) diffRow(box, { op: "-", text });
+      if (lines.length > 40) diffRow(box, { skip: lines.length - 40 }, "more lines");
+    }
   }
 
   private renderProperties(): void {
@@ -305,6 +392,21 @@ export class MergeModal extends Modal {
     this.primary.setText(text);
     this.primary.disabled = (merge + del === 0 && !marksChanged) || problem !== null;
   }
+}
+
+/** One line of a diff, wrapping rather than scrolling sideways, or a count of folded lines. */
+function diffRow(parent: HTMLElement, line: DiffLine | { skip: number }, folded = "unchanged lines"): void {
+  const row = parent.createDiv();
+  Object.assign(row.style, { whiteSpace: "pre-wrap", wordBreak: "break-word", padding: "0 8px" });
+  if ("skip" in line) {
+    row.setText(`⋯ ${line.skip} ${folded}`);
+    Object.assign(row.style, { color: "var(--text-faint)", fontStyle: "italic", padding: "2px 8px" });
+    return;
+  }
+  row.setText(`${line.op} ${line.text}`);
+  if (line.op === "+") Object.assign(row.style, { background: "rgba(var(--color-green-rgb), 0.15)", color: "var(--text-normal)" });
+  else if (line.op === "-") Object.assign(row.style, { background: "rgba(var(--color-red-rgb), 0.15)", color: "var(--text-normal)" });
+  else row.style.color = "var(--text-muted)";
 }
 
 /** A small image preview, outlined when picked; hidden if the image doesn't load. */
