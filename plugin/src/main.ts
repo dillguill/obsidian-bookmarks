@@ -709,7 +709,13 @@ export default class BookmarksPlugin extends Plugin {
     const merging = notes.filter((n) => selection.state.get(n.path) === "merge");
     // Values come from the notes as they are now, in case one changed while the view was open.
     const choices = kept ? mergeChoices([kept, ...merging], this.mergeSkip(), this.propertySpelling()) : [];
-    const files = selection.removeFiles ? this.unusedFor(notes, { ...selection, choices }) : [];
+    let files: string[] = [];
+    try {
+      if (selection.removeFiles) files = this.unusedFor(notes, { ...selection, choices });
+    } catch (err) {
+      // Leaving files in place is safe; the merge itself can go ahead.
+      console.error("bookmarks: couldn't work out unused files", err);
+    }
     const draft = mergePlan({ notes, state: selection.state, choices, picks: selection.picks, bodies: {} });
     if (!draft.kept) {
       await this.saveSeparate(key, draft.separate);

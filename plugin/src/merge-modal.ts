@@ -57,6 +57,10 @@ export class MergeModal extends Modal {
   private state: Dispositions;
   private picks: Record<string, ConflictPick> = {};
   private removeFiles = true;
+  /** Files only the removed notes use, counted once per change. */
+  private unused = 0;
+  /** Why counting them failed, shown instead of the file option so the merge still works. */
+  private unusedError: string | null = null;
   private choices: PropertyChoice[] = [];
   private notesEl!: HTMLElement;
   private propsEl!: HTMLElement;
@@ -136,8 +140,18 @@ export class MergeModal extends Modal {
     }
   }
 
-  /** Recomputes the properties, the file option and the button after the dispositions change. */
+  /** Recomputes the properties, the file option and the button after the dispositions change; a failure shows its message. */
   private update(): void {
+    try {
+      this.recompute();
+    } catch (err) {
+      console.error("bookmarks: merge view failed", err);
+      this.problemEl.setText(`Something went wrong: ${err instanceof Error ? err.message : String(err)}`);
+      this.primary.setText("Merge");
+    }
+  }
+
+  private recompute(): void {
     const kept = this.having("keep");
     this.choices = kept.length ? mergeChoices([...kept, ...this.having("merge")], this.handlers.skip, this.handlers.spelling) : [];
     // Picks that no longer fit their property (it stopped conflicting, or its values changed) start over.
@@ -146,6 +160,19 @@ export class MergeModal extends Modal {
       if (choice?.kind !== "conflict" || (pick.kind === "each" && pick.names.length !== choice.options.length)) delete this.picks[name];
     }
     this.renderProperties();
+    this.refresh();
+  }
+
+  /** Recounts the unused files and redraws the file option and the button. */
+  private refresh(): void {
+    try {
+      this.unused = this.handlers.unusedCount(this.selection());
+      this.unusedError = null;
+    } catch (err) {
+      console.error("bookmarks: couldn't count unused files", err);
+      this.unused = 0;
+      this.unusedError = err instanceof Error ? err.message : String(err);
+    }
     this.renderFiles();
     this.renderButton();
   }
@@ -186,8 +213,7 @@ export class MergeModal extends Modal {
       else if (select.value === "each") this.picks[choice.name] = { kind: "each", names: choice.options.map((_, i) => (i === 0 ? choice.name : `${choice.name}_${i + 1}`)) };
       else this.picks[choice.name] = { kind: "value", option: Number(select.value.slice("value:".length)) };
       this.renderProperties();
-      this.renderFiles();
-      this.renderButton();
+      this.refresh();
     };
     if (pick.kind !== "each") return;
     const list = el.createDiv();
@@ -198,8 +224,7 @@ export class MergeModal extends Modal {
       Object.assign(input.style, { width: "12em", maxWidth: "100%" });
       const set = (name: string) => {
         pick.names[i] = name;
-        this.renderFiles();
-        this.renderButton();
+        this.refresh();
       };
       new PropertySuggest(this.app, input, this.handlers.propertyNames, set);
       input.oninput = () => set(input.value);
@@ -211,7 +236,12 @@ export class MergeModal extends Modal {
   private renderFiles(): void {
     const el = this.filesEl;
     el.empty();
-    const count = this.handlers.unusedCount(this.selection());
+    if (this.unusedError) {
+      const note = el.createEl("p", { cls: "setting-item-description", text: `Couldn't check for files only removed notes use (${this.unusedError}); they'll be left in place.` });
+      note.style.margin = "12px 0 0";
+      return;
+    }
+    const count = this.unused;
     if (!count) return;
     const label = el.createEl("label");
     Object.assign(label.style, { display: "flex", alignItems: "center", gap: "8px", marginTop: "12px", cursor: "pointer" });
@@ -225,12 +255,14 @@ export class MergeModal extends Modal {
   }
 
   private renderButton(): void {
+    // Labelled before anything that could fail, so there's always a button to press.
+    this.primary.setText("Merge");
     const kept = this.having("keep")[0];
     const merge = this.having("merge").length;
     const del = this.having("delete").length;
     const separate = this.having("separate").map((n) => n.path);
     const marksChanged = separate.length !== this.group.separate.length || separate.some((p) => !this.group.separate.includes(p));
-    const files = this.removeFiles ? this.handlers.unusedCount(this.selection()) : 0;
+    const files = this.removeFiles ? this.unused : 0;
     let text = "Save";
     if (kept && merge + del > 0) {
       text = merge ? `Merge ${merge + 1} notes into “${kept.basename}”` : `Keep “${kept.basename}”`;
