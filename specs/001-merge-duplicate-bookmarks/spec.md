@@ -68,9 +68,11 @@ the other two into it, and check the result.
 6. **Given** a property is a list in at least one note (e.g. `tags: foo` in one
    and `tags: [bar, baz]` in another), **Then** the kept note gets every item
    once (`[foo, bar, baz]`), without the user choosing.
-7. **Given** notes disagree on a single-value property, **Then** the user picks
-   one of the existing values, each labelled with the note it comes from, and
-   the kept note gets that value. Its type never changes.
+7. **Given** notes disagree on a single-value property, **Then** the user can
+   pick one of the existing values (each labelled with the note it comes from),
+   keep all of them as a list, or keep each value: the kept note's value stays
+   under the property's name and every other value goes into a property the
+   user names (with vault property suggestions; an empty name drops it).
 8. **Given** the user merges, **Then** each Merge note's body is appended to the
    kept note under a heading with that note's name, in the order the notes are
    listed.
@@ -295,8 +297,10 @@ URL command and use the notice.
 - **FR-011**: Properties MUST be combined across the Keep and Merge notes as
   follows: equal values or a value in one note only → that value; a list in any
   note → every item once, in note order, compared by full value; differing
-  single values → the user picks one of the existing values. Delete and Separate
-  notes' properties are ignored.
+  single values → the user picks one of the existing values, keeps all values
+  as a list, or keeps each value under a name of their choosing. A name used
+  for two values, or a property with no value kept, blocks the merge with a
+  message. Delete and Separate notes' properties are ignored.
 - **FR-011a**: Property names that differ only by letter case (`exam` / `Exam`)
   MUST be treated as one property when combining. The kept note's spelling is
   used, or, if the kept note has neither, the spelling most notes in the vault

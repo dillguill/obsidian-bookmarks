@@ -122,6 +122,52 @@ export function mergeChoices(notes: readonly MergeNote[], skip: readonly string[
   return choices;
 }
 
+/** How a conflicting property is settled: one note's value, every value as a list, or each value under a name of its own ("" drops it). */
+export type ConflictPick = { kind: "value"; option: number } | { kind: "list" } | { kind: "each"; names: string[] };
+
+/** The values a conflict resolves to, by property name. */
+function resolveConflict(choice: Extract<PropertyChoice, { kind: "conflict" }>, pick: ConflictPick | undefined): Record<string, unknown> {
+  if (pick?.kind === "list") {
+    const items: unknown[] = [];
+    for (const { value } of choice.options) if (!items.some((x) => same(x, value))) items.push(value);
+    return { [choice.name]: items };
+  }
+  if (pick?.kind === "each") {
+    const out: Record<string, unknown> = {};
+    choice.options.forEach((option, i) => {
+      const name = pick.names[i]?.trim();
+      if (name) out[name] = option.value;
+    });
+    return out;
+  }
+  const option = choice.options[pick?.option ?? 0] ?? choice.options[0]!;
+  return { [choice.name]: option.value };
+}
+
+/** Notes whose value of a property survives the merge, for a conflict and how it's settled (none for other properties). */
+export function keptFrom(choice: PropertyChoice, pick: ConflictPick | undefined): string[] {
+  if (choice.kind !== "conflict") return [];
+  if (pick?.kind === "list") return choice.options.map((o) => o.from);
+  if (pick?.kind === "each") return choice.options.filter((_, i) => pick.names[i]?.trim()).map((o) => o.from);
+  return [(choice.options[pick?.option ?? 0] ?? choice.options[0]!).from];
+}
+
+/** Why the conflict picks can't be applied (a name used twice, a property with nothing kept), or null. */
+export function pickProblem(choices: readonly PropertyChoice[], picks: Record<string, ConflictPick>): string | null {
+  const seen = new Set<string>();
+  for (const choice of choices) {
+    const pick = picks[choice.name];
+    const names =
+      choice.kind === "conflict" && pick?.kind === "each" ? pick.names.map((n) => n.trim()).filter(Boolean) : choice.kind === "conflict" ? Object.keys(resolveConflict(choice, pick)) : [choice.name];
+    if (choice.kind === "conflict" && !names.length) return `Keep at least one value of ${choice.name}, or pick one.`;
+    for (const name of names) {
+      if (seen.has(name.toLowerCase())) return `“${name}” is used for two values.`;
+      seen.add(name.toLowerCase());
+    }
+  }
+  return null;
+}
+
 /** What applying a merge does. */
 export interface MergePlan {
   /** The surviving note; null when only Separate marks change. */
@@ -136,12 +182,12 @@ export interface MergePlan {
   bodies: { heading: string; body: string }[];
 }
 
-/** Turns the user's choices into a plan. `picks` gives the chosen option per conflicting property (default: the first). */
+/** Turns the user's choices into a plan. `picks` settles each conflicting property (default: the kept note's value). */
 export function mergePlan(input: {
   notes: readonly MergeNote[];
   state: Dispositions;
   choices: readonly PropertyChoice[];
-  picks: Record<string, number>;
+  picks: Record<string, ConflictPick>;
   bodies: Record<string, string>;
 }): MergePlan {
   const having = (d: Disposition) => input.notes.filter((n) => input.state.get(n.path) === d);
@@ -152,8 +198,10 @@ export function mergePlan(input: {
   const remove: string[] = [];
   if (kept) {
     for (const choice of input.choices) {
-      set[choice.name] = choice.kind === "conflict" ? (choice.options[input.picks[choice.name] ?? 0] ?? choice.options[0]!).value : choice.value;
+      const values = choice.kind === "conflict" ? resolveConflict(choice, input.picks[choice.name]) : { [choice.name]: choice.value };
+      Object.assign(set, values);
       remove.push(...choice.variants);
+      if (!(choice.name in values)) remove.push(choice.name);
     }
   }
   return {

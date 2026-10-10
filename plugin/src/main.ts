@@ -20,7 +20,7 @@ import {
 import { EnrichModal, type EnrichModalOptions } from "./enrich-modal";
 import { EnrichSession } from "./enrich-session";
 import { redirectFrontmatter, redirectedLink, spliceSpans, type Span } from "./links";
-import { appendBodies, applyMergedProperties, countsAsDuplicate, mergeChoices, mergePlan, rankNotes, unusedFiles, type MergeNote } from "./merge";
+import { appendBodies, applyMergedProperties, countsAsDuplicate, keptFrom, mergeChoices, mergePlan, rankNotes, unusedFiles, type MergeNote } from "./merge";
 import { DuplicateListModal, MergeModal, type DuplicateEntry, type MergeSelection } from "./merge-modal";
 import { BookmarksSettingTab, DEFAULT_SETTINGS, type BookmarksSettings } from "./settings";
 import { DEFAULT_TEMPLATE, captureIdPropertyName, chooseTemplate, urlPropertyName, urlPropertyNames } from "./template";
@@ -595,9 +595,14 @@ export default class BookmarksPlugin extends Plugin {
       { url: (first instanceof TFile && this.noteUrl(first)) || key, notes, separate: this.settings.separateNotes?.[key] ?? [] },
       {
         skip: this.mergeSkip(),
+        propertyNames: () => this.vaultProperties(),
         spelling: this.propertySpelling(),
         unusedCount: (selection) => this.unusedFor(notes, selection, sources).length,
-        onApply: (selection) => void this.applyMerge(key, selection).then(next),
+        onApply: (selection) =>
+          void this.applyMerge(key, selection).then(next, (err: unknown) => {
+            console.error("bookmarks: merge failed", err);
+            new Notice(`Couldn't merge: ${err instanceof Error ? err.message : String(err)}`, 0);
+          }),
         onSkip: queue ? next : undefined,
       },
     ).open();
@@ -674,7 +679,7 @@ export default class BookmarksPlugin extends Plugin {
       }
       for (const ref of cache?.frontmatterLinks ?? []) {
         const choice = selection.choices.find((c) => c.name.toLowerCase() === ref.key.replace(/\.\d+$/, "").toLowerCase());
-        const kept = choice && (choice.kind !== "conflict" || choice.options[selection.picks[choice.name] ?? 0]?.from === path);
+        const kept = choice && (choice.kind !== "conflict" || keptFrom(choice, selection.picks[choice.name]).includes(path));
         const target = kept ? this.linkTarget(ref.link, path) : null;
         if (target) carried.push(target.path);
       }

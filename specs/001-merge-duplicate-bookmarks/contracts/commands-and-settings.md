@@ -38,7 +38,12 @@ Top to bottom:
    - The basename opens the note in a new tab when clicked (desktop) or tapped
      (mobile).
 3. **Properties**: listed only when there are conflicts. One row per conflict:
-   the property name, and a select whose options read `<value> — <note basename>`.
+   the property name, and a select whose options read `<value> — <note basename>`,
+   then **Keep all as a list** and **Keep each value…**. "Keep each value" shows
+   one row per value with a name input (vault property suggestions; prefilled
+   with the property's name for the kept note's value and `<name>_2`, `<name>_3`…
+   for the others; empty = don't keep). A name clash shows in red above the
+   buttons and disables the primary button.
    A single line below gives the count of combined properties, e.g.
    "4 properties combined automatically (tags, aliases, …)".
 4. **Unused files**: a toggle, "Remove N files only removed notes use", on by

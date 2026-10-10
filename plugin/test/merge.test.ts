@@ -4,11 +4,14 @@ import {
   applyMergedProperties,
   countsAsDuplicate,
   initialDispositions,
+  keptFrom,
   mergeChoices,
   mergePlan,
+  pickProblem,
   rankNotes,
   setDisposition,
   unusedFiles,
+  type ConflictPick,
   type Disposition,
   type MergeNote,
 } from "../src/merge";
@@ -121,7 +124,7 @@ describe("mergePlan", () => {
   const d = note("D.md");
   const state = new Map<string, Disposition>([["A.md", "keep"], ["B.md", "merge"], ["C.md", "delete"], ["D.md", "separate"]]);
   const choices = mergeChoices([a, b], [], () => undefined);
-  const plan = mergePlan({ notes: [a, b, c, d], state, choices, picks: { status: 1 }, bodies: { "B.md": "Beta", "C.md": "Gamma" } });
+  const plan = mergePlan({ notes: [a, b, c, d], state, choices, picks: { status: { kind: "value", option: 1 } }, bodies: { "B.md": "Beta", "C.md": "Gamma" } });
 
   it("sorts the notes by what happens to them", () => {
     expect(plan).toMatchObject({ kept: "A.md", merge: ["B.md"], delete: ["C.md"], separate: ["D.md"] });
@@ -138,6 +141,39 @@ describe("mergePlan", () => {
   it("has no kept note when only marks change", () => {
     const save = mergePlan({ notes: [a, b], state: new Map([["A.md", "separate"], ["B.md", "separate"]]), choices: [], picks: {}, bodies: {} });
     expect(save).toMatchObject({ kept: null, merge: [], delete: [], separate: ["A.md", "B.md"] });
+  });
+});
+
+describe("conflict picks", () => {
+  const a = note("A.md", { frontmatter: { status: "read", tags: ["x"] } });
+  const b = note("B.md", { frontmatter: { status: "todo" } });
+  const c = note("C.md", { frontmatter: { status: "done" } });
+  const state = new Map<string, Disposition>([["A.md", "keep"], ["B.md", "merge"], ["C.md", "merge"]]);
+  const choices = mergeChoices([a, b, c], [], () => undefined);
+  const status = choices.find((ch) => ch.name === "status")!;
+  const plan = (pick: ConflictPick) => mergePlan({ notes: [a, b, c], state, choices, picks: { status: pick }, bodies: {} }).properties;
+
+  it("keeps all values as a list", () => {
+    expect(plan({ kind: "list" })).toEqual({ set: { status: ["read", "todo", "done"], tags: ["x"] }, remove: [] });
+  });
+  it("keeps each value under its own name, dropping values without one", () => {
+    expect(plan({ kind: "each", names: ["status", "status_old", ""] })).toEqual({ set: { status: "read", status_old: "todo", tags: ["x"] }, remove: [] });
+  });
+  it("removes the original name when no value keeps it", () => {
+    expect(plan({ kind: "each", names: ["state", "", "status_done"] })).toEqual({ set: { state: "read", status_done: "done", tags: ["x"] }, remove: ["status"] });
+  });
+  it("says which notes' values survive", () => {
+    expect(keptFrom(status, { kind: "value", option: 1 })).toEqual(["B.md"]);
+    expect(keptFrom(status, { kind: "list" })).toEqual(["A.md", "B.md", "C.md"]);
+    expect(keptFrom(status, { kind: "each", names: ["status", "", "s3"] })).toEqual(["A.md", "C.md"]);
+    expect(keptFrom(choices.find((ch) => ch.name === "tags")!, undefined)).toEqual([]);
+  });
+  it("flags a name used twice or taken by another property", () => {
+    expect(pickProblem(choices, { status: { kind: "each", names: ["status", "s2", "s2"] } })).toBe("“s2” is used for two values.");
+    expect(pickProblem(choices, { status: { kind: "each", names: ["status", "tags", ""] } })).toBe("“tags” is used for two values.");
+    expect(pickProblem(choices, { status: { kind: "each", names: ["", "", ""] } })).toBe("Keep at least one value of status, or pick one.");
+    expect(pickProblem(choices, { status: { kind: "each", names: ["status", "status_old", ""] } })).toBeNull();
+    expect(pickProblem(choices, {})).toBeNull();
   });
 });
 
