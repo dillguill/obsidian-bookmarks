@@ -83,14 +83,3 @@ export function findUrl(text: string): string | null {
   const candidate = match[0].replace(/[),.;!?]+$/, "");
   return normalizeUrl(candidate) ? candidate : null;
 }
-
-/** "https://www.NYTimes.com/x" -> "nytimes.com", for entries in a site list. */
-export function siteEntry(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/^[a-z]+:\/\//, "")
-    .replace(/^\*\./, "")
-    .replace(/^www\./, "")
-    .replace(/[/?#:].*$/, "");
-}

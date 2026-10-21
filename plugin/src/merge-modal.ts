@@ -1,4 +1,4 @@
-import { App, Modal, SuggestModal } from "obsidian";
+import { App, Modal } from "obsidian";
 import {
   initialDispositions,
   mergeChoices,
@@ -13,6 +13,8 @@ import {
 import { collapse, diffLines, diffStats, type DiffLine } from "./diff";
 import { clipped, iconButton, preview, rowLine, sectionHead, smallSelect } from "./modal-ui";
 import { PropertySuggest } from "./property-suggest";
+import { Picker } from "./source-picker";
+import { errorText } from "./errors";
 
 const DISPOSITIONS: { value: Disposition; text: string }[] = [
   { value: "keep", text: "Keep" },
@@ -101,17 +103,14 @@ export class MergeModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     this.titleEl.setText("Merge duplicates");
-    const url = contentEl.createDiv({ text: this.group.url, cls: "setting-item-description" });
-    Object.assign(url.style, { wordBreak: "break-all", marginBottom: "4px" });
+    contentEl.createDiv({ text: this.group.url, cls: "setting-item-description bookmarks-merge-url" });
     sectionHead(contentEl, "Notes");
     this.notesEl = contentEl.createDiv();
     this.propsEl = contentEl.createDiv();
     this.filesEl = contentEl.createDiv();
     this.changesEl = contentEl.createDiv();
-    this.problemEl = contentEl.createDiv();
-    Object.assign(this.problemEl.style, { color: "var(--text-error)", marginTop: "8px" });
-    const buttons = contentEl.createDiv();
-    Object.assign(buttons.style, { display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: "8px", marginTop: "16px" });
+    this.problemEl = contentEl.createDiv({ cls: "bookmarks-problem" });
+    const buttons = contentEl.createDiv({ cls: "bookmarks-buttons" });
     if (this.handlers.onSkip) {
       buttons.createEl("button", { text: "Skip" }).onclick = () => {
         this.close();
@@ -144,9 +143,9 @@ export class MergeModal extends Modal {
     this.notesEl.empty();
     for (const note of this.group.notes) {
       const { main, controls } = rowLine(this.notesEl);
-      Object.assign(main.style, { flexDirection: "column", alignItems: "stretch", gap: "0" });
+      main.addClass("mod-column");
       const name = clipped(main, note.basename);
-      Object.assign(name.style, { fontWeight: "600", cursor: "pointer" });
+      name.addClasses(["bookmarks-strong", "bookmarks-clickable"]);
       name.title = note.path;
       name.onclick = () => void this.app.workspace.openLinkText(note.path, "", "tab");
       const links = `${note.backlinks} link${note.backlinks === 1 ? "" : "s"}`;
@@ -169,7 +168,7 @@ export class MergeModal extends Modal {
       this.recompute();
     } catch (err) {
       console.error("bookmarks: merge view failed", err);
-      this.problemEl.setText(`Something went wrong: ${err instanceof Error ? err.message : String(err)}`);
+      this.problemEl.setText(`Something went wrong: ${errorText(err)}`);
       this.primary.setText("Merge");
     }
   }
@@ -194,7 +193,7 @@ export class MergeModal extends Modal {
     } catch (err) {
       console.error("bookmarks: couldn't count unused files", err);
       this.unused = 0;
-      this.unusedError = err instanceof Error ? err.message : String(err);
+      this.unusedError = errorText(err);
     }
     this.renderFiles();
     this.renderButton();
@@ -230,9 +229,8 @@ export class MergeModal extends Modal {
       p.redirects ? `${p.redirects} link${p.redirects === 1 ? "" : "s"} redirected` : "",
     ].filter(Boolean);
 
-    const head = el.createDiv();
-    Object.assign(head.style, { display: "flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap", margin: "12px 0 4px", cursor: "pointer" });
-    head.createSpan({ text: `${this.changesOpen ? "▾" : "▸"} Changes` }).style.fontWeight = "600";
+    const head = el.createDiv({ cls: "bookmarks-changes-head" });
+    head.createSpan({ text: `${this.changesOpen ? "▾" : "▸"} Changes`, cls: "bookmarks-strong" });
     head.createSpan({ text: summary.join(" · "), cls: "setting-item-description" });
     head.onclick = () => {
       this.changesOpen = !this.changesOpen;
@@ -240,20 +238,8 @@ export class MergeModal extends Modal {
     };
     if (!this.changesOpen) return;
 
-    const box = el.createDiv();
-    Object.assign(box.style, {
-      maxHeight: "40vh",
-      overflowY: "auto",
-      border: "1px solid var(--background-modifier-border)",
-      borderRadius: "6px",
-      fontFamily: "var(--font-monospace)",
-      fontSize: "var(--font-ui-smaller)",
-      lineHeight: "1.45",
-    });
-    const fileHead = (text: string) => {
-      const h = box.createDiv({ text });
-      Object.assign(h.style, { fontWeight: "600", padding: "4px 8px", background: "var(--background-secondary)", borderBottom: "1px solid var(--background-modifier-border)" });
-    };
+    const box = el.createDiv({ cls: "bookmarks-diff" });
+    const fileHead = (text: string) => box.createDiv({ text, cls: "bookmarks-diff-file" });
     if (p.kept) {
       fileHead(`${p.kept.name} (kept)`);
       for (const line of collapse(keptDiff, 3)) diffRow(box, line);
@@ -277,8 +263,7 @@ export class MergeModal extends Modal {
     for (const choice of conflicts) this.renderConflict(el, choice);
     if (combined.length) {
       const shown = combined.slice(0, 4).join(", ") + (combined.length > 4 ? ", …" : "");
-      const line = el.createEl("p", { cls: "setting-item-description", text: `${combined.length} propert${combined.length === 1 ? "y" : "ies"} combined automatically (${shown}).` });
-      line.style.margin = "6px 0 0";
+      el.createEl("p", { cls: "setting-item-description bookmarks-note-line", text: `${combined.length} propert${combined.length === 1 ? "y" : "ies"} combined automatically (${shown}).` });
     }
   }
 
@@ -286,9 +271,9 @@ export class MergeModal extends Modal {
   private renderConflict(el: HTMLElement, choice: Extract<PropertyChoice, { kind: "conflict" }>): void {
     const from = (path: string) => this.group.notes.find((n) => n.path === path)?.basename ?? path;
     const { main, controls } = rowLine(el);
-    clipped(main, choice.name).style.fontWeight = "600";
+    clipped(main, choice.name).addClass("bookmarks-strong");
     const select = smallSelect(controls);
-    select.style.maxWidth = "16em";
+    select.addClass("mod-wide");
     choice.options.forEach((option, i) => {
       const item = select.createEl("option", { text: `${preview(option.value, 60)} — ${from(option.from)}`, value: `value:${i}` });
       item.title = preview(option.value, 2000);
@@ -315,16 +300,14 @@ export class MergeModal extends Modal {
       // Image values get thumbnails; tapping one picks it.
       const images = choice.options.map((option) => this.handlers.imageSrc(option.value, option.from));
       if (!images.some(Boolean)) return;
-      const strip = el.createDiv();
-      Object.assign(strip.style, { display: "flex", flexWrap: "wrap", gap: "8px", margin: "0 0 8px" });
+      const strip = el.createDiv({ cls: "bookmarks-thumb-strip" });
       choice.options.forEach((option, i) => {
         const src = images[i];
         if (!src) return;
         const picked = pick.kind === "list" || (pick.kind === "value" && pick.option === i);
-        const item = strip.createDiv({ attr: { "aria-label": `Use the value from ${from(option.from)}` } });
-        Object.assign(item.style, { display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", cursor: "pointer", maxWidth: "96px" });
+        const item = strip.createDiv({ cls: "bookmarks-thumb-choice", attr: { "aria-label": `Use the value from ${from(option.from)}` } });
         thumbnail(item, src, picked);
-        clipped(item, from(option.from), true).style.maxWidth = "96px";
+        clipped(item, from(option.from), true);
         item.onclick = () => {
           select.value = `value:${i}`;
           select.onchange?.(new Event("change"));
@@ -332,12 +315,10 @@ export class MergeModal extends Modal {
       });
       return;
     }
-    const list = el.createDiv();
-    Object.assign(list.style, { paddingLeft: "12px", borderLeft: "2px solid var(--background-modifier-border)", marginBottom: "6px" });
+    const list = el.createDiv({ cls: "bookmarks-each-list" });
     choice.options.forEach((option, i) => {
       const row = rowLine(list);
-      const input = row.main.createEl("input", { type: "text", value: pick.names[i] ?? "", attr: { placeholder: "Don't keep" } });
-      Object.assign(input.style, { width: "12em", maxWidth: "100%" });
+      const input = row.main.createEl("input", { type: "text", value: pick.names[i] ?? "", cls: "bookmarks-each-input", attr: { placeholder: "Don't keep" } });
       const set = (name: string) => {
         pick.names[i] = name;
         this.refresh();
@@ -355,14 +336,12 @@ export class MergeModal extends Modal {
     const el = this.filesEl;
     el.empty();
     if (this.unusedError) {
-      const note = el.createEl("p", { cls: "setting-item-description", text: `Couldn't check for files only removed notes use (${this.unusedError}); they'll be left in place.` });
-      note.style.margin = "12px 0 0";
+      el.createEl("p", { cls: "setting-item-description bookmarks-files-note", text: `Couldn't check for files only removed notes use (${this.unusedError}); they'll be left in place.` });
       return;
     }
     const count = this.unused;
     if (!count) return;
-    const label = el.createEl("label");
-    Object.assign(label.style, { display: "flex", alignItems: "center", gap: "8px", marginTop: "12px", cursor: "pointer" });
+    const label = el.createEl("label", { cls: "bookmarks-check-label" });
     const box = label.createEl("input", { type: "checkbox" });
     box.checked = this.removeFiles;
     box.onchange = () => {
@@ -395,35 +374,25 @@ export class MergeModal extends Modal {
 }
 
 /** One line of a diff, wrapping rather than scrolling sideways, or a count of folded lines. */
-function diffRow(parent: HTMLElement, line: DiffLine | { skip: number }, folded = "unchanged lines"): void {
-  const row = parent.createDiv();
-  Object.assign(row.style, { whiteSpace: "pre-wrap", wordBreak: "break-word", padding: "0 8px" });
+export function diffRow(parent: HTMLElement, line: DiffLine | { skip: number }, folded = "unchanged lines"): void {
+  const row = parent.createDiv({ cls: "bookmarks-diff-row" });
   if ("skip" in line) {
     row.setText(`⋯ ${line.skip} ${folded}`);
-    Object.assign(row.style, { color: "var(--text-faint)", fontStyle: "italic", padding: "2px 8px" });
+    row.addClass("mod-skip");
     return;
   }
   row.setText(`${line.op} ${line.text}`);
-  if (line.op === "+") Object.assign(row.style, { background: "rgba(var(--color-green-rgb), 0.15)", color: "var(--text-normal)" });
-  else if (line.op === "-") Object.assign(row.style, { background: "rgba(var(--color-red-rgb), 0.15)", color: "var(--text-normal)" });
-  else row.style.color = "var(--text-muted)";
+  if (line.op === "+") row.addClass("mod-add");
+  else if (line.op === "-") row.addClass("mod-remove");
 }
 
 /** A small image preview, outlined when picked; hidden if the image doesn't load. */
 function thumbnail(parent: HTMLElement, src: string, picked: boolean, size = 64): HTMLImageElement {
-  const img = parent.createEl("img", { attr: { src, alt: "", loading: "lazy" } });
-  Object.assign(img.style, {
-    height: `${size}px`,
-    maxWidth: `${size * 1.5}px`,
-    objectFit: "cover",
-    borderRadius: "4px",
-    flex: "none",
-    outline: picked ? "2px solid var(--interactive-accent)" : "1px solid var(--background-modifier-border)",
-    outlineOffset: "1px",
-  });
-  img.onerror = () => {
-    img.style.display = "none";
-  };
+  const img = parent.createEl("img", { cls: picked ? "bookmarks-thumb is-picked" : "bookmarks-thumb", attr: { src, alt: "", loading: "lazy" } });
+  // Sized per use, so these stay inline.
+  img.style.height = `${size}px`;
+  img.style.maxWidth = `${size * 1.5}px`;
+  img.onerror = () => img.hide();
   return img;
 }
 
@@ -437,34 +406,15 @@ export interface DuplicateEntry {
 }
 
 /** Searchable list of every duplicate group in the vault. */
-export class DuplicateListModal extends SuggestModal<DuplicateEntry> {
-  constructor(
-    app: App,
-    private readonly entries: readonly DuplicateEntry[],
-    private readonly onChoose: (entry: DuplicateEntry) => void,
-  ) {
-    super(app);
-    this.setPlaceholder("Search duplicate bookmarks…");
-    this.emptyStateText = "No matching duplicates";
-    this.limit = 500;
-  }
-
-  getSuggestions(query: string): DuplicateEntry[] {
-    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return this.entries.filter((entry) => {
-      const text = `${entry.url}\n${entry.names.join("\n")}`.toLowerCase();
-      return words.every((word) => text.includes(word));
-    });
-  }
-
-  renderSuggestion(entry: DuplicateEntry, el: HTMLElement): void {
-    const url = el.createDiv({ text: entry.url });
-    Object.assign(url.style, { fontWeight: "600", wordBreak: "break-all" });
-    const names = el.createDiv({ text: entry.names.join(" · ") });
-    Object.assign(names.style, { color: "var(--text-muted)", fontSize: "var(--font-ui-smaller)" });
-  }
-
-  onChooseSuggestion(entry: DuplicateEntry): void {
-    this.onChoose(entry);
-  }
+export function duplicatePicker(app: App, entries: readonly DuplicateEntry[], onChoose: (entry: DuplicateEntry) => void): Picker<DuplicateEntry> {
+  return new Picker(app, entries, {
+    placeholder: "Search duplicate bookmarks…",
+    empty: "No matching duplicates",
+    text: (entry) => `${entry.url}\n${entry.names.join("\n")}`,
+    render: (entry, el) => {
+      el.createDiv({ text: entry.url, cls: "bookmarks-suggestion-url" });
+      el.createDiv({ text: entry.names.join(" · "), cls: "bookmarks-suggestion-detail mod-wrap" });
+    },
+    choose: onChoose,
+  });
 }

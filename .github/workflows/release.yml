@@ -45,7 +45,7 @@ jobs:
         run: |
           flags=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" plugin/main.js plugin/manifest.json docker-compose.yml harness/.env.example --title "$GITHUB_REF_NAME" --generate-notes "${flags[@]}"
+          gh release create "$GITHUB_REF_NAME" plugin/main.js plugin/manifest.json plugin/styles.css docker-compose.yml harness/.env.example --title "$GITHUB_REF_NAME" --generate-notes "${flags[@]}"
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

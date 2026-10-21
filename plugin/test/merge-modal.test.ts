@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 // The modal classes only need to exist; this test looks at member names, not behaviour.
 vi.mock("obsidian", () => ({ Modal: class {}, SuggestModal: class {}, AbstractInputSuggest: class {}, setIcon: () => {} }));
 
-const { DuplicateListModal, MergeModal } = await import("../src/merge-modal");
+const { MergeModal } = await import("../src/merge-modal");
+const { Picker } = await import("../src/source-picker");
 
 /**
  * Properties Obsidian sets on every Modal / SuggestModal instance (read from Obsidian 1.14). A method
@@ -18,7 +19,7 @@ const OBSIDIAN_MODAL_PROPERTIES = [
 ];
 
 describe("merge modals", () => {
-  it.each([MergeModal, DuplicateListModal])("%o doesn't reuse a name Obsidian's Modal sets", (Modal) => {
+  it.each([MergeModal, Picker])("%o doesn't reuse a name Obsidian's Modal sets", (Modal) => {
     const members = Object.getOwnPropertyNames(Modal.prototype);
     expect(members.filter((name) => OBSIDIAN_MODAL_PROPERTIES.includes(name))).toEqual([]);
   });

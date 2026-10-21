@@ -3,7 +3,6 @@
 // up with. Kept free of Obsidian so it can be tested; the plugin reads the notes
 // from the metadata cache and applies the plan.
 
-import { placeContent, type ContentRow } from "./enrich";
 import { asList, isEmpty, same } from "./values";
 
 /** What a merge does with a note: keeps it, folds it into the kept note, trashes it, or leaves it alone for good. */
@@ -227,8 +226,18 @@ export function applyMergedProperties(frontmatter: Record<string, unknown>, plan
 
 /** The kept note's text with each merged body appended under a heading with that note's name. */
 export function appendBodies(text: string, plan: Pick<MergePlan, "bodies">, frontmatterEnd: number): string {
-  const rows: ContentRow[] = plan.bodies.map((b) => ({ item: { kind: "text", text: `# ${b.heading}\n\n${b.body}` }, heading: null, position: "append" }));
-  return rows.length ? placeContent(text, rows, {}, frontmatterEnd) : text;
+  if (!plan.bodies.length) return text;
+  const front = text.slice(0, frontmatterEnd);
+  let body = joinBlocks("", text.slice(frontmatterEnd));
+  for (const b of plan.bodies) body = joinBlocks(body, `# ${b.heading}\n\n${b.body}`.replace(/\n{3,}/g, "\n\n").trim());
+  return `${front && !front.endsWith("\n") ? `${front}\n` : front}${body}\n`;
+}
+
+/** Joins two pieces of Markdown with one blank line, dropping the newlines at their edges. */
+function joinBlocks(out: string, piece: string): string {
+  const p = piece.replace(/^\n+/, "").replace(/\s+$/, "");
+  if (!p.trim()) return out;
+  return out ? `${out}\n\n${p}` : p;
 }
 
 /**

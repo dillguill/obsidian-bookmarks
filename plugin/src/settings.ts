@@ -1,8 +1,11 @@
 import { App, Notice, PluginSettingTab, SecretComponent, Setting } from "obsidian";
 import type { ClipperTemplate } from "./api";
+import { FolderSuggest } from "./folder-suggest";
+import type { PendingInsert } from "./placeholders";
 import type BookmarksPlugin from "./main";
 import { PropertySuggest } from "./property-suggest";
 import { urlPropertyName } from "./template";
+import { errorText } from "./errors";
 
 export interface BookmarksSettings {
   /** Base URL of the bookmarks-server container, e.g. https://bookmarks.tailnet.ts.net */
@@ -14,7 +17,12 @@ export interface BookmarksSettings {
   tokenSecretName: string;
   /** Legacy: the notes folder is now each template's note location; migrated to the server once. */
   notesFolder?: string;
-  assetsFolder: string;
+  /** Legacy: where capture files went before they followed Obsidian's attachment setting; becomes attachmentFolder once. */
+  assetsFolder?: string;
+  /** Where capture files and downloaded media go; empty follows Obsidian's "Default location for new attachments". */
+  attachmentFolder: string;
+  /** Screenshots a written note is still waiting on, with where each goes in the note. */
+  pendingInserts: PendingInsert[];
   /** Poll fallback interval for draining completed jobs (design §3). */
   pollIntervalSeconds: number;
   /**
@@ -37,7 +45,8 @@ export interface BookmarksSettings {
 export const DEFAULT_SETTINGS: BookmarksSettings = {
   serverUrl: "",
   tokenSecretName: "",
-  assetsFolder: "Bookmarks/assets",
+  attachmentFolder: "",
+  pendingInserts: [],
   pollIntervalSeconds: 60,
   urlProperty: "source",
 };
@@ -105,14 +114,17 @@ export class BookmarksSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Assets folder")
-      .setDesc("Where screenshots are saved.")
-      .addText((text) =>
-        text.setValue(this.plugin.settings.assetsFolder).onChange(async (value) => {
-          this.plugin.settings.assetsFolder = value.trim();
+      .setName("Attachment folder override")
+      .setDesc(attachmentDescription(this.app))
+      .addText((text) => {
+        text.setPlaceholder("Use Obsidian's attachment setting").setValue(this.plugin.settings.attachmentFolder);
+        const save = async (value: string) => {
+          this.plugin.settings.attachmentFolder = value.trim().replace(/^\/+|\/+$/g, "");
           await this.plugin.saveSettings();
-        }),
-      );
+        };
+        text.onChange((value) => void save(value));
+        new FolderSuggest(this.app, text.inputEl, (path) => void save(path));
+      });
 
     const urlSetting = new Setting(containerEl).setName("URL property");
     const describeUrl = () => {
@@ -166,8 +178,30 @@ export class BookmarksSettingTab extends PluginSettingTab {
       if (problem) new Notice(problem);
       return problem === null;
     } catch (err) {
-      new Notice(`Connection failed: ${err instanceof Error ? err.message : String(err)}`);
+      new Notice(`Connection failed: ${errorText(err)}`);
       return false;
     }
   }
+}
+
+/** Says where screenshots and media go when the override is empty, from Obsidian's own setting. */
+function attachmentDescription(app: App): string {
+  let setting: unknown;
+  try {
+    // Not in the public API; only used to describe the setting, so a change there just loses the detail.
+    setting = (app.vault as unknown as { getConfig?: (key: string) => unknown }).getConfig?.("attachmentFolderPath");
+  } catch {
+    setting = undefined;
+  }
+  const where =
+    typeof setting !== "string"
+      ? "where Obsidian's “Default location for new attachments” setting says"
+      : setting === "/" || setting === ""
+        ? "in the vault folder, as Obsidian's attachment setting says"
+        : setting === "./"
+          ? "next to each note, as Obsidian's attachment setting says"
+          : setting.startsWith("./")
+            ? `in a “${setting.slice(2)}” folder next to each note, as Obsidian's attachment setting says`
+            : `in “${setting}”, as Obsidian's attachment setting says`;
+  return `Screenshots and downloaded media go ${where}. Name a folder here to put them there instead.`;
 }

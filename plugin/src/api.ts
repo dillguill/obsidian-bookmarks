@@ -1,6 +1,6 @@
 // Wire types for the bookmarks-server HTTP API; mirrors harness/src/api.ts.
 // Bump API_VERSION in both when the API changes incompatibly.
-export const API_VERSION = 7;
+export const API_VERSION = 8;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -9,7 +9,15 @@ export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
  * "enrich" re-fetches a page for a note that already exists: the plugin reads
  * it straight away, so it's never listed for delivery.
  */
-export type CaptureOrigin = "plugin" | "api" | "shortcut" | "bookmarklet" | "share" | "enrich";
+export type CaptureOrigin = "plugin" | "api" | "shortcut" | "bookmarklet" | "share" | "enrich" | "media";
+
+/**
+ * "full" captures everything the template uses in one go. "preview" publishes
+ * the rendered note as soon as the page settles, then holds the page open so
+ * the plugin can render it with another template or ask for its screenshots
+ * (POST /jobs/:id/render, /files, /release).
+ */
+export type CaptureMode = "full" | "preview";
 
 export interface PageMeta {
   /** URL after redirects. */
@@ -50,6 +58,27 @@ export interface Job {
   template?: string | null;
   /** Capture files asked for on top of the ones the rendered note uses. */
   files?: CaptureFile[];
+  mode?: CaptureMode;
+  /** While a preview's page is held: when it's released if nothing asks for it again. */
+  heldUntil?: string | null;
+  /** Media downloads (origin "media"), or a capture's follow-up media download. */
+  media?: MediaJobInfo | null;
+}
+
+/** What a media download fetches: a post's video, its photos, its cover. */
+export type MediaWant = "video" | "photos" | "cover";
+
+/** A media download's progress: the files made so far and what couldn't be fetched. */
+export interface MediaJobInfo {
+  /** The post or video page. */
+  url: string;
+  want: MediaWant[];
+  made: { asset: MediaAsset; want: MediaWant; index?: number; bytes: number }[];
+  errors: { want: MediaWant; index?: number; message: string }[];
+  /** On a capture job: the media download queued after it. */
+  followUp?: string;
+  /** On a media download queued after a capture: that capture's id, so the plugin puts the files in its note. */
+  forCapture?: string;
 }
 
 /** Most photos a TikTok carousel can hold; each is its own capture file. */
@@ -59,10 +88,10 @@ export const TIKTOK_IMAGE_MAX = 35;
  * Files a template can ask for, each named after its template variable, which
  * holds the file's vault path: full page, first screen, first screen at phone
  * width, the main content block and a small first screen, each also in the
- * site's dark mode (`_dark`), a PDF of the page, the page's {{image}} saved
- * locally (`image_local`), and a TikTok post's cover (`tiktok_thumbnail`),
- * video (`tiktok_video`) and carousel photos (`tiktok_image_1`…), whose links
- * expire. The server makes only the ones the rendered note uses.
+ * site's dark mode (`_dark`), and a PDF of the page. The media variables after
+ * them (`image_local`, `tiktok_thumbnail`, `tiktok_video`, `tiktok_image_1`…)
+ * aren't made by a capture: the note shows the web address or the TikTok player
+ * until "Download media" saves them (see harness/src/remote-media.ts).
  */
 export const CAPTURE_FILES = [
   "screenshot_page",
@@ -89,7 +118,18 @@ export function fileExt(kind: CaptureFile, screenshotExt: Job["screenshotExt"]):
 }
 
 /** A capture file, the readable `markdown`, or the `note` rendered with Web Clipper's engine ({@link RenderedNote}, JSON). */
-export type AssetKind = CaptureFile | "markdown" | "note";
+export type AssetKind = CaptureFile | MediaAsset | "markdown" | "note";
+
+/** Files a media download makes: the video, the cover and each photo. */
+export const MEDIA_ASSETS = ["media_video", "media_cover", ...Array.from({ length: TIKTOK_IMAGE_MAX }, (_, i) => `media_photo_${i + 1}` as const)] as const;
+export type MediaAsset = (typeof MEDIA_ASSETS)[number];
+
+/** A capture file or media file's extension: media images share the screenshot format's, jpg when there's none. */
+export function assetExt(kind: CaptureFile | MediaAsset, screenshotExt: Job["screenshotExt"]): string | null {
+  if (kind === "media_video") return "mp4";
+  if (kind.startsWith("media_")) return screenshotExt ?? "jpg";
+  return fileExt(kind as CaptureFile, screenshotExt);
+}
 
 /** A note rendered on the server by Obsidian Web Clipper's template engine. */
 export interface RenderedNote {
@@ -103,7 +143,7 @@ export interface RenderedNote {
   frontmatter: string;
   content: string;
   /** Every non-empty template variable the note was rendered with, by "{{name}}", for "Update note from source". */
-  variables?: Record<string, string>;
+  variables: Record<string, string>;
 }
 
 /**
@@ -126,7 +166,12 @@ export interface CaptureSettings {
   propertyTypes: PropertyTypeEntry[];
   /** Leave capture_id out of note frontmatter; the plugin then tracks it itself. */
   hideCaptureId?: boolean;
+  /** Settings migrations applied so far. */
+  schemaRevision?: number;
 }
+
+/** What adding a captured page does: write the note, write it then download its media, or copy its Markdown. */
+export type CaptureAction = "add" | "add-media" | "copy";
 
 export interface PropertyTypeEntry {
   name: string;
@@ -155,4 +200,6 @@ export interface ClipperTemplate {
   triggers?: string[];
   /** False hides the template from "Update note from source"; missing means shown. Not part of Web Clipper's format. */
   updateFromSource?: boolean;
+  /** What the capture modal's main button does; missing means "add". Not part of Web Clipper's format. */
+  onCapture?: CaptureAction;
 }

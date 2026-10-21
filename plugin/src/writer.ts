@@ -1,6 +1,8 @@
 import { CAPTURE_FILES, fileExt, fileMarker, type CaptureFile, type Job, type RenderedNote } from "./api";
 import type { DedupIndex } from "./dedup";
 import type { PageData } from "./page-data";
+import { frontmatterFrom, type PropertyField } from "./fields";
+import { extractTokens, tokensIn, type BodyAnchor } from "./placeholders";
 import { cleanUrl } from "./url";
 import { formatDate, render, renderFrontmatter, type ClipperTemplate, type Variables } from "./template";
 
@@ -12,6 +14,10 @@ export interface VaultPort {
   createNote(path: string, content: string): Promise<void>;
   /** Overwrites an existing note. */
   replaceNote(path: string, content: string): Promise<void>;
+  /** A free path for a new attachment of the note at `notePath`, where the user's Obsidian attachment setting puts it. */
+  attachmentPath(name: string, notePath: string): Promise<string>;
+  /** Sets properties on a note the way Obsidian's Properties view writes them. */
+  setFrontmatter(path: string, values: Record<string, unknown>): Promise<void>;
 }
 
 /**
@@ -40,7 +46,8 @@ export interface WriteOptions {
   index: DedupIndex;
   template: ClipperTemplate;
   notesFolder: string;
-  assetsFolder: string;
+  /** Where capture files go; empty follows the user's Obsidian attachment setting. */
+  attachmentFolder: string;
   now?: Date;
   /** Leave capture_id out of the fallback renderer's frontmatter (the shared hideCaptureId setting). */
   hideCaptureId?: boolean;
@@ -110,14 +117,21 @@ export function fillFiles(text: string, saved: SavedFiles): string {
   }, text);
 }
 
-/** Saves capture files in the assets folder: <note>.jpg for the page, <note>-banner.jpg, <note>-banner-dark.jpg and so on, <note>.pdf, <note>-image.jpg, <note>-tiktok-video.mp4. */
+/**
+ * Saves capture files as the note's attachments: <note>.jpg for the page,
+ * <note>-banner.jpg, <note>-banner-dark.jpg and so on, <note>.pdf,
+ * <note>-image.jpg, <note>-tiktok-video.mp4. They go where the user's Obsidian
+ * attachment setting puts them, or in `folder` when the plugin overrides it;
+ * existing files are never overwritten.
+ */
 export async function saveCaptureFiles(
   vault: VaultPort,
-  assetsFolder: string,
+  folder: string,
   files: Partial<Record<CaptureFile, ArrayBuffer | null>> | undefined,
   screenshotExt: Job["screenshotExt"],
-  noteBase: string,
+  notePath: string,
 ): Promise<SavedFiles> {
+  const noteBase = notePath.slice(notePath.lastIndexOf("/") + 1).replace(/\.md$/, "");
   const saved: SavedFiles = {};
   for (const kind of CAPTURE_FILES) {
     const data = files?.[kind];
@@ -126,12 +140,24 @@ export async function saveCaptureFiles(
     // screenshot_page -> note, screenshot_banner_dark -> note-banner-dark, screenshot_page_dark -> note-dark, image_local -> note-image.
     const suffix = kind.replace(/^(screenshot|pdf)_/, "").replace(/^page_?/, "").replace(/_local$/, "").replace(/_/g, "-");
     const base = suffix ? `${noteBase}-${suffix}` : noteBase;
-    await vault.ensureFolder(assetsFolder);
-    const path = await freePath(vault, assetsFolder, base, ext);
+    const path = await attachmentPath(vault, folder, `${base}.${ext}`, notePath);
     await vault.writeBinary(path, data);
     saved[kind] = path;
   }
   return saved;
+}
+
+/** A free path for one attachment: in the override folder, else where Obsidian's setting says (its folder made if missing). */
+export async function attachmentPath(vault: VaultPort, folder: string, name: string, notePath: string): Promise<string> {
+  if (folder) {
+    await vault.ensureFolder(folder);
+    const dot = name.lastIndexOf(".");
+    return freePath(vault, folder, name.slice(0, dot), name.slice(dot + 1));
+  }
+  const path = await vault.attachmentPath(name, notePath);
+  const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  if (parent) await vault.ensureFolder(parent);
+  return path;
 }
 
 async function freePath(vault: VaultPort, folder: string, base: string, ext: string): Promise<string> {
@@ -192,7 +218,7 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
     const folder = note.path.replace(/^\/+|\/+$/g, "") || options.notesFolder;
     const base = cleanName(note.noteName) || `bookmark-${formatDate((options.now ?? new Date()).toISOString(), "YYYY-MM-DD")}`;
     const notePath = await targetPath(folder, base);
-    const saved = await saveCaptureFiles(vault, options.assetsFolder, input.files, job.screenshotExt, notePath.slice(notePath.lastIndexOf("/") + 1, -3));
+    const saved = await saveCaptureFiles(vault, options.attachmentFolder, input.files, job.screenshotExt, notePath);
     const body = fillFiles(note.content, saved).replace(/^\s+/, "").trimEnd();
     await save(notePath, `${fillFiles(note.frontmatter, saved)}${body ? `${body}\n` : ""}`);
     index.set(notePath, url, job.id);
@@ -220,9 +246,7 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   const page: PageData | undefined = meta ?? undefined;
   const base = noteBaseName(template, vars, page);
   const notePath = await targetPath(options.notesFolder, base);
-  const noteBase = notePath.slice(notePath.lastIndexOf("/") + 1, -3);
-
-  const saved = await saveCaptureFiles(vault, options.assetsFolder, input.files, job.screenshotExt, noteBase);
+  const saved = await saveCaptureFiles(vault, options.attachmentFolder, input.files, job.screenshotExt, notePath);
 
   let content = input.markdown.trim();
   if (job.status === "failed") {
@@ -235,4 +259,41 @@ export async function writeBookmark(input: CapturedBookmark, options: WriteOptio
   await save(notePath, `${fillFiles(renderFrontmatter(template, vars, page, options.hideCaptureId), saved)}\n${body.trimEnd()}\n`);
   index.set(notePath, url, job.id);
   return { kind: "written", path: notePath };
+}
+
+/** A note as the capture modal shows it, ready to write. */
+export interface EditedNote {
+  /** The bookmark's address, for the duplicate index. */
+  url: string;
+  captureId: string | null;
+  noteName: string;
+  folder: string;
+  properties: PropertyField[];
+  /** With screenshots as their {{variable}} tokens. */
+  body: string;
+}
+
+/** What a written note still waits on: screenshots in the body, and properties that hold one. */
+export interface Waiting {
+  body: (BodyAnchor & { kind: CaptureFile })[];
+  properties: { name: string; kind: CaptureFile; expression: string }[];
+}
+
+/**
+ * Writes the note the capture modal shows, the user's edits and all: the body
+ * as edited with every screenshot token taken out, then its properties set the
+ * way Obsidian writes them. Says what screenshots it waits on.
+ */
+export async function writeEditedNote(vault: VaultPort, index: DedupIndex, note: EditedNote): Promise<{ path: string; waiting: Waiting }> {
+  const folder = note.folder.replace(/^\/+|\/+$/g, "");
+  const base = cleanName(note.noteName) || `bookmark-${formatDate(new Date().toISOString(), "YYYY-MM-DD")}`;
+  if (folder) await vault.ensureFolder(folder);
+  const path = await freePath(vault, folder, base, "md");
+  const { body, anchors } = extractTokens(note.body);
+  const text = body.replace(/^\s+/, "").trimEnd();
+  await vault.createNote(path, text ? `${text}\n` : "");
+  await vault.setFrontmatter(path, frontmatterFrom(note.properties));
+  index.set(path, note.url, note.captureId ?? undefined);
+  const properties = note.properties.flatMap((field) => tokensIn(field.text).map((kind) => ({ name: field.name, kind, expression: field.text })));
+  return { path, waiting: { body: anchors, properties } };
 }

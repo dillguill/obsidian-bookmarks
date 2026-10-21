@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { fileMarker, type Job, type RenderedNote } from "../src/api";
 import { DedupIndex } from "../src/dedup";
 import { DEFAULT_TEMPLATE } from "../src/template";
-import { writeBookmark, type VaultPort } from "../src/writer";
+import type { PropertyField } from "../src/fields";
+import { writeBookmark, writeEditedNote, type VaultPort } from "../src/writer";
 
 class MemoryVault implements VaultPort {
   files = new Map<string, string | ArrayBuffer>();
@@ -23,6 +24,20 @@ class MemoryVault implements VaultPort {
   async replaceNote(path: string, content: string) {
     if (!this.files.has(path)) throw new Error("missing");
     this.files.set(path, content);
+  }
+  frontmatter = new Map<string, Record<string, unknown>>();
+  async setFrontmatter(path: string, values: Record<string, unknown>) {
+    if (!this.files.has(path)) throw new Error("missing");
+    this.frontmatter.set(path, { ...(this.frontmatter.get(path) ?? {}), ...values });
+  }
+  /** Like Obsidian's "In subfolder under current folder" (attachments), with " 1", " 2" for taken names. */
+  async attachmentPath(name: string, notePath: string) {
+    const folder = `${notePath.slice(0, notePath.lastIndexOf("/"))}/attachments`;
+    const dot = name.lastIndexOf(".");
+    for (let n = 0; ; n++) {
+      const path = `${folder}/${n ? `${name.slice(0, dot)} ${n}${name.slice(dot)}` : name}`;
+      if (!this.files.has(path)) return path;
+    }
   }
 }
 
@@ -58,11 +73,28 @@ describe("writeBookmark", () => {
   let vault: MemoryVault;
   let index: DedupIndex;
   const now = new Date("2026-10-02T12:00:00");
-  const options = () => ({ vault, index, template: DEFAULT_TEMPLATE, notesFolder: "Bookmarks/notes", assetsFolder: "Bookmarks/assets", now });
+  const options = () => ({ vault, index, template: DEFAULT_TEMPLATE, notesFolder: "Bookmarks/notes", attachmentFolder: "Bookmarks/assets", now });
 
   beforeEach(() => {
     vault = new MemoryVault();
     index = new DedupIndex();
+  });
+
+  it("puts capture files where Obsidian's attachment setting says when there's no override", async () => {
+    const result = await writeBookmark({ job: job(), markdown: "Hello", files: { screenshot_page: new ArrayBuffer(3) } }, { ...options(), attachmentFolder: "" });
+    const shot = "Bookmarks/notes/attachments/example-com-a-post-2026-10-02.jpg";
+    expect(vault.files.has(shot)).toBe(true);
+    expect(vault.folders.has("Bookmarks/notes/attachments")).toBe(true);
+    expect(vault.files.get(result.path) as string).toContain(`![[${shot}]]`);
+  });
+
+  it("never overwrites an attachment that's already there", async () => {
+    vault.files.set("Bookmarks/notes/attachments/example-com-a-post-2026-10-02.jpg", new ArrayBuffer(1));
+    await writeBookmark({ job: job(), markdown: "Hello", files: { screenshot_page: new ArrayBuffer(3) } }, { ...options(), attachmentFolder: "" });
+    expect(vault.files.has("Bookmarks/notes/attachments/example-com-a-post-2026-10-02 1.jpg")).toBe(true);
+    vault.files.set("Bookmarks/assets/example-com-a-post-2026-10-02.jpg", new ArrayBuffer(1));
+    await writeBookmark({ job: job({ id: "01JABCDEFGHJKMNPQRSTVWXYZ1" }), markdown: "Hello", files: { screenshot_page: new ArrayBuffer(3) } }, { ...options(), mode: { kind: "new" } });
+    expect(vault.files.has("Bookmarks/assets/example-com-a-post-2026-10-02-2.jpg")).toBe(true);
   });
 
   it("writes the screenshot and a note with frontmatter and body", async () => {
@@ -86,6 +118,7 @@ describe("writeBookmark", () => {
   it("saves every capture file under the note's name", async () => {
     const note: RenderedNote = {
       template: "Clips",
+      variables: {},
       noteName: "All",
       path: "Clips",
       frontmatter: "---\n---\n",
@@ -112,9 +145,17 @@ describe("writeBookmark", () => {
     expect(result.path).toBe("Bookmarks/notes/example-com-a-post-2026-10-02-2.md");
   });
 
+  it("writes a phone capture's TikTok player as it is, for its media download to replace later", async () => {
+    const player = `<iframe\nsrc="https://www.tiktok.com/player/v1/1?autoplay=0"\n/>`;
+    const note: RenderedNote = { template: "TikTok", variables: {}, noteName: "Post", path: "Clips", frontmatter: `---\nthumbnail: "https://p16.tiktokcdn.com/c.jpeg"\n---\n`, content: `${player}\n\nCaption` };
+    const result = await writeBookmark({ job: job(), markdown: "", files: {}, note }, options());
+    expect(vault.files.get(result.path)).toBe(`---\nthumbnail: "https://p16.tiktokcdn.com/c.jpeg"\n---\n${player}\n\nCaption\n`);
+  });
+
   it("writes the server-rendered note, filling in the screenshot path", async () => {
     const note: RenderedNote = {
       template: "Clips",
+      variables: {},
       noteName: "A Post: notes",
       path: "Clips/example.com/",
       frontmatter: `---\nsource: "https://example.com/post"\ncover: "[[${fileMarker("screenshot_page")}]]"\ncapture_id: "${job().id}"\n---\n`,
@@ -136,6 +177,7 @@ describe("writeBookmark", () => {
   it("saves the banner shot next to the note and fills {{screenshot_banner}}", async () => {
     const note: RenderedNote = {
       template: "Clips",
+      variables: {},
       noteName: "Banner",
       path: "Clips",
       frontmatter: `---\nbanner: "[[${fileMarker("screenshot_banner")}]]"\npage: "${fileMarker("screenshot_page")}"\n---\n`,
@@ -207,3 +249,46 @@ describe("DedupIndex", () => {
     expect(index.size).toBe(0);
   });
 });
+
+describe("writeEditedNote", () => {
+  let vault: MemoryVault;
+  let index: DedupIndex;
+  const field = (name: string, text: string, type: PropertyField["type"] = "text"): PropertyField => ({ name, type, text, expression: "", edited: false });
+  const note = (over = {}) => ({
+    url: "https://example.com/post",
+    captureId: "01JCAPTURE",
+    noteName: "A Post: notes",
+    folder: "Clips/",
+    properties: [field("source", "https://example.com/post"), field("tags", "a, b", "multitext"), field("cover", "[[{{screenshot_banner}}]]"), field("empty", "")],
+    body: "\n# A Post\n\n![[{{screenshot_page}}]]\n\nMy edit\n",
+    ...over,
+  });
+
+  beforeEach(() => {
+    vault = new MemoryVault();
+    index = new DedupIndex();
+  });
+
+  it("writes the body as edited, without the screenshots, and sets typed properties", async () => {
+    const { path, waiting } = await writeEditedNote(vault, index, note());
+    expect(path).toBe("Clips/A Post notes.md");
+    expect(vault.files.get(path)).toBe("# A Post\n\nMy edit\n");
+    expect(vault.frontmatter.get(path)).toEqual({ source: "https://example.com/post", tags: ["a", "b"], cover: null, empty: null });
+    expect(waiting.body.map((a) => [a.kind, a.form])).toEqual([["screenshot_page", "embed"]]);
+    expect(waiting.properties).toEqual([{ name: "cover", kind: "screenshot_banner", expression: "[[{{screenshot_banner}}]]" }]);
+  });
+
+  it("picks a free name and puts the note in the duplicate index", async () => {
+    vault.files.set("Clips/A Post notes.md", "taken");
+    const { path } = await writeEditedNote(vault, index, note());
+    expect(path).toBe("Clips/A Post notes-2.md");
+    expect(index.findByUrl("https://example.com/post")).toBe(path);
+    expect(index.findByCaptureId("01JCAPTURE")).toBe(path);
+  });
+
+  it("writes in the vault folder when the folder is empty", async () => {
+    const { path } = await writeEditedNote(vault, index, note({ folder: "", noteName: "" }));
+    expect(path).toMatch(/^bookmark-\d{4}-\d{2}-\d{2}\.md$/);
+  });
+});
+

@@ -1,36 +1,38 @@
 import { App, SuggestModal } from "obsidian";
-import { filterSources, type SourceEntry } from "./enrich";
+import { filterWords } from "./search";
 
-/** A searchable list of variables and files to add to the update. */
-export class SourcePicker extends SuggestModal<SourceEntry> {
+export interface PickerOptions<T> {
+  placeholder: string;
+  empty: string;
+  /** What a search matches against. */
+  text: (item: T) => string;
+  render: (item: T, el: HTMLElement) => void;
+  choose: (item: T) => void;
+}
+
+/** A searchable list to pick one item from; the query matches every word anywhere in an item's text. */
+export class Picker<T> extends SuggestModal<T> {
   constructor(
     app: App,
-    private readonly entries: readonly SourceEntry[],
-    placeholder: string,
+    private readonly items: readonly T[],
+    private readonly options: PickerOptions<T>,
   ) {
     super(app);
-    this.setPlaceholder(placeholder);
-    this.emptyStateText = "No matching variables";
+    this.setPlaceholder(options.placeholder);
+    this.emptyStateText = options.empty;
     this.limit = 500;
   }
 
-  getSuggestions(query: string): SourceEntry[] {
-    return filterSources(this.entries, query);
+  getSuggestions(query: string): T[] {
+    return filterWords(this.items, query, this.options.text);
   }
 
-  renderSuggestion(entry: SourceEntry, el: HTMLElement): void {
-    const top = el.createDiv();
-    Object.assign(top.style, { display: "flex", justifyContent: "space-between", gap: "8px" });
-    const name = top.createSpan({ text: entry.name });
-    Object.assign(name.style, { fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-    Object.assign(top.createSpan({ text: entry.section }).style, { color: "var(--text-faint)", fontSize: "var(--font-ui-smaller)", flex: "none" });
-    if (entry.detail) {
-      const detail = el.createDiv({ text: entry.detail });
-      Object.assign(detail.style, { color: "var(--text-muted)", fontSize: "var(--font-ui-smaller)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" });
-    }
+  renderSuggestion(item: T, el: HTMLElement): void {
+    this.options.render(item, el);
   }
 
-  onChooseSuggestion(entry: SourceEntry): void {
-    entry.choose();
+  onChooseSuggestion(item: T): void {
+    this.options.choose(item);
   }
 }
+

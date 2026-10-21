@@ -1,0 +1,883 @@
+/* Bookmarks plugin styles. Every class is prefixed bookmarks- and uses Obsidian's CSS variables. */
+
+/* ---- shared rows (modal-ui.ts) ---- */
+
+.bookmarks-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0 4px;
+}
+
+.bookmarks-strong {
+  font-weight: 600;
+}
+
+.bookmarks-section-add {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 8px;
+  height: auto;
+}
+
+.bookmarks-icon-button {
+  flex: none;
+}
+
+.bookmarks-small-select {
+  font-size: var(--font-ui-smaller);
+  height: auto;
+  padding: 2px 24px 2px 8px;
+  max-width: 11em;
+}
+
+.bookmarks-small-select.mod-wide {
+  max-width: 16em;
+}
+
+/* What it is on the left, controls on the right; on narrow screens the controls wrap underneath. */
+.bookmarks-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 6px 0;
+}
+
+.bookmarks-row.mod-divided {
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.bookmarks-row.is-dragging {
+  opacity: 0.4;
+}
+
+.bookmarks-row-main {
+  flex: 1 1 12em;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bookmarks-row-main.mod-column {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.bookmarks-row-main.mod-stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.bookmarks-row-controls {
+  flex: 1 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.bookmarks-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bookmarks-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  flex: none;
+}
+
+.bookmarks-clipped {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  padding: 0;
+}
+
+.bookmarks-clickable {
+  cursor: pointer;
+}
+
+.bookmarks-error-box {
+  color: var(--text-error);
+  border: 1px solid var(--text-error);
+  border-radius: var(--radius-s);
+  padding: 8px 10px;
+  margin: 8px 0;
+  font-size: var(--font-ui-small);
+}
+
+.bookmarks-problem {
+  color: var(--text-error);
+  margin-top: 8px;
+}
+
+.bookmarks-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.bookmarks-note-line {
+  margin: 6px 0 0;
+}
+
+.bookmarks-notice-actions a {
+  margin-right: 1em;
+}
+
+.bookmarks-full-width {
+  width: 100%;
+}
+
+/* ---- pickers (source-picker.ts) ---- */
+
+.bookmarks-suggestion-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bookmarks-suggestion-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmarks-suggestion-section {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  flex: none;
+}
+
+.bookmarks-suggestion-detail {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmarks-suggestion-url {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.bookmarks-suggestion-detail.mod-wrap {
+  white-space: normal;
+}
+
+/* ---- merge duplicates (merge-modal.ts) ---- */
+
+.bookmarks-merge-url {
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+
+.bookmarks-changes-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0 4px;
+  cursor: pointer;
+}
+
+.bookmarks-diff {
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
+}
+
+.bookmarks-diff-file {
+  font-weight: 600;
+  padding: 4px 8px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* Wraps rather than scrolling sideways. */
+.bookmarks-diff-row {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 8px;
+  color: var(--text-muted);
+}
+
+.bookmarks-diff-row.mod-add {
+  background: rgba(var(--color-green-rgb), 0.15);
+  color: var(--text-normal);
+}
+
+.bookmarks-diff-row.mod-remove {
+  background: rgba(var(--color-red-rgb), 0.15);
+  color: var(--text-normal);
+}
+
+.bookmarks-diff-row.mod-skip {
+  color: var(--text-faint);
+  font-style: italic;
+  padding: 2px 8px;
+}
+
+.bookmarks-thumb-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.bookmarks-thumb-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  max-width: 96px;
+}
+
+.bookmarks-thumb-choice .bookmarks-clipped {
+  max-width: 96px;
+}
+
+.bookmarks-thumb {
+  object-fit: cover;
+  border-radius: 4px;
+  flex: none;
+  outline: 1px solid var(--background-modifier-border);
+  outline-offset: 1px;
+}
+
+.bookmarks-thumb.is-picked {
+  outline: 2px solid var(--interactive-accent);
+}
+
+.bookmarks-each-list {
+  padding-left: 12px;
+  border-left: 2px solid var(--background-modifier-border);
+  margin-bottom: 6px;
+}
+
+.bookmarks-each-input {
+  width: 12em;
+  max-width: 100%;
+}
+
+.bookmarks-files-note {
+  margin: 12px 0 0;
+}
+
+.bookmarks-check-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  cursor: pointer;
+}
+
+/* ---- capture and update modals (clip-modal.ts), after Obsidian Web Clipper ---- */
+
+.bookmarks-clip-modal {
+  --bookmarks-label-width: var(--metadata-label-width, 9em);
+}
+
+/*
+ * A column: header and URL on top, the note scrolling in the middle, the
+ * footer pinned at the bottom, so Add is always on screen (phones too).
+ */
+.bookmarks-clip-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: min(90vh, 90dvh);
+}
+
+.bookmarks-clip-modal .modal-content.bookmarks-clip {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  gap: 8px;
+}
+
+.bookmarks-clip-top {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: none;
+}
+
+.bookmarks-clip-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Room for focus rings at the edges. */
+  padding: 2px;
+  margin: -2px;
+}
+
+.bookmarks-clip-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The icon in front of the template and URL lines. */
+.bookmarks-clip-line-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-faint);
+}
+
+.bookmarks-clip-line-icon svg {
+  width: var(--icon-s, 16px);
+  height: var(--icon-s, 16px);
+}
+
+.bookmarks-clip-template {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  box-shadow: none;
+  background-color: transparent;
+  color: var(--text-muted);
+  padding-left: 0;
+}
+
+.bookmarks-clip-template:hover,
+.bookmarks-clip-template:focus {
+  color: var(--text-normal);
+}
+
+.bookmarks-clip-changed {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  flex: none;
+}
+
+/* The URL: a quiet line like the template's, boxed only while hovered or edited. */
+.bookmarks-clip-url {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bookmarks-clip-url-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bookmarks-clip-url-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: auto;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  text-overflow: ellipsis;
+  border-radius: var(--radius-s);
+}
+
+.bookmarks-clip-url-input:hover {
+  background: var(--background-modifier-hover);
+}
+
+.bookmarks-clip-url-input:focus {
+  color: var(--text-normal);
+  background: var(--background-modifier-form-field);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.bookmarks-clip-url.is-readonly .bookmarks-clip-url-input {
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+}
+
+.bookmarks-clip-folder {
+  width: 100%;
+}
+
+.bookmarks-clip-status {
+  padding-left: calc(var(--icon-s, 16px) + 6px);
+  font-size: var(--font-ui-smaller);
+}
+
+.bookmarks-clip-status.mod-error {
+  color: var(--text-error);
+}
+
+.bookmarks-clip-status a {
+  margin-left: 0.5em;
+}
+
+/* The file name: a labelled row, like a property, so it reads as editable. */
+.bookmarks-clip-name {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-s);
+  min-height: var(--metadata-input-height, 1.75rem);
+}
+
+.bookmarks-clip-name:hover {
+  box-shadow: 0 0 0 1px var(--background-modifier-border);
+}
+
+.bookmarks-clip-name:focus-within {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.bookmarks-clip-name-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 var(--bookmarks-label-width);
+  padding: 0 6px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.bookmarks-clip-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  font-weight: var(--font-semibold, 600);
+}
+
+.bookmarks-clip-name-input:focus {
+  background: var(--background-modifier-hover);
+}
+
+
+
+.bookmarks-clip-properties-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bookmarks-clip-properties-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: var(--font-semibold, 600);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.bookmarks-clip-chevron {
+  display: inline-flex;
+  transition: transform 100ms ease-in-out;
+}
+
+.bookmarks-clip-chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+.bookmarks-clip-properties.is-collapsed .bookmarks-clip-chevron {
+  transform: rotate(-90deg);
+}
+
+.bookmarks-clip-properties.is-collapsed .bookmarks-clip-property-list {
+  display: none;
+}
+
+.bookmarks-clip-property-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--metadata-gap, 3px);
+  padding: 4px 0;
+}
+
+.bookmarks-property {
+  border-radius: var(--radius-s);
+}
+
+.bookmarks-property:hover {
+  box-shadow: 0 0 0 1px var(--background-modifier-border);
+}
+
+.bookmarks-property:focus-within {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+
+.bookmarks-property-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: var(--metadata-input-height, 1.75rem);
+}
+
+.bookmarks-property-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 var(--bookmarks-label-width);
+  min-width: 0;
+  padding: 0 6px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.bookmarks-property-icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.bookmarks-property-icon svg {
+  width: var(--icon-s, 16px);
+  height: var(--icon-s, 16px);
+}
+
+.bookmarks-property-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmarks-property-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.bookmarks-property-input {
+  width: 100%;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  font-size: var(--font-ui-small);
+}
+
+.bookmarks-property-input:focus {
+  background: var(--background-modifier-hover);
+}
+
+.bookmarks-property-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  font-size: var(--font-ui-small);
+}
+
+.bookmarks-property-extra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 0 6px 4px calc(var(--bookmarks-label-width) + 8px);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.bookmarks-clip-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--divider-color, var(--background-modifier-border));
+  padding-top: 8px;
+}
+
+.bookmarks-clip-body-input {
+  width: 100%;
+  min-height: 10em;
+  resize: vertical;
+  font-family: var(--font-text);
+  font-size: var(--font-ui-small);
+}
+
+.bookmarks-clip-footer {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--divider-color, var(--background-modifier-border));
+  padding-top: 10px;
+}
+
+.bookmarks-clip-footer-left {
+  flex: 1 1 12em;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bookmarks-clip-split {
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.bookmarks-clip-action {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.bookmarks-clip-action.mod-alone {
+  border-radius: var(--button-radius, var(--radius-s));
+}
+
+.bookmarks-clip-more {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 0 8px;
+}
+
+.bookmarks-clip-empty {
+  padding: 4px 6px;
+}
+
+/* Phones: the label column narrows and the footer wraps, so nothing scrolls sideways. */
+@media (max-width: 400px) {
+  .bookmarks-clip-modal {
+    --bookmarks-label-width: 7.5em;
+  }
+
+  .bookmarks-clip-footer-left {
+    flex-basis: 100%;
+  }
+
+  .bookmarks-clip-split {
+    flex: 1 1 100%;
+  }
+
+  .bookmarks-clip-action {
+    flex: 1 1 auto;
+  }
+}
+
+/* Obsidian's phone modals fill the screen; keep the note scrolling and the footer on it, above the keyboard. */
+.is-phone .bookmarks-clip-modal {
+  max-height: 100%;
+  height: 100%;
+}
+
+.is-phone .bookmarks-clip-body-input {
+  min-height: 6em;
+}
+
+.bookmarks-property-remove {
+  visibility: hidden;
+  flex: none;
+}
+
+.bookmarks-property:hover .bookmarks-property-remove,
+.bookmarks-property:focus-within .bookmarks-property-remove {
+  visibility: visible;
+}
+
+/* No hover on touch screens: always show it there. */
+@media (hover: none) {
+  .bookmarks-property-remove {
+    visibility: visible;
+  }
+}
+
+.bookmarks-property-new {
+  padding: 2px 6px;
+}
+
+/* ---- update from source (update-modal.ts) ---- */
+
+.bookmarks-clip-hint {
+  padding-left: calc(var(--bookmarks-label-width) + 8px);
+  font-size: var(--font-ui-smaller);
+}
+
+.bookmarks-clip-hint a {
+  margin-left: 0.25em;
+}
+
+.bookmarks-property.is-changed .bookmarks-property-key {
+  color: var(--text-accent);
+}
+
+.bookmarks-property.is-removed .bookmarks-property-name,
+.bookmarks-property.is-removed .bookmarks-property-input {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+
+.bookmarks-property-compare {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 10em;
+}
+
+.bookmarks-clip-body-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.bookmarks-clip-section-title {
+  font-weight: var(--font-semibold, 600);
+  color: var(--text-muted);
+}
+
+/* Keep / Add to the end / Replace, as one control. */
+.bookmarks-segmented {
+  display: inline-flex;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+}
+
+.bookmarks-segmented button {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  font-size: var(--font-ui-smaller);
+  height: auto;
+  padding: 3px 10px;
+}
+
+.bookmarks-segmented button + button {
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.bookmarks-segmented button.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.bookmarks-clip-body-input.is-readonly {
+  color: var(--text-muted);
+  background: var(--background-secondary);
+}
+
+.bookmarks-clip-diff-toggle {
+  align-self: flex-start;
+  font-size: var(--font-ui-smaller);
+}
+
+/* ---- download media (media-modal.ts) ---- */
+
+.bookmarks-media-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(60vh, 60dvh);
+  overflow-y: auto;
+}
+
+.bookmarks-media-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.bookmarks-media-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.bookmarks-media-thumb {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--text-faint);
+}
+
+.bookmarks-media-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.bookmarks-media-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bookmarks-media-label,
+.bookmarks-media-where {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmarks-media-status {
+  flex: 0 1 auto;
+  max-width: 45%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-ui-smaller);
+}
+
+.bookmarks-media-status-icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.bookmarks-media-row.is-done .bookmarks-media-status {
+  color: var(--color-green);
+}
+
+.bookmarks-media-row.is-failed .bookmarks-media-status {
+  color: var(--text-error);
+}
+
+.bookmarks-media-row.is-working .bookmarks-media-status-icon {
+  animation: bookmarks-spin 1s linear infinite;
+}
+
+.bookmarks-media-reason {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes bookmarks-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
