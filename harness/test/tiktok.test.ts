@@ -116,6 +116,18 @@ describe("tiktokData", () => {
     // TikTok's player swipes through photo posts too.
     expect(data.variables.tiktok_embed).toBe(videoEmbed(post.id));
   });
+  it("shows the player for the post instead of saved files when media isn't downloaded", () => {
+    const photo = (name: string) => ({ imageURL: { urlList: [`https://p16.tiktokcdn-us.com/${name}.jpeg`] } });
+    const photos = tiktokData({ ...post, kind: "photo" }, { id: post.id, imagePost: { images: [photo("one"), photo("two")] } }, [], false);
+    expect(photos.variables.tiktok_images).toBe(videoEmbed(post.id));
+    expect(photos.variables.tiktok_save).toBe(videoEmbed(post.id));
+    // The addresses are still there for "Download media" to fetch.
+    expect(photos.images).toHaveLength(2);
+    const video = tiktokData(post, { id: post.id, video: { playAddr: "https://v16.tiktokcdn.com/v.mp4" } }, [], false);
+    expect(video.variables.tiktok_save).toBe(videoEmbed(post.id));
+    expect(video.variables.tiktok_images).toBe("");
+    expect(video.video).toEqual(["https://v16.tiktokcdn.com/v.mp4"]);
+  });
 });
 
 describe("transcripts", () => {

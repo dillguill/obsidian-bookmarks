@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { AssetKind, CaptureFile, CaptureOrigin, CaptureSettings, Job, JobStatus, PageMeta } from "./api.js";
+import type { AssetKind, CaptureFile, CaptureMode, CaptureOrigin, CaptureSettings, Job, JobStatus, MediaJobInfo, PageMeta } from "./api.js";
 import { currentSettings } from "./settings.js";
 import { ulid } from "./ulid.js";
 
@@ -16,6 +16,9 @@ interface Row {
   screenshot_ext: string | null;
   template: string | null;
   files: string | null;
+  mode: string;
+  held_until: string | null;
+  media: string | null;
   created_at: string;
   updated_at: string;
   delivered_at: string | null;
@@ -35,6 +38,9 @@ function toJob(row: Row): Job {
     screenshotExt: row.screenshot_ext as Job["screenshotExt"],
     template: row.template ?? null,
     files: row.files ? (JSON.parse(row.files) as CaptureFile[]) : [],
+    mode: row.mode as CaptureMode,
+    heldUntil: row.held_until,
+    media: row.media ? (JSON.parse(row.media) as MediaJobInfo) : null,
   };
 }
 
@@ -67,17 +73,32 @@ export class JobStore {
     const columns = this.db.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>;
     if (!columns.some((c) => c.name === "template")) this.db.exec("ALTER TABLE jobs ADD COLUMN template TEXT");
     if (!columns.some((c) => c.name === "files")) this.db.exec("ALTER TABLE jobs ADD COLUMN files TEXT");
-    // A crash mid-capture leaves rows running; retry them.
+    if (!columns.some((c) => c.name === "mode")) this.db.exec("ALTER TABLE jobs ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'");
+    if (!columns.some((c) => c.name === "held_until")) this.db.exec("ALTER TABLE jobs ADD COLUMN held_until TEXT");
+    if (!columns.some((c) => c.name === "media")) this.db.exec("ALTER TABLE jobs ADD COLUMN media TEXT");
+    // A crash mid-capture leaves rows running; retry them. A preview's held page
+    // died with the process and nobody is waiting on it any more.
+    this.db.prepare("UPDATE jobs SET status = 'failed', error = 'cancelled', held_until = NULL WHERE status = 'running' AND mode = 'preview'").run();
     this.db.prepare("UPDATE jobs SET status = 'pending' WHERE status = 'running'").run();
   }
 
-  create(url: string, origin: CaptureOrigin, template: string | null = null, files: CaptureFile[] = []): Job {
+  create(url: string, origin: CaptureOrigin, template: string | null = null, files: CaptureFile[] = [], mode: CaptureMode = "full", media: MediaJobInfo | null = null): Job {
     const now = new Date().toISOString();
     const id = ulid();
     this.db
-      .prepare("INSERT INTO jobs (id, url, origin, status, template, files, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)")
-      .run(id, url, origin, template, files.length ? JSON.stringify(files) : null, now, now);
+      .prepare("INSERT INTO jobs (id, url, origin, status, template, files, mode, media, created_at, updated_at) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)")
+      .run(id, url, origin, template, files.length ? JSON.stringify(files) : null, mode, media ? JSON.stringify(media) : null, now, now);
     return this.get(id)!;
+  }
+
+  /** Records that a preview's page is held, until `until` unless used again; null when it's let go. */
+  hold(id: string, until: string | null): void {
+    this.db.prepare("UPDATE jobs SET held_until = ?, updated_at = ? WHERE id = ?").run(until, new Date().toISOString(), id);
+  }
+
+  /** Records a media download's progress, or a capture's follow-up download. */
+  setMedia(id: string, media: MediaJobInfo): void {
+    this.db.prepare("UPDATE jobs SET media = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(media), new Date().toISOString(), id);
   }
 
   get(id: string): Job | null {
@@ -85,11 +106,16 @@ export class JobStore {
     return row ? toJob(row) : null;
   }
 
-  /** Jobs waiting for delivery; enrich jobs are read by the plugin that asked for them, so they're left out. */
-  list(statuses: JobStatus[], limit: number): Job[] {
+  /**
+   * Jobs waiting for delivery. Enrich jobs are read by the plugin that asked for
+   * them, and a preview that failed or was let go was already shown to the user,
+   * so both are left out. Media downloads are listed only when asked for.
+   */
+  list(statuses: JobStatus[], limit: number, origin: "media" | null = null): Job[] {
     const placeholders = statuses.map(() => "?").join(",");
+    const which = origin === "media" ? "origin = 'media'" : "origin NOT IN ('enrich', 'media') AND NOT (mode = 'preview' AND status = 'failed')";
     const rows = this.db
-      .prepare(`SELECT * FROM jobs WHERE status IN (${placeholders}) AND origin != 'enrich' ORDER BY id LIMIT ?`)
+      .prepare(`SELECT * FROM jobs WHERE status IN (${placeholders}) AND ${which} ORDER BY id LIMIT ?`)
       .all(...statuses, limit) as unknown as Row[];
     return rows.map(toJob);
   }
@@ -99,11 +125,28 @@ export class JobStore {
     const row = this.db
       .prepare(
         `UPDATE jobs SET status = 'running', updated_at = ?
-         WHERE id = (SELECT id FROM jobs WHERE status = 'pending' ORDER BY id LIMIT 1)
+         WHERE id = (SELECT id FROM jobs WHERE status = 'pending' AND origin != 'media' ORDER BY id LIMIT 1)
          RETURNING *`,
       )
       .get(new Date().toISOString()) as Row | undefined;
     return row ? toJob(row) : null;
+  }
+
+  /** Media downloads waiting their turn, oldest first. */
+  pendingMedia(): Job[] {
+    return (this.db.prepare("SELECT * FROM jobs WHERE status = 'pending' AND origin = 'media' ORDER BY id").all() as unknown as Row[]).map(toJob);
+  }
+
+  /** Moves one pending job to running; false when it isn't pending any more. */
+  claim(id: string): boolean {
+    return this.db.prepare("UPDATE jobs SET status = 'running', updated_at = ? WHERE id = ? AND status = 'pending'").run(new Date().toISOString(), id).changes > 0;
+  }
+
+  /** Ends a media download: done when anything was made, else failed with the reason. */
+  finishMedia(id: string, assets: AssetKind[], screenshotExt: Job["screenshotExt"], error: string | null): void {
+    this.db
+      .prepare("UPDATE jobs SET status = ?, error = ?, assets = ?, screenshot_ext = ?, updated_at = ? WHERE id = ? AND status = 'running'")
+      .run(assets.length ? "done" : "failed", assets.length ? null : (error ?? "nothing could be downloaded"), JSON.stringify(assets), screenshotExt, new Date().toISOString(), id);
   }
 
   /** Records what a running capture has made so far; its assets can be read before it's done. */
@@ -122,7 +165,7 @@ export class JobStore {
    */
   cancel(id: string): boolean {
     const result = this.db
-      .prepare("UPDATE jobs SET status = 'failed', error = 'cancelled', assets = '[]', updated_at = ? WHERE id = ? AND status IN ('pending', 'running')")
+      .prepare("UPDATE jobs SET status = 'failed', error = 'cancelled', assets = '[]', held_until = NULL, updated_at = ? WHERE id = ? AND status IN ('pending', 'running')")
       .run(new Date().toISOString(), id);
     return result.changes > 0;
   }
@@ -134,7 +177,7 @@ export class JobStore {
 
   finish(id: string, meta: PageMeta, assets: AssetKind[], screenshotExt: Job["screenshotExt"]): void {
     this.db
-      .prepare("UPDATE jobs SET status = 'done', error = NULL, meta = ?, assets = ?, screenshot_ext = ?, updated_at = ? WHERE id = ? AND status = 'running'")
+      .prepare("UPDATE jobs SET status = 'done', error = NULL, meta = ?, assets = ?, screenshot_ext = ?, held_until = NULL, updated_at = ? WHERE id = ? AND status = 'running'")
       .run(JSON.stringify(meta), JSON.stringify(assets), screenshotExt, new Date().toISOString(), id);
   }
 
@@ -160,7 +203,7 @@ export class JobStore {
     const rows = this.db
       .prepare(
         `UPDATE jobs SET assets = '[]'
-         WHERE assets != '[]' AND ((status = 'delivered' AND delivered_at < ?) OR (origin = 'enrich' AND status IN ('done', 'failed') AND updated_at < ?))
+         WHERE assets != '[]' AND ((status = 'delivered' AND delivered_at < ?) OR (origin IN ('enrich', 'media') AND status IN ('done', 'failed') AND updated_at < ?))
          RETURNING id`,
       )
       .all(cutoff.toISOString(), cutoff.toISOString()) as unknown as Array<{ id: string }>;

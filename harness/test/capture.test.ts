@@ -3,11 +3,12 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CAPTURE_FILES, fileMarker } from "../src/api.js";
 import { blockReason, filesWanted, PlaywrightEngine } from "../src/capture.js";
+import { MEDIA_FILES } from "../src/remote-media.js";
 import { renderRequest } from "../src/render.js";
 import { DEFAULT_CAPTURE_SETTINGS } from "../src/settings.js";
 
 describe("filesWanted", () => {
-  const note = (content: string) => ({ template: "T", noteName: "n", path: "", frontmatter: "", content });
+  const note = (content: string) => ({ template: "T", noteName: "n", path: "", frontmatter: "", content, variables: {} });
 
   it("adds files asked for by name to the ones the note uses", () => {
     expect([...filesWanted(note(`![[${fileMarker("screenshot_banner")}]]`))]).toEqual(["screenshot_banner"]);
@@ -171,11 +172,12 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
     expect(result.note!.content).toBe(`![[${fileMarker("screenshot_banner")}]]`);
   });
 
-  it("makes every capture file the template uses, light and dark", async () => {
+  it("makes every screenshot the template uses, light and dark, and points at media on the web", async () => {
     const content = CAPTURE_FILES.map((kind) => `{{${kind}}}`).join(" ");
-    const { files } = await engine.capture(`${base}/layout`, withContent(content));
-    // Everything but the TikTok files, which only TikTok posts have.
-    expect(Object.keys(files).sort()).toEqual(CAPTURE_FILES.filter((kind) => !kind.startsWith("tiktok_")).sort());
+    const { files, note } = await engine.capture(`${base}/layout`, withContent(content));
+    // Media is left for "Download media": the page image stays on the web.
+    expect(Object.keys(files).sort()).toEqual(CAPTURE_FILES.filter((kind) => !MEDIA_FILES.includes(kind)).sort());
+    expect(note!.content).toContain(`${base}/cover.png`);
     expect(jpegSize(files.screenshot_mobile!)).toEqual({ width: 390, height: 844 });
     expect(jpegSize(files.screenshot_thumbnail!)).toEqual({ width: 480, height: 300 });
     expect(jpegSize(files.screenshot_article!).width).toBe(600);
@@ -185,8 +187,6 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
       expect(dark.equals(light)).toBe(false);
     }
     expect(files.pdf_page!.subarray(0, 4).toString()).toBe("%PDF");
-    // The PNG og:image comes out at its own size, in the screenshot format.
-    expect(jpegSize(files.image_local!)).toEqual({ width: 40, height: 20 });
   });
 
   it("loads lazy images before printing the PDF", async () => {
@@ -213,6 +213,39 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
     expect(result.screenshotExt).toBeNull();
     expect(result.markdown).toContain("Some readable words");
   });
+
+  it("previews a page without media, re-renders it and takes its shots later, full height", async () => {
+    const templates = [
+      { ...DEFAULT_CAPTURE_SETTINGS.templates[0]!, name: "One", noteContentFormat: "one ![[{{image_local}}]] ![[{{screenshot_page}}]]", properties: [] },
+      { ...DEFAULT_CAPTURE_SETTINGS.templates[0]!, name: "Two", noteContentFormat: "two {{title}}", properties: [] },
+    ];
+    const held = await engine.preview(`${base}/layout`, renderRequest({ ...DEFAULT_CAPTURE_SETTINGS, templates }, "One", "01JOB"));
+    try {
+      expect(held.meta.title).toBe("Layout");
+      // The page image points at the web; the screenshot waits for files().
+      expect(held.note!.content).toBe(`one ![](${base}/cover.png) ![[${fileMarker("screenshot_page")}]]`);
+      expect((await held.render("Two"))!.content).toBe("two Layout");
+      const made: string[] = [];
+      const { screenshotExt } = await held.files(["screenshot_page", "image_local"], (kind) => made.push(kind));
+      expect(made).toEqual(["screenshot_page"]);
+      expect(screenshotExt).toBe("jpg");
+      // Still usable after the shots: back at desktop width.
+      expect((await held.render("One"))!.template).toBe("One");
+    } finally {
+      await held.close();
+    }
+  }, 30_000);
+
+  it("scrolls a held page before its shots, so they're full height", async () => {
+    const held = await engine.preview(`${base}/inner`, withContent("![[{{screenshot_page}}]]"));
+    try {
+      const shots: Buffer[] = [];
+      await held.files(["screenshot_page"], (_, data) => shots.push(data));
+      expect(jpegSize(shots[0]!).height).toBeGreaterThan(800);
+    } finally {
+      await held.close();
+    }
+  }, 30_000);
 
   it("also makes capture files asked for by name", async () => {
     const result = await engine.capture(`${base}/`, { ...withContent("{{content}}"), files: ["screenshot_banner", "screenshot_thumbnail"] });

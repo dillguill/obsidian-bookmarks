@@ -37,7 +37,7 @@ describe("fileVariables", () => {
 describe("currentSettings", () => {
   it("drops settings saved by older versions", () => {
     const stored = { screenshotStyle: "banner", bannerSites: ["x.com"], noScreenshotSites: [], hideCaptureId: true } as never;
-    expect(currentSettings(stored)).toEqual({ ...DEFAULT_CAPTURE_SETTINGS, hideCaptureId: true });
+    expect(currentSettings(stored)).toEqual({ ...DEFAULT_CAPTURE_SETTINGS, hideCaptureId: true, schemaRevision: 1 });
   });
 });
 
@@ -60,3 +60,13 @@ describe("renameScreenshotVariables", () => {
     }
   });
 });
+
+describe("withTemplateName", () => {
+  it("writes the template's name for {{template}}, in every field", async () => {
+    const { withTemplateName } = await import("../src/render.js");
+    const t = withTemplateName({ ...DEFAULT_CAPTURE_SETTINGS.templates[0]!, name: "TikTok", noteNameFormat: "{{template}} {{title}}", properties: [{ name: "template", value: "{{ template }}", type: "text" }] });
+    expect(t.noteNameFormat).toBe("TikTok {{title}}");
+    expect(t.properties[0]!.value).toBe("TikTok");
+  });
+});
+

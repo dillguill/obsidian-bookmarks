@@ -414,6 +414,7 @@ function renderTemplate() {
   $("t-note-name").value = t.noteNameFormat;
   $("t-path").value = t.path;
   $("t-update").checked = t.updateFromSource !== false;
+  $("t-on-capture").value = t.onCapture ?? "add";
   $("t-content").value = t.noteContentFormat;
   $("template-delete").disabled = settings.templates.length === 1;
   $("template-duplicate").textContent = "Duplicate";
@@ -515,6 +516,12 @@ $("t-update").addEventListener("change", (e) => {
   const t = current();
   if (e.target.checked) delete t.updateFromSource;
   else t.updateFromSource = false;
+  scheduleSave();
+});
+$("t-on-capture").addEventListener("change", (e) => {
+  const t = current();
+  if (e.target.value === "add") delete t.onCapture;
+  else t.onCapture = e.target.value;
   scheduleSave();
 });
 

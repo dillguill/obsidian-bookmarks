@@ -117,6 +117,7 @@
       <section id="properties" hidden>
         <h1>Properties</h1>
         <p class="desc">Property types are shared by every template, as in Obsidian. Changing a type here, or in a template, changes it everywhere. A new property in a template takes its type from this list.</p>
+        <p class="desc">The Bookmarks plugin keeps this list in step with your vault: whenever it connects, the types your vault's Properties view uses replace the ones here. Change a type in Obsidian to keep it.</p>
         <div id="property-types" class="properties"></div>
         <button id="add-property-type" class="add">+ Add property type</button>
       </section>
@@ -147,20 +148,20 @@
             <tr><td><code class="copy">{{capture_id}}</code></td><td>The capture's id; always saved so a capture is never written twice.</td></tr>
         </table>
         <h2>Screenshots and PDF</h2>
-        <p class="desc">Each is the saved file's vault path. Wrap it to show the image, <code>![[{{screenshot_page}}]]</code>, or to link it, <code>[[{{screenshot_page}}]]</code>, in the note content or a property. A file is made only when a template uses it, and is empty for a blocked page; the brackets around an empty one are removed.</p>
+        <p class="desc">Each is the saved file's vault path, where Obsidian's attachment setting puts it (or the plugin's override). Wrap it to show the image, <code>![[{{screenshot_page}}]]</code>, or to link it, <code>[[{{screenshot_page}}]]</code>, in the note content or a property. A file is made only when a template uses it, and is empty for a blocked page; the brackets around an empty one are removed.</p>
         <table class="key">
-            <tr><td><code class="copy">{{screenshot_page}}</code></td><td>The whole page, e.g. <code>Bookmarks/assets/note.jpg</code>.</td></tr>
+            <tr><td><code class="copy">{{screenshot_page}}</code></td><td>The whole page, e.g. <code>attachments/note.jpg</code>.</td></tr>
             <tr><td><code class="copy">{{screenshot_banner}}</code></td><td>The first screen (1280×800), <code>note-banner.jpg</code>.</td></tr>
             <tr><td><code class="copy">{{screenshot_mobile}}</code></td><td>The first screen at phone width (390×844), <code>note-mobile.jpg</code>.</td></tr>
             <tr><td><code class="copy">{{screenshot_article}}</code></td><td>Just the main content block, without navigation or sidebars, <code>note-article.jpg</code>. Empty when the page has no article or main element.</td></tr>
             <tr><td><code class="copy">{{screenshot_thumbnail}}</code></td><td>A small first screen (480×300) for covers in Bases or card views, <code>note-thumbnail.jpg</code>.</td></tr>
             <tr><td><code class="copy">{{pdf_page}}</code></td><td>A PDF of the page with selectable text, <code>note.pdf</code>.</td></tr>
-            <tr><td><code class="copy">{{image_local}}</code></td><td>The page's main image (<code>{{image}}</code>) saved in the vault, <code>note-image.jpg</code>, for images whose links may not last. Empty when the page has no image.</td></tr>
+            <tr><td><code class="copy">{{image_local}}</code></td><td>The page's main image (<code>{{image}}</code>): its web address, which <b>Download media</b> in Obsidian saves into the vault. Empty when the page has no image.</td></tr>
         </table>
         <p class="desc">Add <code>_dark</code> to any screenshot for the site's dark mode, e.g. <code class="copy">{{screenshot_page_dark}}</code> (<code>note-dark.jpg</code>) or <code class="copy">{{screenshot_mobile_dark}}</code> (<code>note-mobile-dark.jpg</code>). Sites without a dark mode look the same.</p>
         <p class="desc">Templates saved or imported with the older <code>{{screenshot}}</code>, <code>{{screenshot_link}}</code> and <code>{{screenshot_embed}}</code> are rewritten to these.</p>
         <h2>TikTok</h2>
-        <p class="desc">Read from the post's own data on TikTok video and photo pages, where the page's title, description and image say little. Empty on other sites.</p>
+        <p class="desc">Read from the post's own data on TikTok video and photo pages, where the page's title, description and image say little. Empty on other sites. A capture doesn't download the post: the media variables show the player or the web address, and <b>Download media</b> in Obsidian (or the template's <b>Add and download media</b> preset) swaps them for the saved video, photos and cover.</p>
         <table class="key">
             <tr><td><code class="copy">{{tiktok_title}}</code></td><td>The caption's first line, without trailing hashtags.</td></tr>
             <tr><td><code class="copy">{{tiktok_description}}</code></td><td>The whole caption.</td></tr>
@@ -169,14 +170,14 @@
             <tr><td><code class="copy">{{tiktok_author_handle}}</code></td><td>The creator's handle, without the @.</td></tr>
             <tr><td><code class="copy">{{tiktok_embed}}</code></td><td>A player that plays in the note, or swipes through a photo carousel: an <code>&lt;iframe&gt;</code> for the note content.</td></tr>
             <tr><td><code class="copy">{{tiktok_id}}</code></td><td>The post's id, e.g. <code>7382225350710824222</code>.</td></tr>
-            <tr><td><code class="copy">{{tiktok_images}}</code></td><td>A photo carousel's photos, saved in the vault and embedded one per line (<code>![[note-tiktok-image-1.jpg]]</code>…). Empty for videos.</td></tr>
+            <tr><td><code class="copy">{{tiktok_images}}</code></td><td>A photo carousel: the player, until its photos are downloaded (one embed per line). Empty for videos.</td></tr>
             <tr><td><code class="copy">{{tiktok_image_count}}</code></td><td>How many photos the carousel has. Empty for videos.</td></tr>
-            <tr><td><code class="copy">{{tiktok_image_1}}</code></td><td>One carousel photo's vault path, up to <code>{{tiktok_image_35}}</code>; wrap it like a screenshot.</td></tr>
+            <tr><td><code class="copy">{{tiktok_image_1}}</code></td><td>One carousel photo's web address, up to <code>{{tiktok_image_35}}</code>.</td></tr>
             <tr><td><code class="copy">{{tiktok_transcript}}</code></td><td>What's said in the video, from TikTok's auto captions in the language spoken, as plain text. Empty when there are none, as for videos without speech.</td></tr>
             <tr><td><code class="copy">{{tiktok_transcript_timestamps}}</code></td><td>The transcript one caption per line with its time, e.g. <code>[0:03] If you want to track…</code></td></tr>
-            <tr><td><code class="copy">{{tiktok_save}}</code></td><td>The post saved in the vault and embedded, so it plays offline: the video (<code>![[note-tiktok-video.mp4]]</code>) or a carousel's photos, one per line.</td></tr>
-            <tr><td><code class="copy">{{tiktok_video}}</code></td><td>The saved video's vault path, <code>note-tiktok-video.mp4</code>; wrap it like a screenshot. Empty for photo posts.</td></tr>
-            <tr><td><code class="copy">{{tiktok_thumbnail}}</code></td><td>The cover image saved in the vault, <code>note-tiktok-thumbnail.jpg</code>; wrap it like a screenshot. Saved because TikTok's cover links expire within days.</td></tr>
+            <tr><td><code class="copy">{{tiktok_save}}</code></td><td>The post as the player; downloading media replaces it with the saved video (<code>![[note-video.mp4]]</code>) or the carousel's photos, so it plays offline.</td></tr>
+            <tr><td><code class="copy">{{tiktok_video}}</code></td><td>The player, wherever it's written. Empty for photo posts.</td></tr>
+            <tr><td><code class="copy">{{tiktok_thumbnail}}</code></td><td>The cover's web address. TikTok's cover links expire within days, so <b>Download media</b> fetches a fresh one and saves it.</td></tr>
         </table>
         <h2>Schema and meta</h2>
         <p class="desc">Read from the page's schema.org data and meta tags, as in Web Clipper.</p>
@@ -242,6 +243,17 @@
             <div class="desc">Offer this template when updating an existing note from its page in Obsidian.</div>
           </div>
           <input type="checkbox" class="toggle" id="t-update">
+        </div>
+        <div class="setting">
+          <div class="setting-info">
+            <label class="setting-name" for="t-on-capture">On capture</label>
+            <div class="desc">What the capture window's button does in Obsidian; the others stay in its menu. With "Add and download media", captures shared from your phone download the page's videos and photos too.</div>
+          </div>
+          <select id="t-on-capture">
+            <option value="add">Add to Obsidian</option>
+            <option value="add-media">Add and download media</option>
+            <option value="copy">Copy Markdown</option>
+          </select>
         </div>
         <div class="setting column">
           <div class="setting-info">

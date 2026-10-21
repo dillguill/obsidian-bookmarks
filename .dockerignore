@@ -1,0 +1,14 @@
+# The image copies only package manifests, tsconfig files and harness/{src,ui,vendor}.
+.git/
+**/node_modules/
+**/dist/
+harness/data/
+plugin/
+spikes/
+specs/
+docs/
+.specify/
+*.log
+.env
+.env.*
+.DS_Store

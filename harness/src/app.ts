@@ -2,13 +2,13 @@ import { timingSafeEqual } from "node:crypto";
 import { createReadStream, readFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { API_VERSION, CAPTURE_FILES, fileExt, type AssetKind, type CaptureFile, type CaptureOrigin, type JobStatus } from "./api.js";
+import { API_VERSION, assetExt, CAPTURE_FILES, MEDIA_ASSETS, type AssetKind, type CaptureFile, type CaptureMode, type CaptureOrigin, type JobStatus, type MediaWant } from "./api.js";
 import { passwordProblem, SESSION_DAYS, Throttle, type AuthStore } from "./auth.js";
 import type { Config } from "./config.js";
 import type { JobStore } from "./db.js";
 import { parseCaptureSettings } from "./settings.js";
 import { urlRejection } from "./ssrf.js";
-import { assetPath, type Worker } from "./worker.js";
+import { assetPath, NotPreview, PageGone, type Worker } from "./worker.js";
 
 export interface AppDeps {
   config: Pick<Config, "tokens" | "dataDir" | "waitCapMs" | "allowPrivateNetworks">;
@@ -25,7 +25,12 @@ const FILES: ReadonlySet<string> = new Set<string>(CAPTURE_FILES);
 const STATUSES: ReadonlySet<string> = new Set<JobStatus>(["pending", "running", "done", "failed", "delivered"]);
 const MAX_BODY = 16 * 1024;
 const MAX_SETTINGS_BODY = 512 * 1024;
-const JOB_PATH = new RegExp(`^/jobs/([0-9A-Z]{26})(?:/(delivered|cancel|asset/(${[...CAPTURE_FILES, "markdown", "note"].join("|")})))?$`);
+const JOB_PATH = new RegExp(`^/jobs/([0-9A-Z]{26})(?:/(delivered|cancel|render|files|release|asset/(${[...CAPTURE_FILES, ...MEDIA_ASSETS, "markdown", "note"].join("|")})))?$`);
+const WANTS: ReadonlySet<string> = new Set<MediaWant>(["video", "photos", "cover"]);
+/** Origins a preview can come from: someone is waiting on it in the plugin. */
+const PREVIEW_ORIGINS: ReadonlySet<string> = new Set<CaptureOrigin>(["plugin", "enrich"]);
+/** Files a held page can take: screenshots and the PDF. Media is fetched by "Download media". */
+const PAGE_FILES: ReadonlySet<string> = new Set<string>(CAPTURE_FILES.filter((kind) => kind.startsWith("screenshot_") || kind === "pdf_page"));
 
 // The settings page: static files with no secrets in them, so they're served
 // without signing in; the page signs in with a password and calls the API
@@ -124,6 +129,7 @@ interface CaptureBody {
   template: string;
   /** Extra capture files by name (JSON array, or comma-separated in a form or query). */
   files: string[];
+  mode: string;
 }
 
 /** Accepts JSON `{url, origin, template, files}`, a form body, or `?url=` so Shortcuts and curl stay simple. */
@@ -141,6 +147,7 @@ async function captureRequest(req: IncomingMessage, query: URLSearchParams): Pro
     origin: String(fields.origin ?? query.get("origin") ?? "api"),
     template: String(fields.template ?? query.get("template") ?? "").trim(),
     files: listField(fields.files ?? query.get("files")),
+    mode: String(fields.mode ?? query.get("mode") ?? "full"),
   };
 }
 
@@ -268,7 +275,7 @@ export function createApp(deps: AppDeps): Server {
     if (!caller(req)) return sendJson(res, 401, { error: "unauthorized" });
 
     if (method === "GET" && path === "/health") {
-      return sendJson(res, 200, { status: "ok", apiVersion: API_VERSION, version: deps.version });
+      return sendJson(res, 200, { status: "ok", apiVersion: API_VERSION, version: deps.version, media: { ytdlp: await worker.ytdlp } });
     }
 
     if (path === "/settings" && method === "GET") return sendJson(res, 200, { settings: store.getSettings() });
@@ -301,25 +308,44 @@ export function createApp(deps: AppDeps): Server {
       if (!ORIGINS.has(body.origin)) return sendJson(res, 400, { error: "bad_request", message: `unknown origin ${body.origin}` });
       const unknownFile = body.files.find((name) => !FILES.has(name));
       if (unknownFile) return sendJson(res, 400, { error: "bad_request", message: `unknown capture file ${unknownFile}` });
+      if (body.mode !== "full" && body.mode !== "preview") return sendJson(res, 400, { error: "bad_request", message: `unknown mode ${body.mode}` });
+      if (body.mode === "preview" && !PREVIEW_ORIGINS.has(body.origin)) return sendJson(res, 400, { error: "bad_request", message: "previews are for the plugin" });
+      if (body.mode === "preview" && body.files.length) return sendJson(res, 400, { error: "bad_request", message: "ask a preview's page for files with POST /jobs/:id/files" });
       const rejection = await rejectUrl(body.url);
       if (rejection) return sendJson(res, 422, { error: "url_rejected", message: rejection });
 
       if (body.template && !store.getSettings().templates.some((t) => t.name === body.template)) {
         return sendJson(res, 422, { error: "unknown_template", message: `No template named "${body.template}".` });
       }
-      const job = store.create(new URL(body.url).toString(), body.origin as CaptureOrigin, body.template || null, body.files as CaptureFile[]);
+      const job = store.create(new URL(body.url).toString(), body.origin as CaptureOrigin, body.template || null, body.files as CaptureFile[], body.mode as CaptureMode);
       worker.kick();
-      if (url.searchParams.get("wait") !== "1") return sendJson(res, 202, { job });
+      if (url.searchParams.get("wait") !== "1" || body.mode === "preview") return sendJson(res, 202, { job });
       const settled = await worker.waitFor(job.id, config.waitCapMs);
       const done = settled && settled.status !== "pending" && settled.status !== "running";
       return sendJson(res, done ? 200 : 202, { job: settled ?? job });
+    }
+
+    if (method === "POST" && path === "/media") {
+      const body = await jsonBody(req);
+      if (!body) return sendJson(res, 400, { error: "bad_request", message: "Body must be JSON {url, want}." });
+      const target = text(body.url).trim();
+      const want = listField(body.want);
+      if (!target) return sendJson(res, 400, { error: "bad_request", message: "url is required" });
+      if (!want.length || want.some((w) => !WANTS.has(w))) return sendJson(res, 400, { error: "bad_request", message: "want is a list of video, photos and cover" });
+      // The start is checked here; every request the download makes goes through the egress proxy.
+      const rejection = await rejectUrl(target);
+      if (rejection) return sendJson(res, 422, { error: "url_rejected", message: rejection });
+      const href = new URL(target).toString();
+      const job = store.create(href, "media", null, [], "full", { url: href, want: [...new Set(want)] as MediaWant[], made: [], errors: [] });
+      worker.kickMedia();
+      return sendJson(res, 202, { job });
     }
 
     if (method === "GET" && path === "/jobs") {
       const statuses = (url.searchParams.get("status") ?? "done").split(",").filter((s) => STATUSES.has(s)) as JobStatus[];
       if (statuses.length === 0) return sendJson(res, 400, { error: "bad_request", message: "unknown status" });
       const limit = Math.min(Math.max(Number.parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 1), 200);
-      return sendJson(res, 200, { jobs: store.list(statuses, limit) });
+      return sendJson(res, 200, { jobs: store.list(statuses, limit, url.searchParams.get("origin") === "media" ? "media" : null) });
     }
 
     const jobMatch = JOB_PATH.exec(path);
@@ -332,9 +358,34 @@ export function createApp(deps: AppDeps): Server {
 
       if (method === "POST" && action === "delivered") {
         if (!store.markDelivered(id)) return sendJson(res, 409, { error: "not_finished", message: `job is ${job.status}` });
-        // An update's files are read once, by the plugin that asked for them.
-        if (job.origin === "enrich") await deps.worker.discard(id);
+        // An update's and a media download's files are read once, by the plugin that asked for them.
+        if (job.origin === "enrich" || job.origin === "media") await deps.worker.discard(id);
         return sendJson(res, 200, { job: store.get(id) });
+      }
+
+      if (method === "POST" && (action === "render" || action === "files" || action === "release")) {
+        const body = await jsonBody(req);
+        if (!body) return sendJson(res, 400, { error: "bad_request", message: "Body must be JSON." });
+        try {
+          if (action === "render") {
+            const template = text(body.template).trim();
+            if (!store.getSettings().templates.some((t) => t.name === template)) return sendJson(res, 422, { error: "unknown_template", message: `No template named "${template}".` });
+            return sendJson(res, 200, { note: await worker.render(id, template) });
+          }
+          if (action === "files") {
+            const kinds = listField(body.files);
+            const bad = kinds.find((kind) => !PAGE_FILES.has(kind));
+            if (!kinds.length || bad) return sendJson(res, 400, { error: "bad_request", message: bad ? `${bad} isn't a screenshot or the PDF` : "files is required" });
+            worker.files(id, kinds as CaptureFile[], body.finish === true);
+            return sendJson(res, 202, { job: store.get(id) });
+          }
+          await worker.release(id, body.keep === true);
+          return sendJson(res, 200, {});
+        } catch (err) {
+          if (err instanceof PageGone) return sendJson(res, 410, { error: "page_released", message: "The page is no longer open. Fetch it again." });
+          if (err instanceof NotPreview) return sendJson(res, 409, { error: "not_preview", message: "This capture has no page held open." });
+          throw err;
+        }
       }
 
       if (method === "POST" && action === "cancel") {
@@ -352,7 +403,7 @@ export function createApp(deps: AppDeps): Server {
             ? "text/markdown; charset=utf-8"
             : kind === "note"
               ? "application/json; charset=utf-8"
-              : ASSET_TYPES[fileExt(kind, job.screenshotExt) ?? "png"] ?? "application/octet-stream";
+              : ASSET_TYPES[assetExt(kind, job.screenshotExt) ?? "png"] ?? "application/octet-stream";
         res.writeHead(200, { "content-type": contentType, "content-length": info.size });
         createReadStream(file).pipe(res);
         return;

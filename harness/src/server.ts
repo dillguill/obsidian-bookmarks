@@ -14,7 +14,7 @@ const store = new JobStore(join(config.dataDir, "jobs.sqlite"));
 const auth = new AuthStore(join(config.dataDir, "auth.sqlite"));
 auth.setupCode(); // logs the code to create the sign-in account, until there is one
 const engine = new PlaywrightEngine(config);
-const worker = new Worker(store, engine, config.dataDir, config.concurrency);
+const worker = new Worker(store, engine, config.dataDir, config.concurrency, { ytdlpPath: config.ytdlpPath, allowPrivateNetworks: config.allowPrivateNetworks });
 const server = createApp({ config, store, auth, worker, version });
 
 const prune = () => worker.prune(config.retentionDays).catch((err: unknown) => console.error("prune failed", err));
@@ -24,6 +24,8 @@ const pruneTimer = setInterval(prune, 60 * 60 * 1000);
 server.listen(config.port, config.host, () => {
   console.log(`bookmarks-server ${version} listening on ${config.host}:${config.port}`);
   worker.kick(); // resume jobs left pending by a restart
+  worker.kickMedia();
+  void worker.ytdlp.then((version) => console.log(version ? `video downloads: yt-dlp ${version}` : "video downloads off: yt-dlp isn't installed"));
 });
 
 async function shutdown(): Promise<void> {

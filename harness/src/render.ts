@@ -30,6 +30,23 @@ export function withRequiredProperties(template: ClipperTemplate, hideCaptureId 
   return { ...template, properties };
 }
 
+/**
+ * {{template}} is the template's own name, so a note can record which template
+ * made it (a `template: {{template}}` property) and "Update note from source"
+ * opens on it next time. Written into the template before rendering; filters
+ * on it aren't supported.
+ */
+export function withTemplateName(template: ClipperTemplate): ClipperTemplate {
+  const name = (text: string) => text.replace(/\{\{\s*template\s*\}\}/g, template.name);
+  return {
+    ...template,
+    noteNameFormat: name(template.noteNameFormat),
+    path: name(template.path),
+    noteContentFormat: name(template.noteContentFormat),
+    properties: template.properties.map((p) => ({ ...p, value: name(p.value) })),
+  };
+}
+
 /** Every capture file's variable, its vault path or empty. Mirrors fileVariables in plugin/src/writer.ts. */
 export function fileVariables(paths: Partial<Record<CaptureFile, string | null>>): Record<CaptureFile, string> {
   return Object.fromEntries(CAPTURE_FILES.map((kind) => [kind, paths[kind] ?? ""])) as Record<CaptureFile, string>;
@@ -38,7 +55,7 @@ export function fileVariables(paths: Partial<Record<CaptureFile, string | null>>
 export function renderRequest(settings: CaptureSettings, templateName: string | null, captureId: string, files: CaptureFile[] = []): RenderRequest {
   return {
     files,
-    templates: settings.templates.map((t) => withRequiredProperties(t, settings.hideCaptureId)),
+    templates: settings.templates.map((t) => withTemplateName(withRequiredProperties(t, settings.hideCaptureId))),
     templateName,
     propertyTypes: Object.fromEntries(settings.propertyTypes.map((p) => [p.name, p.type])),
     extra: { capture_id: captureId, ...fileVariables(Object.fromEntries(CAPTURE_FILES.map((kind) => [kind, fileMarker(kind)]))) },

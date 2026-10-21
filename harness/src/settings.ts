@@ -1,4 +1,4 @@
-import type { CaptureSettings, ClipperTemplate, PropertyType, PropertyTypeEntry, TemplateProperty } from "./api.js";
+import type { CaptureAction, CaptureSettings, ClipperTemplate, PropertyType, PropertyTypeEntry, TemplateProperty } from "./api.js";
 import { DEFAULT_TEMPLATE } from "./template-default.js";
 
 export const DEFAULT_CAPTURE_SETTINGS: CaptureSettings = {
@@ -41,12 +41,28 @@ function renameInTemplate(template: ClipperTemplate): ClipperTemplate {
   };
 }
 
-/** Brings settings saved by older versions up to date: drops the screenshot style and site lists, renames old variables. */
+const CAPTURE_ACTIONS: ReadonlySet<string> = new Set<CaptureAction>(["add", "add-media", "copy"]);
+/** Settings migrations: 1 gives templates that used media variables the "Add and download media" preset. */
+export const SCHEMA_REVISION = 1;
+/** Variables that downloaded media when a note was captured, before media moved to "Download media". */
+const MEDIA_VARIABLES = /\{\{\s*(tiktok_save|tiktok_images|tiktok_video|tiktok_thumbnail|tiktok_image_\d+|image_local)\b/;
+
+/** A template that saved its page's media when captured keeps doing so: its preset becomes "Add and download media". */
+export function withMediaPreset(template: ClipperTemplate): ClipperTemplate {
+  if (template.onCapture) return template;
+  const text = [template.noteNameFormat, template.path, template.noteContentFormat, ...template.properties.map((p) => p.value)].join("\n");
+  return MEDIA_VARIABLES.test(text) ? { ...template, onCapture: "add-media" } : template;
+}
+
+/** Brings settings saved by older versions up to date: drops the screenshot style and site lists, renames old variables, applies migrations once. */
 export function currentSettings(stored: Partial<CaptureSettings>): CaptureSettings {
+  const revision = stored.schemaRevision ?? 0;
+  const templates = (stored.templates ?? DEFAULT_CAPTURE_SETTINGS.templates).map(renameInTemplate);
   return {
-    templates: (stored.templates ?? DEFAULT_CAPTURE_SETTINGS.templates).map(renameInTemplate),
+    templates: revision < 1 ? templates.map(withMediaPreset) : templates,
     propertyTypes: stored.propertyTypes ?? DEFAULT_CAPTURE_SETTINGS.propertyTypes,
     hideCaptureId: stored.hideCaptureId ?? false,
+    schemaRevision: SCHEMA_REVISION,
   };
 }
 
@@ -78,7 +94,9 @@ export function parseCaptureSettings(body: unknown): CaptureSettings | string {
   }
   const hideCaptureId = fields.hideCaptureId ?? false;
   if (typeof hideCaptureId !== "boolean") return "hideCaptureId must be true or false.";
-  return { templates, propertyTypes, hideCaptureId };
+  // A body from before the migration (an old export, an old page) gets it now.
+  const revision = typeof fields.schemaRevision === "number" ? fields.schemaRevision : 0;
+  return { templates: revision < 1 ? templates.map(withMediaPreset) : templates, propertyTypes, hideCaptureId, schemaRevision: SCHEMA_REVISION };
 }
 
 const text = (value: unknown, fallback = ""): string | null =>
@@ -122,5 +140,6 @@ export function parseTemplate(raw: unknown): ClipperTemplate | string {
     properties,
     triggers,
     ...(t.updateFromSource === false ? { updateFromSource: false } : {}),
+    ...(typeof t.onCapture === "string" && CAPTURE_ACTIONS.has(t.onCapture) ? { onCapture: t.onCapture as CaptureAction } : {}),
   });
 }

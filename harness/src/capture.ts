@@ -1,35 +1,18 @@
 import { createRequire } from "node:module";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import TurndownService from "turndown";
+import { urlRejection } from "./ssrf.js";
 import { CAPTURE_FILES, fileExt, fileMarker, type CaptureFile, type PageMeta, type RenderedNote } from "./api.js";
 import type { Config } from "./config.js";
+import { imageFile, tiktokItem, tiktokTranscript } from "./media.js";
+import { hideOverlays, prepareForShots, VIEWPORT, waitForDomQuiet } from "./page.js";
 import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
-import { urlRejection } from "./ssrf.js";
-import {
-  itemFromScripts,
-  noTikTokVariables,
-  oembedItem,
-  oembedUrl,
-  readTikTokScripts,
-  scriptsFromHtml,
-  tiktokData,
-  tiktokPost,
-  transcriptSources,
-  vttCues,
-  videoUrl,
-  type TikTokItem,
-  type TikTokPost,
-  type TranscriptCue,
-} from "./tiktok.js";
+import { takeShots, type ShotFormat } from "./shots.js";
+import { MEDIA_FILES, noteWithRemoteMedia, type RemoteMedia } from "./remote-media.js";
+import { itemFromScripts, noTikTokVariables, readTikTokScripts, tiktokData, tiktokPost, videoEmbed, type TikTokData } from "./tiktok.js";
 
 const require = createRequire(import.meta.url);
 const DEFUDDLE_PATH = require.resolve("defuddle/full");
-const VIEWPORT = { width: 1280, height: 800 };
-const MOBILE_VIEWPORT = { width: 390, height: 844 };
-const THUMBNAIL_WIDTH = 480;
-const IMAGE_MAX_WIDTH = 2000;
-const VIDEO_MAX_BYTES = 300 * 1024 * 1024;
-const VIDEO_TIMEOUT_MS = 120_000;
 
 /**
  * Capture files are template variables: make only the ones the rendered note uses.
@@ -69,8 +52,27 @@ export interface CaptureProgress {
   file(kind: CaptureFile, data: Buffer, ext: "jpg" | "png"): void;
 }
 
+/**
+ * A page kept open after a preview: its note can be rendered again with
+ * another template, and its screenshots taken, without loading it again.
+ */
+export interface HeldPage {
+  meta: PageMeta;
+  markdown: string;
+  note: RenderedNote | null;
+  /** The note rendered with another template. */
+  render(templateName: string): Promise<RenderedNote | null>;
+  /** Takes screenshot and PDF files, handing each to `put` as it's made; scrolls the page the first time so lazy content is in them. */
+  files(kinds: readonly CaptureFile[], put: (kind: CaptureFile, data: Buffer, ext: "jpg" | "png") => void): Promise<{ screenshotExt: "jpg" | "png" | null }>;
+  close(): Promise<void>;
+}
+
 export interface CaptureEngine {
   capture(url: string, render?: RenderRequest | null, progress?: CaptureProgress): Promise<CaptureResult>;
+  /** Reads the page and renders its note as soon as it settles, without media, and keeps it open. */
+  preview(url: string, render: RenderRequest): Promise<HeldPage>;
+  /** A TikTok photo post's photos (in order) and cover, as image files; for "Download media". */
+  tiktokPhotos(url: string, cover: boolean): Promise<{ photos: Buffer[]; cover: Buffer | null; ext: "jpg" | "png" }>;
   close(): Promise<void>;
 }
 
@@ -113,43 +115,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, onTimeout: () => void):
   ]).finally(() => clearTimeout(timer));
 }
 
-// networkidle fires before client-side renders that run on timers, so also wait
-// until the DOM stops changing for a quiet window (capped).
-/** A capture file map that reports each file to `progress` as it's set. */
-function reportFiles(progress: CaptureProgress | undefined, ext: "jpg" | "png"): Partial<Record<CaptureFile, Buffer>> {
-  const files: Partial<Record<CaptureFile, Buffer>> = {};
-  if (!progress) return files;
-  return new Proxy(files, {
-    set(target, kind, data) {
-      (target as Record<string | symbol, unknown>)[kind] = data;
-      if (typeof kind === "string" && Buffer.isBuffer(data)) progress.file(kind as CaptureFile, data, ext);
-      return true;
-    },
-  });
-}
-
-async function waitForDomQuiet(page: Page, quietMs = 500, maxMs = 5000): Promise<void> {
-  await page.evaluate(
-    ({ quiet, max }) =>
-      new Promise<void>((resolve) => {
-        let timer: ReturnType<typeof setTimeout>;
-        const done = () => {
-          obs.disconnect();
-          clearTimeout(cap);
-          resolve();
-        };
-        const obs = new MutationObserver(() => {
-          clearTimeout(timer);
-          timer = setTimeout(done, quiet);
-        });
-        obs.observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
-        timer = setTimeout(done, quiet);
-        const cap = setTimeout(done, max);
-      }),
-    { quiet: quietMs, max: maxMs },
-  );
-}
-
 /**
  * Renders the note with Obsidian Web Clipper's own engine on the live page, so
  * templates behave as they do in Web Clipper. A failure here falls back to the
@@ -171,73 +136,6 @@ async function renderNote(page: Page, render: RenderRequest, url: string): Promi
   }
 }
 
-/** Hides cookie/consent banners and restores page scrolling before the screenshot. */
-async function hideOverlays(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const selectors = [
-      "#onetrust-consent-sdk",
-      "#CybotCookiebotDialog",
-      ".fc-consent-root",
-      ".cc-window",
-      ".js-consent-banner",
-      "[id^='sp_message_container']",
-      "#didomi-host",
-      "#usercentrics-root",
-      "#cookie-banner",
-      "#cookie-notice",
-    ];
-    for (const el of document.querySelectorAll<HTMLElement>(selectors.join(","))) el.style.setProperty("display", "none", "important");
-    for (const el of document.querySelectorAll<HTMLElement>("body *")) {
-      const style = getComputedStyle(el);
-      if (style.position !== "fixed" && style.position !== "sticky") continue;
-      const text = el.innerText ?? "";
-      if (text.length < 2000 && /\b(cookies?|consent)\b/i.test(text)) el.style.setProperty("display", "none", "important");
-    }
-    for (const el of [document.documentElement, document.body]) {
-      if (getComputedStyle(el).overflow === "hidden") el.style.setProperty("overflow", "visible", "important");
-    }
-  });
-}
-
-/**
- * Some layouts (docs sites, app shells) scroll inside a container, so the page
- * itself is one viewport tall and a full-page screenshot shows one screen.
- * Returns how much taller the viewport must be for the largest such container
- * to fit its content. Growing the viewport, rather than restyling the
- * container, keeps virtualized renderers (Obsidian Publish) drawing.
- */
-async function innerScrollExtra(page: Page): Promise<number> {
-  return page.evaluate((viewportHeight) => {
-    const pageHeight = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
-    if (pageHeight > viewportHeight + 50) return 0;
-    let best: HTMLElement | null = null;
-    for (const el of document.querySelectorAll<HTMLElement>("body *")) {
-      const overflowY = getComputedStyle(el).overflowY;
-      if ((overflowY === "auto" || overflowY === "scroll") && el.scrollHeight > el.clientHeight + 50) {
-        if (!best || el.scrollHeight * el.clientWidth > best.scrollHeight * best.clientWidth) best = el;
-      }
-    }
-    if (!best || best.clientWidth < window.innerWidth / 3) return 0;
-    return best.scrollHeight - best.clientHeight;
-  }, VIEWPORT.height);
-}
-
-/** Scrolls in viewport steps so lazy images load, within a height and time budget. */
-async function autoScroll(page: Page, maxHeight: number, budgetMs: number): Promise<void> {
-  await page.evaluate(
-    async ({ max, step, budget }) => {
-      const start = performance.now();
-      const height = () => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0);
-      for (let y = 0; y < Math.min(height(), max) && performance.now() - start < budget; y += step) {
-        window.scrollTo(0, y);
-        await new Promise((resolve) => setTimeout(resolve, 150));
-      }
-      window.scrollTo(0, 0);
-    },
-    { max: maxHeight, step: VIEWPORT.height, budget: budgetMs },
-  );
-}
-
 function absolute(value: string | null | undefined, base: string): string {
   if (!value) return "";
   try {
@@ -247,178 +145,24 @@ function absolute(value: string | null | undefined, base: string): string {
   }
 }
 
-/**
- * The page as an A4 PDF. Lazy images are loaded first (Chromium doesn't load
- * them for print), and fixed or sticky headers become static so they don't
- * cover text on every page; both only affect print, not later screenshots.
- */
-async function pagePdf(page: Page): Promise<Buffer> {
-  await page.evaluate(() =>
-    Promise.all(
-      [...document.images].map((img) => {
-        img.loading = "eager";
-        return img.complete
-          ? null
-          : new Promise((resolve) => {
-              img.onload = img.onerror = resolve;
-              setTimeout(resolve, 3000);
-            });
-      }),
-    ),
-  );
-  await page.emulateMedia({ media: "print" });
-  await page.evaluate(() => {
-    for (const el of document.querySelectorAll<HTMLElement>("body *")) {
-      const position = getComputedStyle(el).position;
-      if (position === "fixed" || position === "sticky") el.setAttribute("data-bookmarks-pinned", "");
-    }
-    const style = document.createElement("style");
-    style.textContent = "@media print { [data-bookmarks-pinned] { position: static !important; } }";
-    document.head.append(style);
+/** What reading a loaded page gives: its details and readable text, plus a TikTok post's data. */
+interface PageRead {
+  meta: PageMeta;
+  markdown: string;
+  tiktok: TikTokData | null;
+  /** The TikTok post's id, when it is one. */
+  tiktokId: string | null;
+}
+
+/** Where a page's media lives on the web, for notes that don't download it. */
+function remoteMedia(read: PageRead): RemoteMedia {
+  const images: RemoteMedia["images"] = {};
+  if (read.meta.image) images.image_local = read.meta.image;
+  if (read.tiktok?.cover[0]) images.tiktok_thumbnail = read.tiktok.cover[0];
+  read.tiktok?.images.forEach((sources, i) => {
+    if (sources[0]) images[`tiktok_image_${i + 1}` as CaptureFile] = sources[0];
   });
-  await page.emulateMedia({ media: null });
-  return page.pdf({ format: "A4", printBackground: true });
-}
-
-/** The first screen scaled down to THUMBNAIL_WIDTH, through CDP since Playwright can't scale a screenshot. */
-async function thumbnail(page: Page, type: "jpeg" | "png"): Promise<Buffer> {
-  await page.evaluate(() => window.scrollTo(0, 0));
-  const cdp = await page.context().newCDPSession(page);
-  try {
-    const { data } = await cdp.send("Page.captureScreenshot", {
-      format: type,
-      ...(type === "jpeg" ? { quality: 80 } : {}),
-      clip: { x: 0, y: 0, ...VIEWPORT, scale: THUMBNAIL_WIDTH / VIEWPORT.width },
-    });
-    return Buffer.from(data, "base64");
-  } finally {
-    await cdp.detach().catch(() => {});
-  }
-}
-
-/**
- * The page's main content block: the article/main element with the most text,
- * or a smaller one inside it that holds nearly all of that text. Null when the
- * page has none.
- */
-async function articleShot(page: Page, format: { type: "jpeg" | "png"; quality?: number }, maxHeight: number): Promise<Buffer | null> {
-  await page.evaluate(() => window.scrollTo(0, 0));
-  const box = await page.evaluate(() => {
-    const blocks = [...document.querySelectorAll<HTMLElement>('article, [itemprop="articleBody"], main, [role="main"]')]
-      .map((el) => {
-        let rect = el.getBoundingClientRect();
-        // display: contents (MDN's <main>) has no box of its own; measure what it holds.
-        if (rect.width === 0 && rect.height === 0) {
-          const range = document.createRange();
-          range.selectNodeContents(el);
-          rect = range.getBoundingClientRect();
-        }
-        return { el, rect, text: (el.innerText ?? "").length };
-      })
-      .filter((b) => b.rect.width >= 200 && b.rect.height >= 200 && b.text > 0)
-      .sort((a, b) => b.text - a.text);
-    let best = blocks[0];
-    if (!best) return null;
-    for (const b of blocks) {
-      if (b.el !== best.el && best.el.contains(b.el) && b.text >= best.text * 0.8) best = b;
-    }
-    const { left, top, width, height } = best.rect;
-    return { x: Math.max(0, left + window.scrollX), y: Math.max(0, top + window.scrollY), width, height };
-  });
-  if (!box) return null;
-  return page.screenshot({ ...format, fullPage: true, clip: { ...box, height: Math.min(box.height, maxHeight) } });
-}
-
-/**
- * An image as a file, so the note keeps it after the link expires (TikTok's
- * cover links last days). Drawn in a blank page and screenshotted,
- * so it comes out in the screenshot format whatever the source format was.
- * Each of `sources` (mirrors of one image) is tried in turn; null when none
- * loads.
- */
-async function imageFile(context: BrowserContext, sources: readonly string[], format: { type: "jpeg" | "png"; quality?: number }, maxHeight: number): Promise<Buffer | null> {
-  const page = await context.newPage();
-  try {
-    await page.setContent(`<body style="margin:0"><img style="display:block;width:100%;height:auto"></body>`);
-    let size: { width: number; height: number } | null = null;
-    for (const src of sources) {
-      size = await page.evaluate(
-        (url) =>
-          new Promise<{ width: number; height: number } | null>((resolve) => {
-            const img = document.querySelector("img")!;
-            const done = () => resolve(img.naturalWidth > 0 ? { width: img.naturalWidth, height: img.naturalHeight } : null);
-            img.onload = img.onerror = done;
-            setTimeout(done, 10_000);
-            img.src = url;
-          }),
-        src,
-      );
-      if (size) break;
-    }
-    if (!size) return null;
-    const width = Math.min(size.width, IMAGE_MAX_WIDTH);
-    const height = Math.min(Math.round((size.height * width) / size.width), maxHeight);
-    await page.setViewportSize({ width, height });
-    return await page.screenshot(format);
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
-/**
- * A TikTok post's item JSON: from the page, else from its /video/ page (where
- * photo posts keep theirs), else the few fields TikTok's oEmbed API gives
- * (for pages that came back as a login wall). Null when all three fail.
- */
-async function tiktokItem(page: Page, post: TikTokPost): Promise<TikTokItem | null> {
-  const fromPage = itemFromScripts(await page.evaluate(readTikTokScripts), post.id);
-  if (fromPage) return fromPage;
-  const get = (url: string) => tiktokGet(page, url);
-  const videoPage = await get(videoUrl(post));
-  const fromVideoPage = videoPage ? itemFromScripts(scriptsFromHtml(await videoPage.text()), post.id) : null;
-  if (fromVideoPage) return fromVideoPage;
-  const oembed = await get(oembedUrl(videoUrl(post)));
-  return oembed ? oembedItem(await oembed.json().catch(() => null)) : null;
-}
-
-/** A GET with the page's cookies, or null when it fails. */
-async function tiktokGet(page: Page, url: string) {
-  try {
-    const response = await page.context().request.get(url, { timeout: 10_000 });
-    return response.ok() ? response : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The post's captions, from the first of their mirror URLs that answers; empty when it has none. */
-async function tiktokTranscript(page: Page, item: TikTokItem | null): Promise<TranscriptCue[]> {
-  for (const url of transcriptSources(item)) {
-    const response = await tiktokGet(page, url);
-    const cues = response ? vttCues(await response.text().catch(() => "")) : [];
-    if (cues.length) return cues;
-  }
-  return [];
-}
-
-/**
- * A TikTok video as a file, from the first of its mirror URLs that answers
- * with one. TikTok serves it to the browser that loaded the post (its cookies
- * and a tiktok.com referrer); null when none does.
- */
-async function videoFile(context: BrowserContext, sources: readonly string[], allowPrivateNetworks: boolean): Promise<Buffer | null> {
-  for (const url of sources) {
-    try {
-      if (await urlRejection(url, allowPrivateNetworks)) continue;
-      const response = await context.request.get(url, { headers: { referer: "https://www.tiktok.com/" }, timeout: VIDEO_TIMEOUT_MS });
-      if (!response.ok() || Number(response.headers()["content-length"] ?? 0) > VIDEO_MAX_BYTES) continue;
-      const body = await response.body();
-      if (body.length > 0 && body.length <= VIDEO_MAX_BYTES && (response.headers()["content-type"] ?? "").startsWith("video/")) return body;
-    } catch {
-      // Try the next mirror.
-    }
-  }
-  return null;
+  return { player: read.tiktokId ? videoEmbed(read.tiktokId) : "", images };
 }
 
 export class PlaywrightEngine implements CaptureEngine {
@@ -440,6 +184,18 @@ export class PlaywrightEngine implements CaptureEngine {
   }
 
   async capture(url: string, render: RenderRequest | null = null, progress?: CaptureProgress): Promise<CaptureResult> {
+    const context = await this.openContext();
+    try {
+      // A timed-out page can leave Chromium wedged for every later context, so
+      // restart the browser rather than just closing this context.
+      return await withTimeout(this.run(context, url, render, progress), this.options.captureTimeoutMs, () => void this.restart());
+    } finally {
+      await context.close().catch(() => {});
+    }
+  }
+
+  /** A fresh browser context for one capture. */
+  private async openContext(): Promise<BrowserContext> {
     const browser = await this.getBrowser();
     const context = await browser.newContext({
       viewport: VIEWPORT,
@@ -455,30 +211,6 @@ export class PlaywrightEngine implements CaptureEngine {
     // tsx/esbuild (npm run dev) wraps functions in __name(), which page.evaluate
     // then calls inside the page; define it there as a no-op.
     await context.addInitScript({ content: "globalThis.__name ??= (fn) => fn;" });
-    try {
-      // A timed-out page can leave Chromium wedged for every later context, so
-      // restart the browser rather than just closing this context.
-      const { video, ...result } = await withTimeout(this.run(context, url, render, progress), this.options.captureTimeoutMs, () => void this.restart());
-      // Outside the capture timeout: a long video can take a while to download.
-      const videoData = video?.length ? await videoFile(context, video, this.options.allowPrivateNetworks) : null;
-      if (videoData) {
-        result.files.tiktok_video = videoData;
-        progress?.file("tiktok_video", videoData, result.screenshotExt ?? "jpg");
-      }
-      return result;
-    } finally {
-      await context.close().catch(() => {});
-    }
-  }
-
-  /** The capture, plus the TikTok video's URLs when the note wants it saved. */
-  private async run(
-    context: BrowserContext,
-    url: string,
-    render: RenderRequest | null,
-    progress?: CaptureProgress,
-  ): Promise<CaptureResult & { video?: string[] }> {
-    const { allowPrivateNetworks, maxHeight, scrollBudgetMs, screenshotFormat } = this.options;
     // Re-check every document the page loads (redirects, iframes), so a public
     // URL can't bounce the browser into the private network (design §8).
     // Subresources aren't intercepted: routing every request through Node
@@ -489,37 +221,37 @@ export class PlaywrightEngine implements CaptureEngine {
       const requestUrl = request.url();
       if (request.resourceType() !== "document" || !/^https?:/i.test(requestUrl)) return route.continue();
       const host = new URL(requestUrl).host;
-      if (!verdicts.has(host)) verdicts.set(host, urlRejection(requestUrl, allowPrivateNetworks));
+      if (!verdicts.has(host)) verdicts.set(host, urlRejection(requestUrl, this.options.allowPrivateNetworks));
       return (await verdicts.get(host)) ? route.abort("blockedbyclient") : route.continue();
     });
+    return context;
+  }
 
+  /**
+   * Opens the page and waits for it to settle. Ad-heavy pages can take 30s+ to
+   * fire load; content is usually there long before. `quick` (previews) skips
+   * waiting for the network to go quiet.
+   */
+  private async load(context: BrowserContext, url: string, quick = false): Promise<{ page: Page; status: number | null }> {
     const page = await context.newPage();
-    // Ad-heavy pages can take 30s+ to fire load; content is usually there long before.
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    const status = response?.status() ?? null;
+    // A TikTok post's data is in the page as soon as it's parsed; its load event
+    // takes ~8s more and its DOM never goes quiet, so a preview stops here.
+    const post = quick ? tiktokPost(page.url()) : null;
+    if (post && itemFromScripts(await page.evaluate(readTikTokScripts), post.id)) return { page, status };
     await page.waitForLoadState("load", { timeout: 10_000 }).catch(() => {});
-    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+    if (!quick) await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
     await waitForDomQuiet(page);
-    const extra = await innerScrollExtra(page);
-    if (extra > 0) {
-      await page.setViewportSize({ width: VIEWPORT.width, height: Math.min(VIEWPORT.height + extra, maxHeight) });
-      await waitForDomQuiet(page, 300, 2000);
-    }
-    await autoScroll(page, maxHeight, scrollBudgetMs);
-    await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
-    await page.evaluate(() =>
-      Promise.all(
-        [...document.images].map((img) =>
-          img.complete
-            ? null
-            : new Promise((resolve) => {
-                img.onload = img.onerror = resolve;
-                setTimeout(resolve, 3000);
-              }),
-        ),
-      ),
-    );
+    return { page, status };
+  }
 
-    // Extract before hiding overlays so Defuddle sees the page as served.
+  /**
+   * Reads the page as served (before overlays are hidden): Defuddle's details
+   * and text, TikTok's data, and a bot-wall check. `media` false means the
+   * capture won't download the post's media (see tiktokData).
+   */
+  private async read(page: Page, status: number | null, media = true): Promise<PageRead> {
     await page.addScriptTag({ path: DEFUDDLE_PATH });
     const parsed = await page.evaluate((pageUrl) => {
       const DefuddleCtor = (window as unknown as { Defuddle: new (doc: Document, opts: object) => { parse(): Record<string, unknown> } }).Defuddle;
@@ -574,7 +306,7 @@ export class PlaywrightEngine implements CaptureEngine {
     const finalUrl = page.url();
     const post = tiktokPost(finalUrl);
     const item = post ? await tiktokItem(page, post) : null;
-    const tiktok = post ? tiktokData(post, item, await tiktokTranscript(page, item)) : null;
+    const tiktok = post ? tiktokData(post, item, await tiktokTranscript(page, item), media) : null;
     const meta: PageMeta = {
       finalUrl,
       canonical: parsed.canonical ? absolute(parsed.canonical, finalUrl) || null : null,
@@ -587,96 +319,150 @@ export class PlaywrightEngine implements CaptureEngine {
       image: absolute(parsed.image, finalUrl),
       favicon: absolute(parsed.favicon, finalUrl),
       wordCount: parsed.wordCount,
-      httpStatus: response?.status() ?? null,
+      httpStatus: status,
       truncated: false,
       schema: parsed.schema,
       metaTags: parsed.metaTags,
     };
-
     const blocked = blockReason(meta, parsed.bodyText);
     if (blocked) throw new BlockedError(`Blocked by site: ${blocked}`, meta);
+    return { meta, markdown: this.turndown.turndown(parsed.content), tiktok, tiktokId: post?.id ?? null };
+  }
 
-    const markdown = this.turndown.turndown(parsed.content);
-    const note = render
-      ? await renderNote(page, { ...render, extra: { ...render.extra, ...(tiktok?.variables ?? noTikTokVariables()) } }, bookmarkUrl(meta))
-      : null;
+  /** The note rendered with a template, with the TikTok variables (empty off TikTok). */
+  private render(page: Page, render: RenderRequest, read: PageRead): Promise<RenderedNote | null> {
+    return renderNote(page, { ...render, extra: { ...render.extra, ...(read.tiktok?.variables ?? noTikTokVariables()) } }, bookmarkUrl(read.meta));
+  }
+
+  private shotFormat(): { format: ShotFormat; ext: "jpg" | "png" } {
+    const type = this.options.screenshotFormat;
+    return { format: type === "jpeg" ? { type, quality: 80 } : { type }, ext: type === "jpeg" ? "jpg" : "png" };
+  }
+
+  /**
+   * Takes the wanted screenshots and PDF from a page made ready for shots,
+   * handing each to `put` as it's made. Returns whether the full-page shot was
+   * cut short.
+   */
+  private async shoot(
+    page: Page,
+    wanted: ReadonlySet<CaptureFile>,
+    read: PageRead,
+    viewportExtra: number,
+    put: (kind: CaptureFile, data: Buffer) => void,
+  ): Promise<boolean> {
+    const { maxHeight } = this.options;
+    const { format } = this.shotFormat();
+    await hideOverlays(page);
+    const { truncated } = await takeShots(page, wanted, { format, maxHeight, viewportExtra }, put);
+    return truncated;
+  }
+
+  async preview(url: string, render: RenderRequest): Promise<HeldPage> {
+    const context = await this.openContext();
+    try {
+      const { page, read, note } = await withTimeout(
+        (async () => {
+          const { page, status } = await this.load(context, url, true);
+          const read = await this.read(page, status, false);
+          const rendered = await this.render(page, render, read);
+          return { page, read, note: rendered && noteWithRemoteMedia(rendered, remoteMedia(read)) };
+        })(),
+        this.options.captureTimeoutMs,
+        () => void this.restart(),
+      );
+      const { ext } = this.shotFormat();
+      let viewportExtra: number | null = null;
+      // One thing at a time on the page: a render mid-screenshot would see a half-scrolled page.
+      let queue: Promise<unknown> = Promise.resolve();
+      const serial = <T>(task: () => Promise<T>): Promise<T> => {
+        const next = queue.then(task, task);
+        queue = next.catch(() => {});
+        return next;
+      };
+      return {
+        meta: read.meta,
+        markdown: read.markdown,
+        note,
+        render: (templateName) =>
+          serial(async () => {
+            const rendered = await this.render(page, { ...render, templateName }, read);
+            return rendered && noteWithRemoteMedia(rendered, remoteMedia(read));
+          }),
+        files: (kinds, put) =>
+          serial(async () => {
+            const wanted = new Set(kinds.filter((kind) => !MEDIA_FILES.includes(kind)));
+            if (!wanted.size) return { screenshotExt: null };
+            viewportExtra ??= await prepareForShots(page, this.options.maxHeight, this.options.scrollBudgetMs);
+            let made = false;
+            read.meta.truncated = await this.shoot(page, wanted, read, viewportExtra, (kind, data) => {
+              made ||= fileExt(kind, ext) === ext;
+              put(kind, data, ext);
+            });
+            return { screenshotExt: made ? ext : null };
+          }),
+        close: () => context.close().catch(() => {}),
+      };
+    } catch (err) {
+      await context.close().catch(() => {});
+      throw err;
+    }
+  }
+
+  /**
+   * The capture: the page's text, its note, and the screenshots the note uses.
+   * Media (the page image, a TikTok post's video, photos and cover) isn't
+   * downloaded; the note points at it on the web until "Download media".
+   */
+  private async run(context: BrowserContext, url: string, render: RenderRequest | null, progress?: CaptureProgress): Promise<CaptureResult> {
+    const { maxHeight, scrollBudgetMs } = this.options;
+    const { page, status } = await this.load(context, url);
+    // Lazy content loads before the page is read, so full captures get all of it.
+    const extra = await prepareForShots(page, maxHeight, scrollBudgetMs);
+    const read = await this.read(page, status, false);
+    const { meta, markdown } = read;
+    const rendered = render ? await this.render(page, render, read) : null;
+    const note = rendered && noteWithRemoteMedia(rendered, remoteMedia(read));
     progress?.page(meta, markdown, note);
-    const wanted = filesWanted(note, render?.files);
+    const wanted = new Set([...filesWanted(note, render?.files)].filter((kind) => !MEDIA_FILES.includes(kind)));
     if (wanted.size === 0) return { meta, markdown, files: {}, screenshotExt: null, note };
 
-    await hideOverlays(page);
-    const type = screenshotFormat;
-    const format = type === "jpeg" ? { type, quality: 80 } : { type };
-    const ext = type === "jpeg" ? "jpg" : "png";
-    const files = reportFiles(progress, ext);
-    // At the original viewport size even if it was grown for an inner scroller.
-    const firstScreen = async () => {
-      await page.evaluate(() => window.scrollTo(0, 0));
-      return page.screenshot({ ...format, clip: { x: 0, y: 0, ...VIEWPORT } });
-    };
-    /** Desktop shots in one color scheme; `suffix` is "" or "_dark". */
-    const desktopShots = async (suffix: "" | "_dark") => {
-      const want = (type: string) => wanted.has(`screenshot_${type}${suffix}` as CaptureFile);
-      const put = (type: string, data: Buffer | null) => {
-        if (data) files[`screenshot_${type}${suffix}` as CaptureFile] = data;
-      };
-      if (want("banner")) put("banner", await firstScreen());
-      if (want("thumbnail")) put("thumbnail", await thumbnail(page, type));
-      if (want("article")) put("article", await articleShot(page, format, maxHeight));
-      if (want("page")) {
-        const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0));
-        meta.truncated = height > maxHeight || VIEWPORT.height + extra > maxHeight;
-        put(
-          "page",
-          await page.screenshot({
-            fullPage: true,
-            ...format,
-            ...(meta.truncated ? { clip: { x: 0, y: 0, width: VIEWPORT.width, height: maxHeight } } : {}),
-          }),
-        );
-      }
-    };
-    const mobileShot = async (suffix: "" | "_dark") => {
-      if (!wanted.has(`screenshot_mobile${suffix}`)) return;
-      await page.evaluate(() => window.scrollTo(0, 0));
-      files[`screenshot_mobile${suffix}`] = await page.screenshot({ ...format, clip: { x: 0, y: 0, ...MOBILE_VIEWPORT } });
-    };
-    const darkMode = async (on: boolean) => {
-      await page.emulateMedia({ colorScheme: on ? "dark" : "light" });
-      await waitForDomQuiet(page, 300, 2000);
-    };
-    const anyDark = [...wanted].some((kind) => kind.endsWith("_dark"));
-
-    await desktopShots("");
-    if (wanted.has("pdf_page")) files.pdf_page = await pagePdf(page);
-    if (anyDark) {
-      await darkMode(true);
-      await desktopShots("_dark");
-    }
-    // Last: the layout reflows at phone width.
-    if (wanted.has("screenshot_mobile") || wanted.has("screenshot_mobile_dark")) {
-      await page.setViewportSize(MOBILE_VIEWPORT);
-      await waitForDomQuiet(page, 300, 2000);
-      // Still in dark mode if any dark shot was wanted, so take that one first.
-      if (anyDark) await mobileShot("_dark");
-      if (wanted.has("screenshot_mobile")) {
-        if (anyDark) await darkMode(false);
-        await mobileShot("");
-      }
-    }
-    const images: [CaptureFile, string[]][] = [
-      ["image_local", meta.image ? [meta.image] : []],
-      ["tiktok_thumbnail", tiktok?.cover ?? []],
-      ...(tiktok?.images ?? []).map((sources, i): [CaptureFile, string[]] => [`tiktok_image_${i + 1}`, sources]),
-    ];
-    for (const [kind, sources] of images) {
-      if (!wanted.has(kind) || !sources.length) continue;
-      const image = await imageFile(page.context(), sources, format, maxHeight);
-      if (image) files[kind] = image;
-    }
+    const { ext } = this.shotFormat();
+    const files: Partial<Record<CaptureFile, Buffer>> = {};
+    meta.truncated = await this.shoot(page, wanted, read, extra, (kind, data) => {
+      files[kind] = data;
+      progress?.file(kind, data, ext);
+    });
     const hasImage = CAPTURE_FILES.some((kind) => fileExt(kind, ext) === ext && files[kind]);
-    const video = wanted.has("tiktok_video") ? tiktok?.video : undefined;
-    return { meta, markdown, files, screenshotExt: hasImage ? ext : null, note, video };
+    return { meta, markdown, files, screenshotExt: hasImage ? ext : null, note };
+  }
+
+  async tiktokPhotos(url: string, cover: boolean): Promise<{ photos: Buffer[]; cover: Buffer | null; ext: "jpg" | "png" }> {
+    const context = await this.openContext();
+    try {
+      return await withTimeout(
+        (async () => {
+          const { page } = await this.load(context, url, true);
+          const post = tiktokPost(page.url());
+          if (!post) throw new Error("not a TikTok post");
+          const item = await tiktokItem(page, post);
+          if (!item) throw new Error("the post is unavailable (deleted, private or behind a login)");
+          const data = tiktokData(post, item);
+          const { format, ext } = this.shotFormat();
+          const photos: Buffer[] = [];
+          for (const sources of data.images) {
+            const image = await imageFile(context, sources, format, this.options.maxHeight);
+            if (image) photos.push(image);
+          }
+          const coverImage = cover && data.cover.length ? await imageFile(context, data.cover, format, this.options.maxHeight) : null;
+          return { photos, cover: coverImage, ext };
+        })(),
+        this.options.captureTimeoutMs,
+        () => void this.restart(),
+      );
+    } finally {
+      await context.close().catch(() => {});
+    }
   }
 
   private restart(): void {

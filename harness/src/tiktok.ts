@@ -176,7 +176,12 @@ function clock(seconds: number): string {
  * the id still gives the date and the embed. `transcript` is the captions'
  * cues, saved now since their links expire.
  */
-export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript: TranscriptCue[] = []): TikTokData {
+/**
+ * The post's template variables and media addresses. With `media` false the
+ * capture doesn't download the post's video or photos, so {{tiktok_save}} and
+ * {{tiktok_images}} show the TikTok player instead of saved files.
+ */
+export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript: TranscriptCue[] = [], media = true): TikTokData {
   const caption = (item?.desc ?? "").trim();
   const created = Number(item?.createTime);
   const date = Number.isFinite(created) && created > 0 ? new Date(created * 1000) : idTime(post.id);
@@ -188,7 +193,8 @@ export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript
     ? []
     : [...new Set([item?.video?.playAddr ?? "", ...(item?.video?.bitrateInfo ?? []).flatMap((rate) => rate.PlayAddr?.UrlList ?? [])].filter(Boolean))];
   // Each marker becomes the saved file's vault path, as with any capture file.
-  const photos = images.map((_, i) => `![[${fileMarker(`tiktok_image_${i + 1}`)}]]`).join("\n");
+  const saved = images.map((_, i) => `![[${fileMarker(`tiktok_image_${i + 1}`)}]]`).join("\n");
+  const photos = media || !images.length ? saved : videoEmbed(post.id);
   return {
     variables: {
       tiktok_id: post.id,
@@ -200,7 +206,7 @@ export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript
       tiktok_embed: videoEmbed(post.id),
       tiktok_images: photos,
       // The post saved in the vault: its video, or a carousel's photos.
-      tiktok_save: video.length ? `![[${fileMarker("tiktok_video")}]]` : photos,
+      tiktok_save: !media ? videoEmbed(post.id) : video.length ? `![[${fileMarker("tiktok_video")}]]` : photos,
       tiktok_image_count: images.length ? String(images.length) : "",
       tiktok_transcript: transcript.map((cue) => cue.text).join(" "),
       tiktok_transcript_timestamps: transcript.map((cue) => `[${clock(cue.start)}] ${cue.text}`).join("\n"),

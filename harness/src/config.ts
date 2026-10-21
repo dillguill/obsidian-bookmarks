@@ -30,6 +30,8 @@ export interface Config {
   chromiumPath: string | undefined;
   /** IANA time zone for dates in notes ({{date}}); the system zone (UTC in Docker) when unset. */
   timezone?: string;
+  /** yt-dlp for "Download media"'s videos; null turns video downloads off. */
+  ytdlpPath: string | null;
 }
 
 function int(value: string | undefined, fallback: number): number {
@@ -61,5 +63,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowPrivateNetworks: env.BOOKMARKS_ALLOW_PRIVATE_NETWORKS === "1",
     chromiumPath: env.BOOKMARKS_CHROMIUM_PATH || undefined,
     timezone: env.TZ || undefined,
+    ytdlpPath: env.BOOKMARKS_YTDLP_PATH === "" ? null : (env.BOOKMARKS_YTDLP_PATH ?? "yt-dlp"),
   };
 }
