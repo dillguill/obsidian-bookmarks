@@ -4,6 +4,13 @@ The phone never captures anything itself. It sends the URL to bookmarks-server,
 the server captures it, and the next Obsidian that opens (desktop or mobile)
 writes the note. Obsidian can be closed when you share.
 
+A post or video shared with a template whose **On capture** setting is **Add and
+download media** (the TikTok template's, for one) also has its video or photos
+downloaded on the server straight away, in case the post is taken down. The note
+shows the TikTok player until Obsidian collects the download and swaps the player
+for the saved files. With any other setting, run **Download media for current
+note** in Obsidian whenever you want them.
+
 ## 1. Let the phone reach the server
 
 The compose file binds the server to `127.0.0.1` on the machine running Docker,

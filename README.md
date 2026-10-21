@@ -31,7 +31,7 @@ your vault as deduplicated bookmark notes. See the
    code from the server's log (`docker compose logs bookmarks-server`). Then, under
    **API keys**, create a key for each device (say "MacBook" and "iPhone Shortcut").
    Check one: `curl -H "Authorization: Bearer <key>" http://127.0.0.1:8787/health`
-   should return `{"status":"ok","apiVersion":6,...}`.
+   should return `{"status":"ok","apiVersion":8,...}`.
 
 2. **Install the plugin** with [BRAT](https://github.com/TfTHacker/obsidian42-brat):
    in BRAT's settings choose **Add beta plugin** and enter `dillguill/obsidian-bookmarks`.
@@ -42,7 +42,7 @@ your vault as deduplicated bookmark notes. See the
    npm install
    npm run build -w plugin
    mkdir -p <vault>/.obsidian/plugins/obsidian-bookmarker
-   cp plugin/main.js plugin/manifest.json <vault>/.obsidian/plugins/obsidian-bookmarker/
+   cp plugin/main.js plugin/manifest.json plugin/styles.css <vault>/.obsidian/plugins/obsidian-bookmarker/
    ```
 
    Enable **Bookmarker** under Settings → Community plugins, then in its settings set
@@ -52,17 +52,38 @@ your vault as deduplicated bookmark notes. See the
    vault's properties. Templates' own URL properties are read too.
 
 3. **Capture from Obsidian**: copy a URL, run **Bookmarks: Capture URL** from the
-   command palette (or the ribbon icon). The note opens when the capture finishes,
-   with the screenshot embedded at the top. Capturing the same URL again shows
-   "Already saved" with **Open existing**, **Replace** (capture again into the
-   same note) and **Save as new**. **Bookmarks: Capture current bookmark again**
-   refreshes the open note the same way. **Bookmarks: Update note from
-   source** fetches the open note's page again (any note with a URL
-   property, even one this plugin didn't make) and lets you pick which
-   properties to add, replace or add to a list, whether to add the page content,
-   and which images to save, placed before or after the note's body or in place of it.
-   On a note with a TikTok player, **Save TikTok offline** swaps the player for
-   the video (or a carousel's photos) saved in the vault.
+   command palette (or the ribbon icon). Like Obsidian Web Clipper, the window
+   reads the page straight away and shows the note the template makes: file
+   name, properties (typed the way your vault types them) and body, all
+   editable, with **Add property** and a folder to save to. Switching template
+   re-renders without loading the page again. **Add to Obsidian** writes exactly
+   what you see at once; screenshots the note uses are added a moment later,
+   where the template puts them, so the note never links to a missing file.
+   The button's menu also has **Add and download media** and **Copy Markdown**;
+   which one is the main button is the template's **On capture** setting. A page
+   that's already saved says so, with a link to the note.
+
+   **Bookmarks: Update note from source** shows the open note (any note with a
+   URL property, even one this plugin didn't make) and fetches its page only when
+   you press **Fetch from source**. Each property then shows what the note has and
+   what the page gives: keep it, use the page's, merge lists, type your own, or
+   remove it; the body can be kept, added to or replaced (with a preview of the
+   change). Editing the file name or folder renames or moves the note. **Replace
+   whole note** sets everything to the page's version. A template property set to
+   `{{template}}` records which template made a note, so the next update opens
+   on it.
+
+   **Bookmarks: Download media for current note**, like Obsidian's own Download
+   attachments, lists the note's media, each ticked: a TikTok post's video or
+   photos and cover, YouTube, X, Vimeo and Instagram videos, images embedded from
+   the web, and image addresses in properties. Each one downloaded replaces its
+   player, embed or address in the note; one that fails is reported and left as
+   it was. Images are fetched by the plugin; posts and videos by the server, one
+   at a time with a pause between downloads from one site, through yt-dlp (or the
+   browser for TikTok photo posts). Captures don't download media themselves:
+   notes show the TikTok player and the web addresses until you download.
+   Screenshots and downloaded media go where Obsidian's "Default location for new
+   attachments" says, unless the plugin's **Attachment folder override** is set.
 
    **Bookmarks: Find duplicate bookmarks** lists notes that point at the same page
    (http or https, `www.`, tracking params and trailing slashes don't matter), and
@@ -91,8 +112,10 @@ your vault as deduplicated bookmark notes. See the
 
 Sites that block the capture (bot walls, hard paywalls) still get a note with the
 link and a "Capture failed" callout but no screenshot, so nothing sent from the phone
-is lost. The callout's **Retry capture** link captures the page again into the same
-note. Saved links drop tracking params (`utm_*`, `fbclid`…) and the ones bot walls
+is lost. The callout's **Retry capture** link opens Update from source on that note,
+with Replace whole note chosen. A phone capture whose template is set to **Add and
+download media** has its post's or video's media downloaded on the server straight
+away, and the plugin puts it in the note when it collects the capture. Saved links drop tracking params (`utm_*`, `fbclid`…) and the ones bot walls
 add (`js_challenge`, `__cf_chl_*`…).
 
 **Settings page.** Open the server in a browser (`http://127.0.0.1:8787/`, or your
@@ -123,7 +146,8 @@ server, so every device and every phone Shortcut uses the same settings:
   `{{screenshot_mobile}}` (first screen at phone width), `{{screenshot_article}}`
   (main content block only), `{{screenshot_thumbnail}}` (small first screen), each
   also as `_dark` for the site's dark mode (`{{screenshot_page_dark}}`…), and
-  `{{pdf_page}}`, plus `{{image_local}}`, the page's `{{image}}` saved in the vault.
+  `{{pdf_page}}`. `{{image_local}}` is the page's `{{image}}`; it stays a web address
+  until **Download media** saves it.
   Write
   `![[{{screenshot_page}}]]` to show one or `[[{{screenshot_page}}]]` to link it, in
   the note content or a property. A capture makes only the files its template
@@ -135,17 +159,28 @@ server, so every device and every phone Shortcut uses the same settings:
   first line), `{{tiktok_description}}` (whole caption), `{{tiktok_published}}`,
   `{{tiktok_author}}`, `{{tiktok_author_handle}}`, `{{tiktok_id}}`,
   `{{tiktok_embed}}` (a player that plays in the note, or swipes through a photo
-  carousel) and `{{tiktok_thumbnail}}` (the cover saved in the vault, since its link
-  expires). `{{tiktok_save}}` saves the post in the vault and embeds it, so it
-  plays offline: the video (`note-tiktok-video.mp4`, path in `{{tiktok_video}}`)
-  or a carousel's photos (paths in `{{tiktok_image_1}}`…, counted by
-  `{{tiktok_image_count}}`; `{{tiktok_images}}` embeds only photos). `{{tiktok_transcript}}` is what's said, from TikTok's captions in the
+  carousel), `{{tiktok_thumbnail}}` (the cover's web address; TikTok's cover links
+  expire, so **Download media** fetches a fresh one) and `{{tiktok_image_count}}`.
+  `{{tiktok_save}}`, `{{tiktok_video}}` and `{{tiktok_images}}` show the player;
+  **Download media** (or the **Add and download media** preset) replaces it with the
+  saved video or photos. `{{tiktok_transcript}}` is what's said, from TikTok's captions in the
   language spoken, and `{{tiktok_transcript_timestamps}}` the same one line per
   caption with its time (`[0:03] …`); empty when TikTok has no captions, as for
   videos without speech. They're empty on other sites. [docs/templates/tiktok.json](docs/templates/tiktok.json) is a template to import.
 
-Server URL, API key, screenshot folder and poll interval are set per device in the
-plugin; the key stays in each device's secret storage.
+Server URL, API key, attachment folder override and poll interval are set per
+device in the plugin; the key stays in each device's secret storage. The plugin
+keeps the server's property types in step with the vault's, so phone captures
+format values the same way.
+
+**Video downloads and your network.** The server never fetches private-network
+addresses (your router, NAS, other tailnet machines) unless
+`BOOKMARKS_ALLOW_PRIVATE_NETWORKS=1`. The browser checks every page it loads;
+yt-dlp sends every request through a proxy inside the server that checks each
+host, connects only to the address it checked, and checks redirects again.
+`BOOKMARKS_YTDLP_PATH=` (empty) turns video downloads off. yt-dlp is pinned in
+`harness/Dockerfile` with its checksum; bump `YTDLP_VERSION` and both checksums
+together when sites change and downloads start failing.
 
 ### Server API
 
@@ -156,16 +191,20 @@ session cookie from signing in (`/auth/*`); only that session can manage keys
 
 | Endpoint | What |
 |---|---|
-| `POST /capture` | Enqueue `{url, origin, template?, files?}` (`template` picks one by name; otherwise triggers decide; `files` lists capture files to make even if the template doesn't use them) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. Jobs with origin `enrich` are read by id and never listed for delivery. |
-| `GET /jobs?status=done,failed` | Finished captures waiting to be written. |
+| `POST /capture` | Enqueue `{url, origin, template?, files?}` (`template` picks one by name; otherwise triggers decide; `files` lists capture files to make even if the template doesn't use them) (JSON, form, plain-text URL, or `?url=`). `?wait=1` holds up to 60s for the result; 202 means still running. Jobs with origin `enrich` are read by id and never listed for delivery. `mode: "preview"` (plugin only) publishes the rendered note as soon as the page settles and holds the page open for the calls below. |
+| `POST /jobs/:id/render` | `{template}`: renders a held preview with another template, without loading the page again. 410 once the page was let go. |
+| `POST /jobs/:id/files` | `{files, finish}`: takes screenshots or the PDF on a held preview's page; with `finish` the job is done afterwards and drain delivers it. |
+| `POST /jobs/:id/release` | `{keep}`: lets go of a held page; `keep` when the note was written, else the job is thrown away. Pages are let go after 2 minutes unused. |
+| `POST /media` | `{url, want}`: queues a media download (`want`: `video`, `photos`, `cover`). One runs at a time, with a pause between downloads from one site. |
+| `GET /jobs?status=done,failed` | Finished captures waiting to be written; `&origin=media` lists media downloads instead. |
 | `GET /jobs/:id` | One job. |
-| `GET /jobs/:id/asset/:kind` | Capture output: a screenshot, `pdf_page`, `image_local`, `tiktok_thumbnail` or `tiktok_image_N` named after its variable (only those the template uses), `markdown`, or the rendered `note`. |
+| `GET /jobs/:id/asset/:kind` | Capture output: a screenshot or `pdf_page` named after its variable (only those the note uses), `markdown`, or the rendered `note`; a media download's `media_video`, `media_cover` and `media_photo_N`. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS` (an update's blobs right away). |
 | `POST /jobs/:id/cancel` | Stops a pending or running capture; it fails as `cancelled` and its result is thrown away. |
-| `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId}`. |
+| `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId, schemaRevision}`; a template's `onCapture` is `add`, `add-media` or `copy`. |
 | `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |
 | `GET /ui/` | The settings page (static, no key needed to load it; it signs in with a username and password). |
-| `GET /health` | `{status, apiVersion, version}`; the plugin warns when `apiVersion` doesn't match. |
+| `GET /health` | `{status, apiVersion, version, media: {ytdlp}}`; the plugin warns when `apiVersion` doesn't match. `ytdlp` is null when video downloads are off. |
 
 ## Development
 

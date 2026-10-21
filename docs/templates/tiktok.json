@@ -2,6 +2,7 @@
   "schemaVersion": "0.1.0",
   "name": "TikTok",
   "behavior": "create",
+  "onCapture": "add-media",
   "noteNameFormat": "{{domain|kebab}}-{{tiktok_title|kebab}}-{{date|date:\"YYYY-MM-DD\"}}",
   "path": "Bookmarks/notes",
   "noteContentFormat": "{{tiktok_embed}}\n\n{{tiktok_description}}\n\n{{tiktok_images}}",
