@@ -686,8 +686,63 @@
   height: 100%;
 }
 
+/*
+ * Phones: the middle doesn't scroll as one. Properties and body share what's
+ * left after the file name evenly; the property list scrolls inside its half
+ * and the body fills its own. Collapsing Properties gives the body the room.
+ */
+.is-phone .bookmarks-clip-scroll {
+  overflow: hidden;
+}
+
+.is-phone .bookmarks-clip-name,
+.is-phone .bookmarks-clip-hint {
+  flex: none;
+}
+
+.is-phone .bookmarks-clip-properties,
+.is-phone .bookmarks-clip-body {
+  flex: 1 1 0;
+  min-height: 0;
+  /* Both halves have the body's divider and top padding, so they come out the same size. */
+  border-top: 1px solid var(--divider-color, var(--background-modifier-border));
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.is-phone .bookmarks-clip-properties.is-collapsed {
+  flex: none;
+}
+
+.is-phone .bookmarks-clip-properties-head,
+.is-phone .bookmarks-clip-body-head,
+.is-phone .bookmarks-clip-diff-toggle {
+  flex: none;
+}
+
+.is-phone .bookmarks-clip-property-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The body: its text box fills the half; with a diff preview open, the half scrolls. */
+.is-phone .bookmarks-clip-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .is-phone .bookmarks-clip-body-input {
-  min-height: 6em;
+  flex: 1 1 auto;
+  min-height: 4em;
+  resize: none;
+}
+
+.is-phone .bookmarks-clip-body .bookmarks-diff {
+  flex: none;
+  max-height: none;
 }
 
 .bookmarks-property-remove {
