@@ -609,6 +609,39 @@
   padding-top: 8px;
 }
 
+/* Capture URL's media switches, under the body. */
+.bookmarks-clip-media {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  flex: none;
+  font-size: var(--font-ui-small);
+}
+
+.bookmarks-clip-media-head {
+  color: var(--text-muted);
+  flex-basis: 100%;
+}
+
+.bookmarks-clip-media-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  cursor: var(--cursor);
+}
+
+.bookmarks-clip-media-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.bookmarks-clip-media-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
 .bookmarks-clip-body-input {
   width: 100%;
   min-height: 10em;

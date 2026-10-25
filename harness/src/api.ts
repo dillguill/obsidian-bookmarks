@@ -1,7 +1,7 @@
 // Wire types for the HTTP API. plugin/src/api.ts mirrors these; bump
 // API_VERSION on any breaking change so a mismatched pair says which side to
 // update (design §5.3).
-export const API_VERSION = 8;
+export const API_VERSION = 9;
 
 export type JobStatus = "pending" | "running" | "done" | "failed" | "delivered";
 
@@ -80,19 +80,20 @@ export interface MediaJobInfo {
   followUp?: string;
   /** On a media download queued after a capture: that capture's id, so the plugin puts the files in its note. */
   forCapture?: string;
+  /** On a media download queued after a capture: the note's values marked `|local` (see {@link RenderedNote.local}). */
+  local?: string[];
 }
 
-/** Most photos a TikTok carousel can hold; each is its own capture file. */
+/** Most photos a TikTok carousel can hold. */
 export const TIKTOK_IMAGE_MAX = 35;
 
 /**
  * Files a template can ask for, each named after its template variable, which
  * holds the file's vault path: full page, first screen, first screen at phone
  * width, the main content block and a small first screen, each also in the
- * site's dark mode (`_dark`), and a PDF of the page. The media variables after
- * them (`image_local`, `tiktok_thumbnail`, `tiktok_video`, `tiktok_image_1`…)
- * aren't made by a capture: the note shows the web address or the TikTok player
- * until "Download media" saves them (see harness/src/remote-media.ts).
+ * site's dark mode (`_dark`), and a PDF of the page. Media isn't a capture
+ * file: it's a web address in the note until the `|local` filter or "Download
+ * media" saves it (see harness/src/local-media.ts).
  */
 export const CAPTURE_FILES = [
   "screenshot_page",
@@ -106,16 +107,12 @@ export const CAPTURE_FILES = [
   "screenshot_article_dark",
   "screenshot_thumbnail_dark",
   "pdf_page",
-  "image_local",
-  "tiktok_thumbnail",
-  "tiktok_video",
-  ...Array.from({ length: TIKTOK_IMAGE_MAX }, (_, i) => `tiktok_image_${i + 1}` as const),
 ] as const;
 export type CaptureFile = (typeof CAPTURE_FILES)[number];
 
-/** A capture file's extension: the PDF and the TikTok video have their own, images share the screenshot format's. */
+/** A capture file's extension: the PDF has its own, screenshots share the screenshot format's. */
 export function fileExt(kind: CaptureFile, screenshotExt: Job["screenshotExt"]): string | null {
-  return kind === "pdf_page" ? "pdf" : kind === "tiktok_video" ? "mp4" : screenshotExt;
+  return kind === "pdf_page" ? "pdf" : screenshotExt;
 }
 
 /** A capture file, the readable `markdown`, or the `note` rendered with Web Clipper's engine ({@link RenderedNote}, JSON). */
@@ -149,6 +146,8 @@ export interface RenderedNote {
   content: string;
   /** Every non-empty template variable the note was rendered with, by "{{name}}", for "Update note from source". */
   variables: Record<string, string>;
+  /** Values in the note the template marked `|local` (a web address or a player), to be saved as vault files once it's written. */
+  local?: string[];
 }
 
 /**
@@ -175,8 +174,8 @@ export interface CaptureSettings {
   schemaRevision?: number;
 }
 
-/** What adding a captured page does: write the note, write it then download its media, or copy its Markdown. */
-export type CaptureAction = "add" | "add-media" | "copy";
+/** What adding a captured page does: write the note, or copy its Markdown. Media marked `|local` is saved either way the note is written. */
+export type CaptureAction = "add" | "copy";
 
 export interface PropertyTypeEntry {
   name: string;

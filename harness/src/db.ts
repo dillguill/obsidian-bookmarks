@@ -142,11 +142,16 @@ export class JobStore {
     return this.db.prepare("UPDATE jobs SET status = 'running', updated_at = ? WHERE id = ? AND status = 'pending'").run(new Date().toISOString(), id).changes > 0;
   }
 
-  /** Ends a media download: done when anything was made, else failed with the reason. */
+  /**
+   * Ends a media download: done when anything was made, or when nothing was
+   * asked of the server (a note whose marked media are all images); else
+   * failed with the reason.
+   */
   finishMedia(id: string, assets: AssetKind[], screenshotExt: Job["screenshotExt"], error: string | null): void {
+    const failed = !assets.length && error !== null;
     this.db
       .prepare("UPDATE jobs SET status = ?, error = ?, assets = ?, screenshot_ext = ?, updated_at = ? WHERE id = ? AND status = 'running'")
-      .run(assets.length ? "done" : "failed", assets.length ? null : (error ?? "nothing could be downloaded"), JSON.stringify(assets), screenshotExt, new Date().toISOString(), id);
+      .run(failed ? "failed" : "done", failed ? error : null, JSON.stringify(assets), screenshotExt, new Date().toISOString(), id);
   }
 
   /** Records what a running capture has made so far; its assets can be read before it's done. */

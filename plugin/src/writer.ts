@@ -119,8 +119,7 @@ export function fillFiles(text: string, saved: SavedFiles): string {
 
 /**
  * Saves capture files as the note's attachments: <note>.jpg for the page,
- * <note>-banner.jpg, <note>-banner-dark.jpg and so on, <note>.pdf,
- * <note>-image.jpg, <note>-tiktok-video.mp4. They go where the user's Obsidian
+ * <note>-banner.jpg, <note>-banner-dark.jpg and so on, and <note>.pdf. They go where the user's Obsidian
  * attachment setting puts them, or in `folder` when the plugin overrides it;
  * existing files are never overwritten.
  */
@@ -137,8 +136,8 @@ export async function saveCaptureFiles(
     const data = files?.[kind];
     const ext = fileExt(kind, screenshotExt);
     if (!data || !ext) continue;
-    // screenshot_page -> note, screenshot_banner_dark -> note-banner-dark, screenshot_page_dark -> note-dark, image_local -> note-image.
-    const suffix = kind.replace(/^(screenshot|pdf)_/, "").replace(/^page_?/, "").replace(/_local$/, "").replace(/_/g, "-");
+    // screenshot_page -> note, screenshot_banner_dark -> note-banner-dark, screenshot_page_dark -> note-dark.
+    const suffix = kind.replace(/^(screenshot|pdf)_/, "").replace(/^page_?/, "").replace(/_/g, "-");
     const base = suffix ? `${noteBase}-${suffix}` : noteBase;
     const path = await attachmentPath(vault, folder, `${base}.${ext}`, notePath);
     await vault.writeBinary(path, data);

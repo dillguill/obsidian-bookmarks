@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { CAPTURE_FILES, fileMarker, type CaptureFile, type CaptureSettings, type ClipperTemplate, type PageMeta } from "./api.js";
 import { cleanUrl } from "./clean-url.js";
+import { withLocalFilter } from "./local-media.js";
 
 const require = createRequire(import.meta.url);
 /** Web Clipper's template engine, bundled by scripts/build-clipper.mjs. */
@@ -55,7 +56,7 @@ export function fileVariables(paths: Partial<Record<CaptureFile, string | null>>
 export function renderRequest(settings: CaptureSettings, templateName: string | null, captureId: string, files: CaptureFile[] = []): RenderRequest {
   return {
     files,
-    templates: settings.templates.map((t) => withTemplateName(withRequiredProperties(t, settings.hideCaptureId))),
+    templates: settings.templates.map((t) => withLocalFilter(withTemplateName(withRequiredProperties(t, settings.hideCaptureId)))),
     templateName,
     propertyTypes: Object.fromEntries(settings.propertyTypes.map((p) => [p.name, p.type])),
     extra: { capture_id: captureId, ...fileVariables(Object.fromEntries(CAPTURE_FILES.map((kind) => [kind, fileMarker(kind)]))) },

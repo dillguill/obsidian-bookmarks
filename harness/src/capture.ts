@@ -8,7 +8,7 @@ import { imageFile, tiktokItem, tiktokTranscript } from "./media.js";
 import { hideOverlays, prepareForShots, VIEWPORT, waitForDomQuiet } from "./page.js";
 import { bookmarkUrl, CLIPPER_BUNDLE_PATH, type RenderRequest } from "./render.js";
 import { takeShots, type ShotFormat } from "./shots.js";
-import { MEDIA_FILES, noteWithRemoteMedia, type RemoteMedia } from "./remote-media.js";
+import { withLocalMarks } from "./local-media.js";
 import { itemFromScripts, noTikTokVariables, readTikTokScripts, tiktokData, tiktokPost, videoEmbed, type TikTokData } from "./tiktok.js";
 
 const require = createRequire(import.meta.url);
@@ -71,8 +71,8 @@ export interface CaptureEngine {
   capture(url: string, render?: RenderRequest | null, progress?: CaptureProgress): Promise<CaptureResult>;
   /** Reads the page and renders its note as soon as it settles, without media, and keeps it open. */
   preview(url: string, render: RenderRequest): Promise<HeldPage>;
-  /** A TikTok photo post's photos (in order) and cover, as image files; for "Download media". */
-  tiktokPhotos(url: string, cover: boolean): Promise<{ photos: Buffer[]; cover: Buffer | null; ext: "jpg" | "png" }>;
+  /** A TikTok photo post's photos (in order) and cover, as image files, as asked for; for "Download media". */
+  tiktokPhotos(url: string, want: { photos: boolean; cover: boolean }): Promise<{ photos: Buffer[]; cover: Buffer | null; ext: "jpg" | "png" }>;
   close(): Promise<void>;
 }
 
@@ -152,17 +152,6 @@ interface PageRead {
   tiktok: TikTokData | null;
   /** The TikTok post's id, when it is one. */
   tiktokId: string | null;
-}
-
-/** Where a page's media lives on the web, for notes that don't download it. */
-function remoteMedia(read: PageRead): RemoteMedia {
-  const images: RemoteMedia["images"] = {};
-  if (read.meta.image) images.image_local = read.meta.image;
-  if (read.tiktok?.cover[0]) images.tiktok_thumbnail = read.tiktok.cover[0];
-  read.tiktok?.images.forEach((sources, i) => {
-    if (sources[0]) images[`tiktok_image_${i + 1}` as CaptureFile] = sources[0];
-  });
-  return { player: read.tiktokId ? videoEmbed(read.tiktokId) : "", images };
 }
 
 export class PlaywrightEngine implements CaptureEngine {
@@ -248,10 +237,9 @@ export class PlaywrightEngine implements CaptureEngine {
 
   /**
    * Reads the page as served (before overlays are hidden): Defuddle's details
-   * and text, TikTok's data, and a bot-wall check. `media` false means the
-   * capture won't download the post's media (see tiktokData).
+   * and text, TikTok's data, and a bot-wall check.
    */
-  private async read(page: Page, status: number | null, media = true): Promise<PageRead> {
+  private async read(page: Page, status: number | null): Promise<PageRead> {
     await page.addScriptTag({ path: DEFUDDLE_PATH });
     const parsed = await page.evaluate((pageUrl) => {
       const DefuddleCtor = (window as unknown as { Defuddle: new (doc: Document, opts: object) => { parse(): Record<string, unknown> } }).Defuddle;
@@ -306,7 +294,7 @@ export class PlaywrightEngine implements CaptureEngine {
     const finalUrl = page.url();
     const post = tiktokPost(finalUrl);
     const item = post ? await tiktokItem(page, post) : null;
-    const tiktok = post ? tiktokData(post, item, await tiktokTranscript(page, item), media) : null;
+    const tiktok = post ? tiktokData(post, item, await tiktokTranscript(page, item)) : null;
     const meta: PageMeta = {
       finalUrl,
       canonical: parsed.canonical ? absolute(parsed.canonical, finalUrl) || null : null,
@@ -329,9 +317,10 @@ export class PlaywrightEngine implements CaptureEngine {
     return { meta, markdown: this.turndown.turndown(parsed.content), tiktok, tiktokId: post?.id ?? null };
   }
 
-  /** The note rendered with a template, with the TikTok variables (empty off TikTok). */
-  private render(page: Page, render: RenderRequest, read: PageRead): Promise<RenderedNote | null> {
-    return renderNote(page, { ...render, extra: { ...render.extra, ...(read.tiktok?.variables ?? noTikTokVariables()) } }, bookmarkUrl(read.meta));
+  /** The note rendered with a template, with the TikTok variables (empty off TikTok) and its `|local` media listed. */
+  private async render(page: Page, render: RenderRequest, read: PageRead): Promise<RenderedNote | null> {
+    const note = await renderNote(page, { ...render, extra: { ...render.extra, ...(read.tiktok?.variables ?? noTikTokVariables()) } }, bookmarkUrl(read.meta));
+    return note && withLocalMarks(note, read.tiktokId ? videoEmbed(read.tiktokId) : "");
   }
 
   private shotFormat(): { format: ShotFormat; ext: "jpg" | "png" } {
@@ -364,9 +353,8 @@ export class PlaywrightEngine implements CaptureEngine {
       const { page, read, note } = await withTimeout(
         (async () => {
           const { page, status } = await this.load(context, url, true);
-          const read = await this.read(page, status, false);
-          const rendered = await this.render(page, render, read);
-          return { page, read, note: rendered && noteWithRemoteMedia(rendered, remoteMedia(read)) };
+          const read = await this.read(page, status);
+          return { page, read, note: await this.render(page, render, read) };
         })(),
         this.options.captureTimeoutMs,
         () => void this.restart(),
@@ -385,13 +373,10 @@ export class PlaywrightEngine implements CaptureEngine {
         markdown: read.markdown,
         note,
         render: (templateName) =>
-          serial(async () => {
-            const rendered = await this.render(page, { ...render, templateName }, read);
-            return rendered && noteWithRemoteMedia(rendered, remoteMedia(read));
-          }),
+          serial(() => this.render(page, { ...render, templateName }, read)),
         files: (kinds, put) =>
           serial(async () => {
-            const wanted = new Set(kinds.filter((kind) => !MEDIA_FILES.includes(kind)));
+            const wanted = new Set(kinds);
             if (!wanted.size) return { screenshotExt: null };
             viewportExtra ??= await prepareForShots(page, this.options.maxHeight, this.options.scrollBudgetMs);
             let made = false;
@@ -412,19 +397,19 @@ export class PlaywrightEngine implements CaptureEngine {
   /**
    * The capture: the page's text, its note, and the screenshots the note uses.
    * Media (the page image, a TikTok post's video, photos and cover) isn't
-   * downloaded; the note points at it on the web until "Download media".
+   * downloaded here; the note points at it on the web, and media marked
+   * `|local` is downloaded after (see Worker.followUp).
    */
   private async run(context: BrowserContext, url: string, render: RenderRequest | null, progress?: CaptureProgress): Promise<CaptureResult> {
     const { maxHeight, scrollBudgetMs } = this.options;
     const { page, status } = await this.load(context, url);
     // Lazy content loads before the page is read, so full captures get all of it.
     const extra = await prepareForShots(page, maxHeight, scrollBudgetMs);
-    const read = await this.read(page, status, false);
+    const read = await this.read(page, status);
     const { meta, markdown } = read;
-    const rendered = render ? await this.render(page, render, read) : null;
-    const note = rendered && noteWithRemoteMedia(rendered, remoteMedia(read));
+    const note = render ? await this.render(page, render, read) : null;
     progress?.page(meta, markdown, note);
-    const wanted = new Set([...filesWanted(note, render?.files)].filter((kind) => !MEDIA_FILES.includes(kind)));
+    const wanted = filesWanted(note, render?.files);
     if (wanted.size === 0) return { meta, markdown, files: {}, screenshotExt: null, note };
 
     const { ext } = this.shotFormat();
@@ -437,7 +422,7 @@ export class PlaywrightEngine implements CaptureEngine {
     return { meta, markdown, files, screenshotExt: hasImage ? ext : null, note };
   }
 
-  async tiktokPhotos(url: string, cover: boolean): Promise<{ photos: Buffer[]; cover: Buffer | null; ext: "jpg" | "png" }> {
+  async tiktokPhotos(url: string, want: { photos: boolean; cover: boolean }): Promise<{ photos: Buffer[]; cover: Buffer | null; ext: "jpg" | "png" }> {
     const context = await this.openContext();
     try {
       return await withTimeout(
@@ -450,11 +435,11 @@ export class PlaywrightEngine implements CaptureEngine {
           const data = tiktokData(post, item);
           const { format, ext } = this.shotFormat();
           const photos: Buffer[] = [];
-          for (const sources of data.images) {
+          for (const sources of want.photos ? data.images : []) {
             const image = await imageFile(context, sources, format, this.options.maxHeight);
             if (image) photos.push(image);
           }
-          const coverImage = cover && data.cover.length ? await imageFile(context, data.cover, format, this.options.maxHeight) : null;
+          const coverImage = want.cover && data.cover.length ? await imageFile(context, data.cover, format, this.options.maxHeight) : null;
           return { photos, cover: coverImage, ext };
         })(),
         this.options.captureTimeoutMs,

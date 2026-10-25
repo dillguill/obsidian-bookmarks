@@ -59,8 +59,11 @@ your vault as deduplicated bookmark notes. See the
    re-renders without loading the page again. **Add to Obsidian** writes exactly
    what you see at once; screenshots the note uses are added a moment later,
    where the template puts them, so the note never links to a missing file.
-   The button's menu also has **Add and download media** and **Copy Markdown**;
-   which one is the main button is the template's **On capture** setting. A page
+   The button's menu picks between that and **Copy Markdown** without saving, so
+   you can look the note over first; the template's **On capture** setting picks
+   the starting one. Under the body, **Save in the vault** lists the note's
+   media, switched on where the template used `|local` (see Templates); what's
+   on is downloaded after Add and replaces its web address in the note. A page
    that's already saved says so, with a link to the note.
 
    **Bookmarks: Update note from source** shows the open note (any note with a
@@ -80,8 +83,9 @@ your vault as deduplicated bookmark notes. See the
    player, embed or address in the note; one that fails is reported and left as
    it was. Images are fetched by the plugin; posts and videos by the server, one
    at a time with a pause between downloads from one site, through yt-dlp (or the
-   browser for TikTok photo posts). Captures don't download media themselves:
-   notes show the TikTok player and the web addresses until you download.
+   browser for TikTok photo posts). Captures only download media marked
+   `|local`: otherwise notes show the TikTok player and the web addresses until
+   you download.
    Screenshots and downloaded media go where Obsidian's "Default location for new
    attachments" says, unless the plugin's **Attachment folder override** is set.
 
@@ -113,9 +117,9 @@ your vault as deduplicated bookmark notes. See the
 Sites that block the capture (bot walls, hard paywalls) still get a note with the
 link and a "Capture failed" callout but no screenshot, so nothing sent from the phone
 is lost. The callout's **Retry capture** link opens Update from source on that note,
-with Replace whole note chosen. A phone capture whose template is set to **Add and
-download media** has its post's or video's media downloaded on the server straight
-away, and the plugin puts it in the note when it collects the capture. Saved links drop tracking params (`utm_*`, `fbclid`…) and the ones bot walls
+with Replace whole note chosen. A phone capture whose template marks media
+`|local` has that media downloaded on the server straight away, and the plugin
+puts it in the note when it collects the capture. Saved links drop tracking params (`utm_*`, `fbclid`…) and the ones bot walls
 add (`js_challenge`, `__cf_chl_*`…).
 
 **Settings page.** Open the server in a browser (`http://127.0.0.1:8787/`, or your
@@ -146,24 +150,33 @@ server, so every device and every phone Shortcut uses the same settings:
   `{{screenshot_mobile}}` (first screen at phone width), `{{screenshot_article}}`
   (main content block only), `{{screenshot_thumbnail}}` (small first screen), each
   also as `_dark` for the site's dark mode (`{{screenshot_page_dark}}`…), and
-  `{{pdf_page}}`. `{{image_local}}` is the page's `{{image}}`; it stays a web address
-  until **Download media** saves it.
+  `{{pdf_page}}`.
   Write
   `![[{{screenshot_page}}]]` to show one or `[[{{screenshot_page}}]]` to link it, in
   the note content or a property. A capture makes only the files its template
   uses. Older templates' `{{screenshot}}`, `{{screenshot_link}}` and
   `{{screenshot_embed}}` are rewritten when loaded or imported.
+- **Saving media: `|local`.** Media stays where it lives on the web: an image is
+  its web address and a TikTok post is the player. Add `|local` to keep a copy in
+  the vault instead: the note is written with the web address, then the file is
+  downloaded and put in its place, as **Download media** would. Use it last,
+  after any other filters: `[[{{tiktok_thumbnail|local}}]]` in a property keeps a
+  TikTok cover, `{{tiktok_embed|local}}` the post's video or photos, and
+  `![]({{image|local}})` the page's main image. On anything that isn't a web
+  address it does nothing, and in a property, which can only link one file, a
+  value that isn't a single address (the post's player) comes out blank. Web Clipper itself doesn't know `|local`, so a
+  template shared with it gets the plain address. The older `{{image_local}}`,
+  `{{tiktok_save}}` and `{{tiktok_image_N}}` are rewritten to their `|local` forms.
 
 - **TikTok** posts fill `tiktok_*` variables from the post's own data, since the
   page's title, description and image say little: `{{tiktok_title}}` (caption's
   first line), `{{tiktok_description}}` (whole caption), `{{tiktok_published}}`,
   `{{tiktok_author}}`, `{{tiktok_author_handle}}`, `{{tiktok_id}}`,
   `{{tiktok_embed}}` (a player that plays in the note, or swipes through a photo
-  carousel), `{{tiktok_thumbnail}}` (the cover's web address; TikTok's cover links
-  expire, so **Download media** fetches a fresh one) and `{{tiktok_image_count}}`.
-  `{{tiktok_save}}`, `{{tiktok_video}}` and `{{tiktok_images}}` show the player;
-  **Download media** (or the **Add and download media** preset) replaces it with the
-  saved video or photos. `{{tiktok_transcript}}` is what's said, from TikTok's captions in the
+  carousel), `{{tiktok_video}}` and `{{tiktok_images}}` (the same player, only for
+  a video or a photo post), `{{tiktok_thumbnail}}` (the cover's web address;
+  TikTok's cover links expire within days, so use `|local` to keep it) and
+  `{{tiktok_image_count}}`. `{{tiktok_transcript}}` is what's said, from TikTok's captions in the
   language spoken, and `{{tiktok_transcript_timestamps}}` the same one line per
   caption with its time (`[0:03] …`); empty when TikTok has no captions, as for
   videos without speech. They're empty on other sites. [docs/templates/tiktok.json](docs/templates/tiktok.json) is a template to import.
@@ -201,7 +214,7 @@ session cookie from signing in (`/auth/*`); only that session can manage keys
 | `GET /jobs/:id/asset/:kind` | Capture output: a screenshot or `pdf_page` named after its variable (only those the note uses), `markdown`, or the rendered `note`; a media download's `media_video`, `media_cover` and `media_photo_N`. |
 | `POST /jobs/:id/delivered` | Plugin ack after writing; blobs are pruned after `BOOKMARKS_RETENTION_DAYS` (an update's blobs right away). |
 | `POST /jobs/:id/cancel` | Stops a pending or running capture; it fails as `cancelled` and its result is thrown away. |
-| `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId, schemaRevision}`; a template's `onCapture` is `add`, `add-media` or `copy`. |
+| `GET /settings` / `PUT /settings` | Shared settings `{templates, propertyTypes, hideCaptureId, schemaRevision}`; a template's `onCapture` is `add` or `copy`. |
 | `GET /templates` | Template names in order, for a Shortcut's "Choose from List". |
 | `GET /ui/` | The settings page (static, no key needed to load it; it signs in with a username and password). |
 | `GET /health` | `{status, apiVersion, version, media: {ytdlp}}`; the plugin warns when `apiVersion` doesn't match. `ytdlp` is null when video downloads are off. |

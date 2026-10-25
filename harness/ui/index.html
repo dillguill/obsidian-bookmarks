@@ -156,12 +156,13 @@
             <tr><td><code class="copy">{{screenshot_article}}</code></td><td>Just the main content block, without navigation or sidebars, <code>note-article.jpg</code>. Empty when the page has no article or main element.</td></tr>
             <tr><td><code class="copy">{{screenshot_thumbnail}}</code></td><td>A small first screen (480×300) for covers in Bases or card views, <code>note-thumbnail.jpg</code>.</td></tr>
             <tr><td><code class="copy">{{pdf_page}}</code></td><td>A PDF of the page with selectable text, <code>note.pdf</code>.</td></tr>
-            <tr><td><code class="copy">{{image_local}}</code></td><td>The page's main image (<code>{{image}}</code>): its web address, which <b>Download media</b> in Obsidian saves into the vault. Empty when the page has no image.</td></tr>
         </table>
         <p class="desc">Add <code>_dark</code> to any screenshot for the site's dark mode, e.g. <code class="copy">{{screenshot_page_dark}}</code> (<code>note-dark.jpg</code>) or <code class="copy">{{screenshot_mobile_dark}}</code> (<code>note-mobile-dark.jpg</code>). Sites without a dark mode look the same.</p>
-        <p class="desc">Templates saved or imported with the older <code>{{screenshot}}</code>, <code>{{screenshot_link}}</code> and <code>{{screenshot_embed}}</code> are rewritten to these.</p>
+        <p class="desc">Templates saved or imported with the older <code>{{screenshot}}</code>, <code>{{screenshot_link}}</code> and <code>{{screenshot_embed}}</code> are rewritten to these, and <code>{{image_local}}</code>, <code>{{tiktok_save}}</code> and <code>{{tiktok_image_1}}</code>… to their <code>|local</code> forms.</p>
+        <h2>Saving media: <code>|local</code></h2>
+        <p class="desc">Media stays where it lives on the web: an image is its web address and a TikTok post is the player. Add <code>|local</code> to keep a copy in the vault instead: the note is written with the web address, then the file is downloaded and put in its place. Use it last, after any other filters. For example <code class="copy">[[{{tiktok_thumbnail|local}}]]</code> in a property keeps a TikTok cover, <code class="copy">{{tiktok_embed|local}}</code> the post's video or photos, and <code class="copy">![]({{image|local}})</code> the page's main image. On anything that isn't a web address it does nothing, and in a property, which can only link one file, a value that isn't a single address (the post's player) comes out blank. In Obsidian, the capture window lets you change what's saved for one capture, and <b>Download media</b> saves media in notes written without it.</p>
         <h2>TikTok</h2>
-        <p class="desc">Read from the post's own data on TikTok video and photo pages, where the page's title, description and image say little. Empty on other sites. A capture doesn't download the post: the media variables show the player or the web address, and <b>Download media</b> in Obsidian (or the template's <b>Add and download media</b> preset) swaps them for the saved video, photos and cover.</p>
+        <p class="desc">Read from the post's own data on TikTok video and photo pages, where the page's title, description and image say little. Empty on other sites. Add <code>|local</code> to the post or the cover to save them (see above).</p>
         <table class="key">
             <tr><td><code class="copy">{{tiktok_title}}</code></td><td>The caption's first line, without trailing hashtags.</td></tr>
             <tr><td><code class="copy">{{tiktok_description}}</code></td><td>The whole caption.</td></tr>
@@ -170,14 +171,12 @@
             <tr><td><code class="copy">{{tiktok_author_handle}}</code></td><td>The creator's handle, without the @.</td></tr>
             <tr><td><code class="copy">{{tiktok_embed}}</code></td><td>A player that plays in the note, or swipes through a photo carousel: an <code>&lt;iframe&gt;</code> for the note content.</td></tr>
             <tr><td><code class="copy">{{tiktok_id}}</code></td><td>The post's id, e.g. <code>7382225350710824222</code>.</td></tr>
-            <tr><td><code class="copy">{{tiktok_images}}</code></td><td>A photo carousel: the player, until its photos are downloaded (one embed per line). Empty for videos.</td></tr>
+            <tr><td><code class="copy">{{tiktok_images}}</code></td><td>The player, for a photo carousel; with <code>|local</code>, its photos (one embed per line). Empty for videos.</td></tr>
             <tr><td><code class="copy">{{tiktok_image_count}}</code></td><td>How many photos the carousel has. Empty for videos.</td></tr>
-            <tr><td><code class="copy">{{tiktok_image_1}}</code></td><td>One carousel photo's web address, up to <code>{{tiktok_image_35}}</code>.</td></tr>
             <tr><td><code class="copy">{{tiktok_transcript}}</code></td><td>What's said in the video, from TikTok's auto captions in the language spoken, as plain text. Empty when there are none, as for videos without speech.</td></tr>
             <tr><td><code class="copy">{{tiktok_transcript_timestamps}}</code></td><td>The transcript one caption per line with its time, e.g. <code>[0:03] If you want to track…</code></td></tr>
-            <tr><td><code class="copy">{{tiktok_save}}</code></td><td>The post as the player; downloading media replaces it with the saved video (<code>![[note-video.mp4]]</code>) or the carousel's photos, so it plays offline.</td></tr>
-            <tr><td><code class="copy">{{tiktok_video}}</code></td><td>The player, wherever it's written. Empty for photo posts.</td></tr>
-            <tr><td><code class="copy">{{tiktok_thumbnail}}</code></td><td>The cover's web address. TikTok's cover links expire within days, so <b>Download media</b> fetches a fresh one and saves it.</td></tr>
+            <tr><td><code class="copy">{{tiktok_video}}</code></td><td>The player, for a video; with <code>|local</code>, the saved video (<code>![[note-video.mp4]]</code>). Empty for photo posts.</td></tr>
+            <tr><td><code class="copy">{{tiktok_thumbnail}}</code></td><td>The cover's web address. TikTok's cover links expire within days, so use <code>|local</code> to keep it.</td></tr>
         </table>
         <h2>Schema and meta</h2>
         <p class="desc">Read from the page's schema.org data and meta tags, as in Web Clipper.</p>
@@ -247,11 +246,10 @@
         <div class="setting">
           <div class="setting-info">
             <label class="setting-name" for="t-on-capture">On capture</label>
-            <div class="desc">What the capture window's button does in Obsidian; the others stay in its menu. With "Add and download media", captures shared from your phone download the page's videos and photos too.</div>
+            <div class="desc">What the capture window's button does in Obsidian; the other stays in its menu. Media marked <code>|local</code> is saved whenever the note is added.</div>
           </div>
           <select id="t-on-capture">
-            <option value="add">Add to Obsidian</option>
-            <option value="add-media">Add and download media</option>
+            <option value="">Add to Obsidian</option>
             <option value="copy">Copy Markdown</option>
           </select>
         </div>

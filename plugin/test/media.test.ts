@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findMedia, hasTikTokPlayer, imageName, replaceSource, replaceTikTokPlayer, videoSite, withoutTikTokPlayer } from "../src/media";
+import { findMedia, hasTikTokPlayer, imageName, isMarked, replaceSource, replaceTikTokPlayer, videoSite, withoutTikTokPlayer } from "../src/media";
 
 const player = `<iframe\nsrc="https://www.tiktok.com/player/v1/7382225350710824222?autoplay=0"\nallow="fullscreen"\nstyle="width:100%;height:50vh;"\n/>`;
 const text = `---\ntitle: x\n---\n${player}\n\nCaption.\n`;
@@ -66,6 +66,27 @@ describe("findMedia", () => {
 
   it("skips what's inside code", () => {
     expect(findMedia("```\n![a](https://example.com/x.png)\n```", {}, null)).toEqual([]);
+  });
+});
+
+describe("isMarked", () => {
+  const post = "https://www.tiktok.com/@a/video/7382225350710824222";
+  const player = '<iframe src="https://www.tiktok.com/player/v1/7382225350710824222?autoplay=0" />';
+  const cover = "https://p16.tiktokcdn.com/cover.jpeg";
+
+  it("picks out the items a template marked |local, and no others", () => {
+    const items = findMedia(`${player}\n\n![](https://e.com/a.png)`, { cover }, post);
+    expect(items.filter((i) => isMarked(i, [cover])).map((i) => i.kind)).toEqual(["tiktok_cover"]);
+    expect(items.filter((i) => isMarked(i, [player])).map((i) => i.kind)).toEqual(["tiktok_video"]);
+    expect(items.filter((i) => isMarked(i, ["https://e.com/a.png"])).map((i) => i.kind)).toEqual(["image"]);
+    expect(items.filter((i) => isMarked(i, []))).toEqual([]);
+  });
+
+  it("takes a marked property address as an image even without an image's extension", () => {
+    expect(findMedia("", { image: "https://e.com/og?id=1" }, null)).toEqual([]);
+    expect(findMedia("", { image: "https://e.com/og?id=1" }, null, ["https://e.com/og?id=1"]).map((i) => i.kind)).toEqual(["image"]);
+    // Never the bookmark's own address.
+    expect(findMedia("", { source: "https://e.com/page" }, "https://e.com/page", ["https://e.com/page"])).toEqual([]);
   });
 });
 

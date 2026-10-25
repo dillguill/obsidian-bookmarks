@@ -16,12 +16,23 @@ const OLD_SCREENSHOT = /\bscreenshot(_page|_banner)?(?:_(link|embed))?\b/g;
 const base = (kind: string | undefined) => `screenshot${kind ?? "_page"}`;
 
 /**
- * Brings older screenshot variables up to date: {{screenshot}} becomes
+ * Brings older variables up to date: {{screenshot}} becomes
  * {{screenshot_page}}, and the {{…_link}}/{{…_embed}} shortcuts become
  * [[{{screenshot_page}}]]/![[{{screenshot_page}}]]. Only text inside {{ }} and
- * {% %} changes, so prose that says "screenshot" is left alone.
+ * {% %} changes, so prose that says "screenshot" is left alone. Media
+ * variables that always saved a file become their `|local` form:
+ * {{image_local}} is {{image|local}}, {{tiktok_save}} {{tiktok_embed|local}}
+ * and {{tiktok_image_N}} {{tiktok_images|local}}.
  */
-export function renameScreenshotVariables(text: string): string {
+export function renameVariables(text: string): string {
+  return renameScreenshotVariables(text)
+    .replace(/\{\{\s*image_local\s*(\||\}\})/g, "{{image|local$1")
+    // The post is a player, not a file, so a [[ ]] or ![[ ]] around it goes.
+    .replace(/(?:!?\[\[)?\{\{\s*tiktok_save\s*\}\}(?:\]\])?/g, "{{tiktok_embed|local}}")
+    .replace(/(?:!?\[\[)?\{\{\s*tiktok_image_\d+\s*\}\}(?:\]\])?/g, "{{tiktok_images|local}}");
+}
+
+function renameScreenshotVariables(text: string): string {
   return text.replace(/\{\{([\s\S]*?)\}\}|\{%[\s\S]*?%\}/g, (tag, inner: string | undefined) => {
     const simple = inner === undefined ? null : /^\s*screenshot(_page|_banner)?_(link|embed)\s*$/.exec(inner);
     if (simple) return `${simple[2] === "embed" ? "!" : ""}[[{{${base(simple[1])}}}]]`;
@@ -31,35 +42,34 @@ export function renameScreenshotVariables(text: string): string {
   });
 }
 
-function renameInTemplate(template: ClipperTemplate): ClipperTemplate {
+/** A template with `change` applied to every field that can hold variables. */
+function mapTemplate(template: ClipperTemplate, change: (text: string) => string): ClipperTemplate {
   return {
     ...template,
-    noteNameFormat: renameScreenshotVariables(template.noteNameFormat),
-    path: renameScreenshotVariables(template.path),
-    noteContentFormat: renameScreenshotVariables(template.noteContentFormat),
-    properties: template.properties.map((p) => ({ ...p, value: renameScreenshotVariables(p.value) })),
+    noteNameFormat: change(template.noteNameFormat),
+    path: change(template.path),
+    noteContentFormat: change(template.noteContentFormat),
+    properties: template.properties.map((p) => ({ ...p, value: change(p.value) })),
   };
 }
 
-const CAPTURE_ACTIONS: ReadonlySet<string> = new Set<CaptureAction>(["add", "add-media", "copy"]);
-/** Settings migrations: 1 gives templates that used media variables the "Add and download media" preset. */
-export const SCHEMA_REVISION = 1;
-/** Variables that downloaded media when a note was captured, before media moved to "Download media". */
-const MEDIA_VARIABLES = /\{\{\s*(tiktok_save|tiktok_images|tiktok_video|tiktok_thumbnail|tiktok_image_\d+|image_local)\b/;
-
-/** A template that saved its page's media when captured keeps doing so: its preset becomes "Add and download media". */
-export function withMediaPreset(template: ClipperTemplate): ClipperTemplate {
-  if (template.onCapture) return template;
-  const text = [template.noteNameFormat, template.path, template.noteContentFormat, ...template.properties.map((p) => p.value)].join("\n");
-  return MEDIA_VARIABLES.test(text) ? { ...template, onCapture: "add-media" } : template;
+function renameInTemplate(template: ClipperTemplate): ClipperTemplate {
+  return mapTemplate(template, renameVariables);
 }
+
+const CAPTURE_ACTIONS: ReadonlySet<string> = new Set<CaptureAction>(["add", "copy"]);
+/**
+ * Settings migrations. 1 stored "Add and download media" on templates that
+ * used media variables, a preset since removed (it's dropped on reading); 2 was
+ * a planned rewrite to `|local`, done by hand instead, so there's none to run.
+ */
+export const SCHEMA_REVISION = 2;
 
 /** Brings settings saved by older versions up to date: drops the screenshot style and site lists, renames old variables, applies migrations once. */
 export function currentSettings(stored: Partial<CaptureSettings>): CaptureSettings {
-  const revision = stored.schemaRevision ?? 0;
   const templates = (stored.templates ?? DEFAULT_CAPTURE_SETTINGS.templates).map(renameInTemplate);
   return {
-    templates: revision < 1 ? templates.map(withMediaPreset) : templates,
+    templates,
     propertyTypes: stored.propertyTypes ?? DEFAULT_CAPTURE_SETTINGS.propertyTypes,
     hideCaptureId: stored.hideCaptureId ?? false,
     schemaRevision: SCHEMA_REVISION,
@@ -94,9 +104,7 @@ export function parseCaptureSettings(body: unknown): CaptureSettings | string {
   }
   const hideCaptureId = fields.hideCaptureId ?? false;
   if (typeof hideCaptureId !== "boolean") return "hideCaptureId must be true or false.";
-  // A body from before the migration (an old export, an old page) gets it now.
-  const revision = typeof fields.schemaRevision === "number" ? fields.schemaRevision : 0;
-  return { templates: revision < 1 ? templates.map(withMediaPreset) : templates, propertyTypes, hideCaptureId, schemaRevision: SCHEMA_REVISION };
+  return { templates, propertyTypes, hideCaptureId, schemaRevision: SCHEMA_REVISION };
 }
 
 const text = (value: unknown, fallback = ""): string | null =>

@@ -3,7 +3,6 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CAPTURE_FILES, fileMarker } from "../src/api.js";
 import { blockReason, filesWanted, PlaywrightEngine } from "../src/capture.js";
-import { MEDIA_FILES } from "../src/remote-media.js";
 import { renderRequest } from "../src/render.js";
 import { DEFAULT_CAPTURE_SETTINGS } from "../src/settings.js";
 
@@ -12,8 +11,8 @@ describe("filesWanted", () => {
 
   it("adds files asked for by name to the ones the note uses", () => {
     expect([...filesWanted(note(`![[${fileMarker("screenshot_banner")}]]`))]).toEqual(["screenshot_banner"]);
-    expect([...filesWanted(note(`![[${fileMarker("screenshot_banner")}]]`), ["image_local", "screenshot_page"])].sort()).toEqual([
-      "image_local",
+    expect([...filesWanted(note(`![[${fileMarker("screenshot_banner")}]]`), ["pdf_page", "screenshot_page"])].sort()).toEqual([
+      "pdf_page",
       "screenshot_banner",
       "screenshot_page",
     ]);
@@ -173,11 +172,12 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
   });
 
   it("makes every screenshot the template uses, light and dark, and points at media on the web", async () => {
-    const content = CAPTURE_FILES.map((kind) => `{{${kind}}}`).join(" ");
+    const content = [...CAPTURE_FILES.map((kind) => `{{${kind}}}`), "![[{{image|local}}]]"].join(" ");
     const { files, note } = await engine.capture(`${base}/layout`, withContent(content));
-    // Media is left for "Download media": the page image stays on the web.
-    expect(Object.keys(files).sort()).toEqual(CAPTURE_FILES.filter((kind) => !MEDIA_FILES.includes(kind)).sort());
-    expect(note!.content).toContain(`${base}/cover.png`);
+    // Media isn't downloaded by the capture: the page image stays on the web, listed to be saved.
+    expect(Object.keys(files).sort()).toEqual([...CAPTURE_FILES].sort());
+    expect(note!.content).toContain(`![](${base}/cover.png)`);
+    expect(note!.local).toEqual([`${base}/cover.png`]);
     expect(jpegSize(files.screenshot_mobile!)).toEqual({ width: 390, height: 844 });
     expect(jpegSize(files.screenshot_thumbnail!)).toEqual({ width: 480, height: 300 });
     expect(jpegSize(files.screenshot_article!).width).toBe(600);
@@ -216,7 +216,7 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
 
   it("previews a page without media, re-renders it and takes its shots later, full height", async () => {
     const templates = [
-      { ...DEFAULT_CAPTURE_SETTINGS.templates[0]!, name: "One", noteContentFormat: "one ![[{{image_local}}]] ![[{{screenshot_page}}]]", properties: [] },
+      { ...DEFAULT_CAPTURE_SETTINGS.templates[0]!, name: "One", noteContentFormat: "one ![[{{image|local}}]] ![[{{screenshot_page}}]]", properties: [] },
       { ...DEFAULT_CAPTURE_SETTINGS.templates[0]!, name: "Two", noteContentFormat: "two {{title}}", properties: [] },
     ];
     const held = await engine.preview(`${base}/layout`, renderRequest({ ...DEFAULT_CAPTURE_SETTINGS, templates }, "One", "01JOB"));
@@ -226,7 +226,7 @@ describe.skipIf(!chromiumPath)("PlaywrightEngine", () => {
       expect(held.note!.content).toBe(`one ![](${base}/cover.png) ![[${fileMarker("screenshot_page")}]]`);
       expect((await held.render("Two"))!.content).toBe("two Layout");
       const made: string[] = [];
-      const { screenshotExt } = await held.files(["screenshot_page", "image_local"], (kind) => made.push(kind));
+      const { screenshotExt } = await held.files(["screenshot_page"], (kind) => made.push(kind));
       expect(made).toEqual(["screenshot_page"]);
       expect(screenshotExt).toBe("jpg");
       // Still usable after the shots: back at desktop width.

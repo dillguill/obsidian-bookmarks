@@ -2,7 +2,7 @@ import { Notice, TFile, getFrontMatterInfo, requestUrl, type App } from "obsidia
 import type { Job, MediaAsset, MediaWant } from "./api";
 import { errorText } from "./errors";
 import type BookmarksPlugin from "./main";
-import { findMedia, imageName, replaceSource, type MediaItem, type MediaKind } from "./media";
+import { findMedia, imageName, isMarked, replaceSource, type MediaItem, type MediaKind } from "./media";
 import { MediaModal, type ItemState } from "./media-modal";
 import { normalizeUrl } from "./url";
 import { attachmentPath } from "./writer";
@@ -19,8 +19,8 @@ const SUFFIX: Record<Exclude<MediaKind, "image">, string> = { tiktok_video: "vid
 
 /**
  * Download media for current note: finds the note's media, lets the user pick
- * (or takes it all, for "Add and download media"), downloads it one item at a
- * time, and swaps each item's player, embed or address for the saved files.
+ * (or takes what a capture marked `|local`), downloads it one item at a time,
+ * and swaps each item's player, embed or address for the saved files.
  */
 export class MediaController {
   constructor(private readonly plugin: BookmarksPlugin) {}
@@ -29,21 +29,23 @@ export class MediaController {
     return this.plugin.app;
   }
 
-  /** What in a note can be downloaded. */
-  async find(file: TFile): Promise<MediaItem[]> {
+  /** What in a note can be downloaded; `local` are values a template marked `|local` (see findMedia). */
+  async find(file: TFile, local: readonly string[] = []): Promise<MediaItem[]> {
     const text = await this.app.vault.read(file);
-    return findMedia(text.slice(getFrontMatterInfo(text).contentStart), this.plugin.frontmatterOf(file), this.plugin.noteUrl(file));
+    return findMedia(text.slice(getFrontMatterInfo(text).contentStart), this.plugin.frontmatterOf(file), this.plugin.noteUrl(file), local);
   }
 
-  /** Opens the picker for a note's media; with `all`, downloads everything without asking. */
-  async download(file: TFile, options: { all?: boolean } = {}): Promise<void> {
+  /** Downloads, without asking, the media a note was just added with: the items with these keys (see MediaItem.key). */
+  async saveLocal(file: TFile, keys: readonly string[], local: readonly string[]): Promise<void> {
+    const items = (await this.find(file, local)).filter((item) => keys.includes(item.key));
+    if (items.length) await this.run(file, items, null);
+  }
+
+  /** Opens the picker for a note's media. */
+  async download(file: TFile): Promise<void> {
     const items = await this.find(file);
     if (!items.length) {
-      if (!options.all) new Notice("There's no media to download in this note.");
-      return;
-    }
-    if (options.all) {
-      void this.run(file, items, null);
+      new Notice("There's no media to download in this note.");
       return;
     }
     const modal = new MediaModal(this.app, items, (chosen) => void this.run(file, chosen, modal));
@@ -66,20 +68,18 @@ export class MediaController {
 
   /**
    * Puts a finished follow-up download (queued by the server after a phone
-   * capture) into the capture's note, and downloads the note's other media
-   * with it, as "Add and download media" does.
+   * capture) into the capture's note, with the note's other media marked
+   * `|local`: images, which the plugin fetches itself.
    */
   async applyFollowUp(file: TFile, job: Job): Promise<void> {
-    const items = await this.find(file);
+    const local = job.media?.local ?? [];
+    const items = (await this.find(file, local)).filter((item) => isMarked(item, local));
     const url = job.media?.url ?? job.url;
     const same = (a: string, b: string) => (normalizeUrl(a) ?? a) === (normalizeUrl(b) ?? b) || tiktokId(a) !== null && tiktokId(a) === tiktokId(b);
     const prefetched = new Map<string, Job>();
     for (const item of items) if (item.via === "server" && same(item.url, url)) prefetched.set(item.url, job);
-    if (!prefetched.size) {
-      // Nothing in the note for it any more (edited, or already saved): just collect it.
-      await this.plugin.client().delivered(job.id).catch(() => {});
-      if (!items.length) return;
-    }
+    // Nothing the server fetched has a place in the note any more (edited, or already saved): just collect it.
+    if (!prefetched.size) await this.plugin.client().delivered(job.id).catch(() => {});
     if (items.length) await this.run(file, items, null, prefetched);
   }
 
@@ -104,9 +104,23 @@ export class MediaController {
       }
     }
 
+    // A TikTok cover is fetched from the address in the note while it still
+    // works (its links last days), and from the post on the server after.
+    const fresh: MediaItem[] = [];
+    for (const item of items.filter((i) => i.kind === "tiktok_cover" && i.preview && !prefetched.has(i.url))) {
+      set(item, { state: "working" });
+      try {
+        await this.saveImage(file, { ...item, url: item.preview! }, `${file.basename}-cover`);
+        set(item, { state: "done" });
+      } catch {
+        fresh.push(item);
+      }
+    }
+
     // One server download per post or video page, for everything wanted from it.
     const groups = new Map<string, MediaItem[]>();
-    for (const item of items.filter((i) => i.via === "server")) groups.set(item.url, [...(groups.get(item.url) ?? []), item]);
+    const onServer = items.filter((i) => i.via === "server" && (i.kind !== "tiktok_cover" || !i.preview || prefetched.has(i.url) || fresh.includes(i)));
+    for (const item of onServer) groups.set(item.url, [...(groups.get(item.url) ?? []), item]);
     if (groups.size) {
       try {
         await this.plugin.ready();
@@ -156,21 +170,24 @@ export class MediaController {
   /** Saves what a finished server download made for one item and puts it in the note; the reason it didn't, or null. */
   private async saveFromJob(file: TFile, item: MediaItem, job: Job): Promise<string | null> {
     const want = WANTS[item.kind as keyof typeof WANTS];
-    const made = (job.media?.made ?? []).filter((m) => m.want === want).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-    if (!made.length) return job.media?.errors.find((e) => e.want === want)?.message ?? job.error ?? "nothing was downloaded";
+    // A post whose URL said video can turn out to be photos, and the other way round.
+    const post = item.kind === "tiktok_video" || item.kind === "tiktok_photos";
+    const fits = (m: MediaWant) => m === want || (post && (m === "video" || m === "photos"));
+    const made = (job.media?.made ?? []).filter((m) => fits(m.want)).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+    if (!made.length) return job.media?.errors.find((e) => fits(e.want))?.message ?? job.error ?? "nothing was downloaded";
     const client = this.plugin.client();
     const saved: TFile[] = [];
     for (const m of made) {
       const ext = m.asset === "media_video" ? "mp4" : (job.screenshotExt ?? "jpg");
-      const suffix = SUFFIX[item.kind as keyof typeof SUFFIX];
+      const suffix = post ? (m.want === "video" ? "video" : "photo") : SUFFIX[item.kind as keyof typeof SUFFIX];
       const name = `${file.basename}-${suffix}${m.index ? `-${m.index}` : ""}.${ext}`;
       saved.push(await this.write(file, name, await client.assetBinary(job.id, m.asset as MediaAsset)));
     }
     return (await this.place(file, item, saved)) ? null : "saved, but its place in the note was edited meanwhile";
   }
 
-  /** Downloads a web or data: image and puts it in the note. */
-  private async saveImage(file: TFile, item: MediaItem): Promise<void> {
+  /** Downloads a web or data: image and puts it in the note; `base` names the file, else the image's own name does. */
+  private async saveImage(file: TFile, item: MediaItem, base?: string): Promise<void> {
     let data: ArrayBuffer;
     let type: string | null = null;
     let disposition: string | null = null;
@@ -188,8 +205,8 @@ export class MediaController {
       disposition = reply.headers["content-disposition"] ?? null;
     }
     if (!data.byteLength) throw new Error("the image was empty");
-    const { base, ext } = imageName(item.url, type, disposition);
-    const saved = await this.write(file, `${base}.${ext}`, data);
+    const named = imageName(item.url, type, disposition);
+    const saved = await this.write(file, `${base ?? named.base}.${named.ext}`, data);
     if (!(await this.place(file, item, [saved]))) throw new Error("saved, but its place in the note was edited meanwhile");
   }
 

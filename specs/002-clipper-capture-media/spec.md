@@ -92,26 +92,28 @@ note has both edits and appeared without waiting for screenshots.
 The footer's Add is a split button. Its main action and the folder come from the
 template; the user can change either for this capture.
 
-**Why this priority**: It's how media download stays out of the capture path
-while still being one click away, and it replaces fixed behaviour with the
-template's own preset.
+*(Revised with the user: "Add and download media" is gone. What a note keeps as
+local files is said by the `|local` filter in the template, and can be changed
+per capture in the modal; see User Story 8.)*
 
-**Independent Test**: Give the TikTok template the preset "Add and download
-media", capture a TikTok post, and check the main button reads "Add and download
-media"; switch it to plain Add for one capture and check no media is fetched.
+**Why this priority**: It replaces fixed behaviour with the template's own
+preset.
+
+**Independent Test**: Give a template the preset "Copy markdown", capture a page,
+and check the main button reads "Copy markdown"; switch to Add for one capture
+and check the note is written.
 
 **Acceptance Scenarios**:
 
 1. **Given** a template with no preset, **Then** the main button is **Add**.
 2. **Given** a template with a preset, **Then** the main button is that action:
-   **Add**, **Add and download media**, or **Copy markdown**.
-3. **Given** the button's menu, **Then** it lists the other actions, plus **Save
+   **Add** or **Copy markdown**.
+3. **Given** the button's menu, **Then** it lists the other action, plus **Save
    as new** when the URL is already saved.
-4. **Given** "Add and download media", **Then** the note is written first exactly
-   as Add would, and its media downloads start afterwards (User Story 5) without
-   the modal waiting.
+4. **Given** Add, **Then** the note is written at once, and any media marked
+   `|local` downloads afterwards (User Story 8) without the modal waiting.
 5. **Given** "Copy markdown", **Then** the full note (properties and body) is
-   copied and nothing is written to the vault.
+   copied with media as web addresses, and nothing is written or downloaded.
 6. **Given** the folder field, **Then** it starts as the template's folder, can be
    changed for this capture, and suggests existing vault folders.
 
@@ -260,28 +262,64 @@ and check the result and that links to the note still work.
 
 ---
 
-### User Story 7 - Captures from the phone follow the template's preset (Priority: P2)
+### User Story 7 - Captures from the phone keep the template's local media (Priority: P2)
 
-A TikTok post shared from the phone with the TikTok template set to "Add and
-download media" lands in the vault as a note, and its video follows shortly,
-without the user opening the modal.
+A TikTok post shared from the phone with a template using
+`{{tiktok_thumbnail|local}}` lands in the vault as a note, and its cover follows
+shortly, without the user opening the modal.
 
 **Why this priority**: Keeps phone and background captures, made while Obsidian
 is closed, from losing media when a post is deleted.
 
-**Independent Test**: Share a TikTok post through the phone shortcut, open
-Obsidian later, and check the note was written first and then the video replaced
-its player.
+**Independent Test**: Share a TikTok post through the phone shortcut, delete
+nothing, open Obsidian later, and check the note was written and its cover
+property links to a vault file.
 
 **Acceptance Scenarios**:
 
-1. **Given** a background capture whose template's preset is "Add and download
-   media", **Then** the server starts the media download straight after the
-   capture, and the note is written first when Obsidian next opens.
+1. **Given** a background capture whose template marks media `|local`, **Then**
+   the server starts downloading exactly that media straight after the capture,
+   and the note is written when Obsidian next opens.
 2. **Given** the media is still downloading when the note is written, **Then** the
-   note keeps the TikTok player or remote links until the files arrive, and they
-   are replaced then.
-3. **Given** any other preset, **Then** background captures download no media.
+   note shows the web address or TikTok player in its place until the file
+   arrives, and it is replaced then.
+3. **Given** a template with no `|local` media, **Then** background captures
+   download no media.
+
+---
+
+### User Story 8 - Say which media is kept locally, in the template (Priority: P1)
+
+TikTok posts and their media links disappear. The user writes
+`[[{{tiktok_thumbnail|local}}]]` in the TikTok template's `cover` property, so
+every capture keeps a copy of the cover in the vault, while the video stays the
+TikTok player. For one post they want the video too, so in the capture modal they
+switch on the video under "Save in the vault" before selecting Add.
+
+**Why this priority**: It's the reason for the change: keeping ephemeral media
+without downloading everything on every capture, with one rule instead of a
+preset, guessed defaults and variables that each save something.
+
+**Independent Test**: With the cover marked `|local` and the video not, capture a
+TikTok post and check only the cover is downloaded and linked; capture another
+with the body's player switched to local in the modal and check the video is
+downloaded too.
+
+**Acceptance Scenarios**:
+
+1. **Given** a media variable without `|local`, **Then** it renders as the web
+   address (or, for a TikTok video, the player), as Web Clipper would.
+2. **Given** a media variable with `|local`, **Then** the note is written showing
+   the web address, and that media alone is downloaded afterwards and replaces the
+   address with a link or embed of the vault file, in the user's link format.
+3. **Given** the capture modal, **Then** a "Save in the vault" list under the
+   body shows the note's media, each with a switch that's on when the template
+   used `|local`; changing it applies to this capture only.
+4. **Given** a download fails, **Then** the web address stays in the note and the
+   failure is reported as in User Story 5.
+5. **Given** an existing template using a removed variable (`{{image_local}}`,
+   `{{tiktok_save}}`, `{{tiktok_image_N}}`), **Then** it is rewritten to the
+   `|local` form that saves the same media (FR-050).
 
 ---
 
@@ -301,9 +339,13 @@ its player.
   switching template): the page is fetched again, with a short notice.
 - **Lazy-loaded articles**: text that only appears on scrolling may be missing
   from the quick read; Update note from source can pull it in later.
-- **Rate limits**: several "Add and download media" captures in a row queue
-  their downloads one at a time with a pause between downloads from the same
-  site.
+- **Rate limits**: several captures with `|local` media in a row queue their
+  downloads one at a time with a pause between downloads from the same site.
+- **`|local` on something that isn't media** (plain text, a page link): the value
+  is left as it is.
+- **Templates pasted into the official Web Clipper**: `{{image|local}}` should
+  fall back to the plain address there; the `tiktok_*` variables only exist in
+  this plugin and render empty in Web Clipper either way.
 - **Expired TikTok media links**: the download command loads the post again
   rather than using links saved earlier; a deleted or private post is reported
   as unavailable.
@@ -314,7 +356,8 @@ its player.
 - **No server configured**: Capture URL can still add a link-only note; Update
   and Download media explain the server is needed.
 - **Existing templates using `{{tiktok_video}}` / `{{tiktok_images}}`** keep
-  working (see FR-033).
+  rendering, as the player and web addresses; removed media variables are
+  rewritten to their `|local` form (FR-050).
 
 ## Requirements *(mandatory)*
 
@@ -353,9 +396,9 @@ its player.
   visible "changed" mark; switching template with edits present MUST ask first.
 - **FR-013**: Add MUST write the note exactly as shown, with the user's edits, to
   the folder in the footer, and open it, without waiting for any file.
-- **FR-014**: The split button MUST offer Add, Add and download media, and Copy
-  markdown, plus Save as new when the URL is already saved; its main action MUST
-  be the template's preset (FR-031) or Add when it has none.
+- **FR-014**: The split button MUST offer Add and Copy markdown, plus Save as new
+  when the URL is already saved; its main action MUST be the template's preset
+  (FR-031) or Add when it has none.
 - **FR-015**: When the URL is already in the vault, the modal MUST name the
   existing note and offer to open it.
 - **FR-016**: When the page can't be read, the modal MUST say why, offer Retry,
@@ -400,11 +443,50 @@ its player.
 
 **Templates**
 
-- **FR-031**: A template MAY set one preset, "On capture": Add, Add and download
-  media, or Copy markdown. It is the only new template setting.
+- **FR-031**: A template MAY set one preset, "On capture": Add or Copy markdown.
+  It is the only new template setting. A stored "Add and download media" MUST be
+  read as Add.
 - **FR-032**: A template's folder MUST be the footer's starting folder.
-- **FR-033**: Existing templates whose note uses the TikTok video or photos MUST be
-  migrated to the preset "Add and download media", so they keep getting media.
+- **FR-033**: Whether media is saved locally MUST be decided only by the `|local`
+  filter (FR-047), never by the preset, by which variables a template uses, or by
+  the URL. *(Changed with the user twice: first a migration stored "Add and download
+  media" on templates using media variables, then it was worked out from those
+  variables; both are replaced by `|local`.)*
+
+**Local media (`|local`)**
+
+- **FR-047**: Media variables MUST render as web addresses (a TikTok post as the
+  player); the `|local` filter, written last in a tag, MUST mark the value to be
+  kept as a vault file. It MUST work on any value holding a web address (an image,
+  a video page, a TikTok player) and MUST leave other values unchanged. In a
+  property, where the result can only be a link to one file, a marked value that
+  isn't a single web address (a player, a list) MUST render blank, with its
+  brackets, and not be downloaded.
+- **FR-048**: The TikTok media variables MUST be: `{{tiktok_embed}}` (the player,
+  for any post), `{{tiktok_video}}` and `{{tiktok_images}}` (the same player, only
+  for a video or a photo post) and `{{tiktok_thumbnail}}` (the cover's address);
+  with `|local` the player saves the video or the photos. Web Clipper's own
+  `{{image}}` is the page image. `{{image_local}}`, `{{tiktok_save}}` and
+  `{{tiktok_image_N}}` MUST be removed. *(Simplified while building: no separate
+  `{{tiktok_media}}`, since `{{tiktok_embed}}` already is that, and no list
+  filters on the photos, since their addresses expire and only the player is
+  shown.)*
+- **FR-049**: Media marked `|local` MUST be downloaded through the same queue as
+  Download media (FR-037), using the address read at capture when it is still
+  valid and reading the post again only when it isn't, and MUST replace its
+  address as in FR-038. The note MUST never contain a link to a file that isn't
+  in the vault (SC-004).
+- **FR-050**: Saved and imported templates MUST be rewritten: `{{image_local}}`
+  → `{{image|local}}`, `{{tiktok_save}}` → `{{tiktok_embed|local}}` and
+  `{{tiktok_image_N}}` → `{{tiktok_images|local}}` whenever they're loaded, and a
+  stored "Add and download media" preset MUST be dropped. Nothing else is
+  rewritten: `|local` on `{{tiktok_thumbnail}}` and the like is the user's choice.
+  *(Changed with the user: a one-time migration adding `|local` to the TikTok
+  variables was dropped, and the user's templates were edited by hand.)*
+- **FR-051**: A post's or video's saved files MUST be named after the note and
+  what they are (`<note>-cover`, `<note>-video`, `<note>-photo-N`), the same
+  whether they came from a capture or from Download media; other images keep
+  their own file names, as Obsidian's download does.
 
 **Download media for current note**
 
@@ -428,8 +510,8 @@ its player.
 - **FR-040**: Videos over the size cap (300 MB) MUST be skipped and reported.
 - **FR-041**: Running the command again MUST NOT save a second copy of something
   already downloaded for the note.
-- **FR-042**: "Add and download media" and background captures with that preset
-  MUST start the same downloads after the note is written, without user
+- **FR-042**: Captures from the modal and background captures with `|local`
+  media MUST start those downloads after the note is written, without user
   interaction, and replace sources as in FR-038 when they finish.
 
 **Where files go**
@@ -450,7 +532,10 @@ its player.
 ### Key Entities
 
 - **Template**: name, URL rules, folder, note name format, properties, body, and
-  the new optional "On capture" preset.
+  the new optional "On capture" preset (Add or Copy markdown).
+- **Local media mark**: a media value a template or the modal marked `|local`:
+  what it is (cover, video, photo, image), the address read at capture, and where
+  it sits in the note.
 - **Quick read**: a page read by the server without media, held for a short time
   so the note can be re-rendered with another template; gives property values,
   note name, body, and the variables a template can use.
@@ -460,8 +545,7 @@ its player.
   TikTok photo, TikTok cover, video from a video site, remote image, property
   image URL), with its source in the note and, once downloaded, its vault file.
 - **Media download**: a queued, one-at-a-time download of a note's media items,
-  started by the command, by "Add and download media", or by a background
-  capture.
+  started by the command, or by a capture with local media marks.
 
 ## Success Criteria *(mandatory)*
 
@@ -470,16 +554,16 @@ its player.
 - **SC-001**: For a typical article or TikTok post, the Capture URL modal shows
   filled-in fields within 5 seconds of a valid URL, and the note is in the vault
   within 1 second of selecting Add.
-- **SC-002**: No capture or update made from the modals downloads a TikTok video
-  or photo unless the user chose "Add and download media" or ran Download media.
+- **SC-002**: No capture or update downloads any media that wasn't marked
+  `|local` (in the template or the modal), unless the user ran Download media.
 - **SC-003**: Switching template after the page was read refills the fields within
   2 seconds without loading the page again.
 - **SC-004**: In testing, no written note ever contains a link to a screenshot or
   media file that isn't in the vault.
 - **SC-005**: Download media replaces every successful item and reports every
   failure; one failure never leaves the note unchanged for items that succeeded.
-- **SC-006**: Ten "Add and download media" TikTok captures in a row complete their
-  downloads without a rate-limit failure.
+- **SC-006**: Ten TikTok captures in a row with `{{tiktok_embed|local}}` complete
+  their downloads without a rate-limit failure.
 - **SC-007**: Both modals and the download list are fully usable on a phone with
   no sideways scrolling.
 - **SC-008**: The plugin adds no more than two new settings in total (the
@@ -490,8 +574,13 @@ its player.
 - **Open question 5a (rate limits)**: a fixed pause between downloads from the
   same site, with no daily cap and no user setting. A cap is added later only if
   rate limits still occur.
-- **Open question 5b (background media)**: background captures with the "Add and
-  download media" preset download media on the server straight away rather than
+- **`|local` in the official Web Clipper**: the server takes `|local` out of a
+  template before Web Clipper's engine sees it, so the bundled engine needs no
+  change. In the Web Clipper extension itself its template editor flags `local`
+  as an unknown filter; rendering is assumed to pass the value through
+  unchanged, which hasn't been tried in the extension.
+- **Open question 5b (background media)**: background captures with `|local`
+  media download it on the server straight away rather than
   waiting for Obsidian to open, favouring posts that may be deleted over
   rate-limit risk (which FR-037 already limits).
 - **Open question 7b (Replace whole note)**: it is a preset of the update modal

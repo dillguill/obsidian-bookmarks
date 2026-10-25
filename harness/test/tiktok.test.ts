@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { fileMarker } from "../src/api.js";
 import {
   captionTitle,
   idTime,
@@ -76,8 +75,9 @@ describe("tiktokData", () => {
         tiktok_author: "Scout, Suki & Stella",
         tiktok_author_handle: "scout2015",
         tiktok_embed: videoEmbed(post.id),
+        tiktok_video: videoEmbed(post.id),
         tiktok_images: "",
-        tiktok_save: `![[${fileMarker("tiktok_video")}]]`,
+        tiktok_thumbnail: "https://p16.tiktokcdn-us.com/cover.image",
         tiktok_image_count: "",
         tiktok_transcript: "",
         tiktok_transcript_timestamps: "",
@@ -95,10 +95,11 @@ describe("tiktokData", () => {
     expect(variables.tiktok_title).toBe("");
     expect(variables.tiktok_author_handle).toBe("scout2015");
     expect(cover).toEqual([]);
-    expect(variables.tiktok_save).toBe("");
+    expect(variables.tiktok_thumbnail).toBe("");
+    expect(variables.tiktok_video).toBe(videoEmbed(post.id));
   });
 
-  it("lists a photo post's carousel and embeds each saved photo", () => {
+  it("lists a photo post's carousel and shows it as the player", () => {
     const photo = (name: string) => ({ imageURL: { urlList: [`https://p16.tiktokcdn-us.com/${name}.jpeg`, "https://p19.example/other.jpeg"] } });
     const data = tiktokData(
       { ...post, kind: "photo" },
@@ -109,24 +110,13 @@ describe("tiktokData", () => {
       ["https://p16.tiktokcdn-us.com/two.jpeg", "https://p19.example/other.jpeg"],
     ]);
     expect(data.cover).toEqual(["https://p16.tiktokcdn-us.com/cover.jpeg", "https://p19.example/other.jpeg"]);
-    expect(data.variables.tiktok_images).toBe(`![[${fileMarker("tiktok_image_1")}]]\n![[${fileMarker("tiktok_image_2")}]]`);
+    expect(data.variables.tiktok_images).toBe(videoEmbed(post.id));
+    expect(data.variables.tiktok_video).toBe("");
+    expect(data.variables.tiktok_thumbnail).toBe("https://p16.tiktokcdn-us.com/cover.jpeg");
     expect(data.variables.tiktok_image_count).toBe("2");
     expect(data.video).toEqual([]);
-    expect(data.variables.tiktok_save).toBe(data.variables.tiktok_images);
     // TikTok's player swipes through photo posts too.
     expect(data.variables.tiktok_embed).toBe(videoEmbed(post.id));
-  });
-  it("shows the player for the post instead of saved files when media isn't downloaded", () => {
-    const photo = (name: string) => ({ imageURL: { urlList: [`https://p16.tiktokcdn-us.com/${name}.jpeg`] } });
-    const photos = tiktokData({ ...post, kind: "photo" }, { id: post.id, imagePost: { images: [photo("one"), photo("two")] } }, [], false);
-    expect(photos.variables.tiktok_images).toBe(videoEmbed(post.id));
-    expect(photos.variables.tiktok_save).toBe(videoEmbed(post.id));
-    // The addresses are still there for "Download media" to fetch.
-    expect(photos.images).toHaveLength(2);
-    const video = tiktokData(post, { id: post.id, video: { playAddr: "https://v16.tiktokcdn.com/v.mp4" } }, [], false);
-    expect(video.variables.tiktok_save).toBe(videoEmbed(post.id));
-    expect(video.variables.tiktok_images).toBe("");
-    expect(video.video).toEqual(["https://v16.tiktokcdn.com/v.mp4"]);
   });
 });
 

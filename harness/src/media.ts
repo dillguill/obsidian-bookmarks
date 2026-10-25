@@ -110,6 +110,8 @@ export interface YtDlpOptions {
   proxy: string;
   maxBytes?: number;
   timeoutMs?: number;
+  /** False fetches only the cover, for a note that keeps just that. */
+  video?: boolean;
 }
 
 /**
@@ -140,6 +142,7 @@ export async function runYtDlp(url: string, dir: string, options: YtDlpOptions):
     "--convert-thumbnails",
     "jpg",
     "--write-info-json",
+    ...(options.video === false ? ["--skip-download"] : []),
     "-o",
     join(dir, "media_video.%(ext)s"),
     "-o",

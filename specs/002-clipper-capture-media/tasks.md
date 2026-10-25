@@ -457,15 +457,15 @@ description: "Task list for Clipper-style capture and media download"
 
 ### Implementation for User Story 2
 
-- [X] T064 [US2] In `harness/src/settings.ts`, parse and keep `onCapture` (`"add" | "add-media" | "copy"`), add `schemaRevision`, and run the migration from research R8 once when `schemaRevision < 1`. Makes T063 pass.
+- [X] T064 [US2] *(later reversed at the user's request: migration 2 takes the preset back from templates migration 1 gave it, so every template starts on "Add to Obsidian"; `docs/templates/tiktok.json` no longer sets it)* In `harness/src/settings.ts`, parse and keep `onCapture` (`"add" | "add-media" | "copy"`), add `schemaRevision`, and run the migration from research R8 once when `schemaRevision < 1`. Makes T063 pass.
 - [X] T065 [P] [US2] *(property types stay editable, with a note that the plugin keeps them in step with the vault; the plugin now merges, keeping types only the server knows, instead of replacing the list)* In `harness/ui/app.js` and `harness/ui/index.html`:
   - add an **On capture** select (Add / Add and download media / Copy markdown) beside the `t-update` checkbox (`app.js:416`, `:516`); a missing value means Add;
   - make the property-types list read-only, labelled "Synced from your vault's property types".
-- [X] T066 [US2] In `plugin/src/capture-modal.ts`:
+- [X] T066 [US2] *(the "add-media" action is removed by T088)* In `plugin/src/capture-modal.ts`:
   - the footer main action is `template.onCapture ?? "add"`, re-evaluated on template switch;
   - the menu lists the other two, plus **Save as new** when `existing`;
   - the folder field uses `FolderSuggest` (T033) and starts as the template's rendered `note.path` (or `template.path` before fetch).
-- [X] T067 [US2] In `plugin/src/capture-controller.ts`, implement the remaining actions:
+- [X] T067 [US2] *(`add-media` is removed by T088)* In `plugin/src/capture-controller.ts`, implement the remaining actions:
   - `copy`: `navigator.clipboard.writeText("---\n" + stringifyYaml(frontmatterFrom(fields)) + "---\n" + extractTokens(body).body)`, a Notice "Copied", then `release(id, false)`;
   - `new`: `add` regardless of `existing`;
   - `add-media`: `add`, then `mediaController.download(file, findMedia(...))`, with no picker and every item.
@@ -506,7 +506,7 @@ description: "Task list for Clipper-style capture and media download"
 
 ### Implementation for User Story 7
 
-- [X] T073 [US7] In `harness/src/worker.ts`:
+- [X] T073 [US7] *(the `onCapture` check is replaced by local marks in T086)* In `harness/src/worker.ts`:
   - render `full` captures with `tiktokData(..., false)`, so the media variables become the player and remote URLs (no media in captures);
   - when such a job finishes, its origin is `shortcut` / `bookmarklet` / `share` / `api`, and its template's `onCapture === "add-media"`, enqueue a media job for `meta.finalUrl` (`want`: video or photos, plus cover) and store `media: { followUp: <id> }` on the capture job.
   - Add a test in `harness/test/app.test.ts` with the fake engine.
@@ -528,13 +528,40 @@ description: "Task list for Clipper-style capture and media download"
   - `smallSelect`/`placeholderRow` if unused;
   - `ON_DEMAND_FILES` references;
   - `{{tiktok_save}}` docs that promise capture-time video.
-- [X] T077 [P] Update the docs:
+- [X] T077 [P] *(`onCapture: "add-media"` superseded by T091)* Update the docs:
   - `README.md`: commands list (Download media; recapture removed), attachment setting, `onCapture`;
   - `docs/phone-capture.md`: background media follows the template preset;
   - `docs/templates/tiktok.json`: add `"onCapture": "add-media"`.
 - [ ] T078 [P] Mobile pass on `plugin/styles.css`: check both modals and the media list at 360 px wide (quickstart 16); fix overflow; make the footer wrap; keep tap targets ≥ 32 px.
 - [ ] T079 Run all of [quickstart.md](quickstart.md) on desktop and a phone. Record results, plus the T057 impersonation output, in the PR description.
 - [ ] T080 Run `npm test && npm run typecheck && npm run build`. Bump the version with `node scripts/set-version.mjs <next beta>` only when releasing.
+
+---
+
+## Phase 11: User Story 8 - Say which media is kept locally, in the template (Priority: P1)
+
+**Goal**: One rule for local media: the `|local` filter. Removes "Add and download media", the guessed `captureAction` default, both preset migrations and the media-variable regex lists (FR-031, FR-033, FR-047–FR-051). Supersedes the "add-media" parts of T063, T064, T066, T067, T073 and T077.
+
+**Independent Test**: Spec User Story 8; then User Story 7 with `{{tiktok_thumbnail|local}}`.
+
+### Tests for User Story 8
+
+- [X] T081 [P] [US8] *(as `harness/test/local-media.test.ts` for the filter and markers, plus `tiktok.test.ts` and `capture.test.ts`; list filters dropped with FR-048)* `harness/test/render.test.ts`: each media variable renders its web address (the TikTok video as the player); with `|local` it renders a local media marker carrying the kind and address; `|local` on plain text or a page link leaves it unchanged; `{{tiktok_images|first|local}}` and `|slice` mark only the chosen photos; `{{tiktok_media}}` is the video or the photos by post kind.
+- [X] T082 [P] [US8] `harness/test/settings.test.ts`: the FR-050 rewrite (`image_local`, `tiktok_save`, `tiktok_image_N`, templates that relied on `tiktok_video`/`tiktok_images` saving, stored `"add-media"`) runs once at the next `schemaRevision`, and leaves `|local` templates alone. Replace the migration 1/2 cases.
+- [X] T083 [P] [US8] `harness/test/app.test.ts`: a background capture whose rendered note has local marks queues one media job wanting exactly those kinds, with the addresses read at capture; one with no marks queues none.
+
+### Implementation for User Story 8
+
+- [X] T084 [US8] *(no new shared module: the media capture files are gone from `CAPTURE_FILES`, `media_*` stay the server's asset names, and every regex list went with `captureAction`)* Shared media table (one module, imported by `harness/src/api.ts` and `plugin/src/api.ts` copies): each media kind (`cover`, `video`, `photo`, `image`) with its file suffix (FR-051) and extension. Replace `SAVES_MEDIA`, `MEDIA_VARIABLES`, `MEDIA_FILES`, the `tiktok_thumbnail`/`tiktok_video`/`tiktok_image_N`/`image_local` capture files and `media_cover`/`media_video`/`media_photo_N` with it.
+- [X] T085 [US8] *(in `harness/src/local-media.ts`: `|local` is taken out of the template text before Web Clipper's engine runs, as `{{template}}` is, so the bundle needed no rebuild; no `{{tiktok_media}}`, see FR-048)* `harness/src/render.ts`: register `local` as a filter in the Web Clipper renderer. It turns a media value (FR-047) into a local media marker and records `{ kind, url, index }` on the render result; anything else passes through. Add `{{tiktok_media}}`; drop `tiktok_save`, `tiktok_image_N`, `image_local` from `harness/src/tiktok.ts` and `harness/src/capture.ts`. Makes T081 pass.
+- [X] T086 [US8] *(`localWants` picks the server's part; cover-only skips the video download with yt-dlp's `--skip-download`, and a photo post's cover skips its photos)* `harness/src/worker.ts`: `followUp` queues a media job from the render result's local marks (kinds plus captured addresses) instead of `captureAction`/`mediaWanted(url)`; the media job tries each captured address first and reads the post again only if it fails (FR-049). Makes T083 pass.
+- [X] T087 [US8] *(the one-time `|local` migration was dropped at the user's request; `schemaRevision` 2 runs nothing, and the server's templates were edited by hand)* `harness/src/settings.ts`: the FR-050 rewrite as the next migration; drop `withoutMediaPreset` and `"add-media"` from `CAPTURE_ACTIONS`, reading a stored one as no preset. `harness/ui/app.js`/`index.html`: On capture offers Add / Copy markdown only. Makes T082 pass.
+- [X] T088 [US8] *(the note is written as shown, with web addresses, so no pending media inserts were needed: `MediaController.saveLocal` downloads the kept items afterwards, a TikTok cover from its captured address first)* Plugin: the note is written with each local marker shown as its web address (or the player) and remembered as a pending media insert, like screenshots; `capture-controller.ts` queues those marks after Add and `media-controller.ts` swaps each address for the saved file as it arrives. Remove the `add-media` action and `captureAction` from `capture-modal.ts`, `clip-modal.ts` and `api.ts`; Copy markdown writes the web addresses.
+- [X] T089 [US8] *(a "Save in the vault" list under the body rather than a switch on each field)* `plugin/src/capture-modal.ts`: a "local" switch on each field holding a media value, on when it carries a local mark; toggling adds or removes the mark for this capture only. Styles in `plugin/styles.css`.
+- [X] T090 [US8] `plugin/src/media.ts` / `media-controller.ts`: Download media names files by the shared table (FR-051) and treats a saved `<note>-cover` like any other saved file, so it isn't offered again (FR-041).
+- [X] T091 [P] [US8] *(the unknown-filter check is recorded as an assumption; not tried in the Web Clipper extension)* Docs: `README.md` and `docs/phone-capture.md` describe `|local` and the media variables; `docs/templates/tiktok.json` uses `[[{{tiktok_thumbnail|local}}]]` for `thumbnail` and keeps `{{tiktok_embed}}` as the player. Check how the official Web Clipper treats an unknown filter and record it in the spec's Assumptions.
+
+**Checkpoint**: Spec User Stories 7 and 8 pass; `npm test && npm run typecheck && npm run build`.
 
 ---
 

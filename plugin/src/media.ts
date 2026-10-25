@@ -1,5 +1,6 @@
-// Media in a note that can become vault files: for now, the TikTok player the
-// {{tiktok_embed}} variable writes. Kept free of Obsidian so it can be tested.
+// Media in a note that can become vault files: TikTok players, video embeds,
+// web images, and image addresses in properties. Kept free of Obsidian so it
+// can be tested.
 
 /** The TikTok player {{tiktok_embed}} writes, however its attributes were edited since. */
 export const TIKTOK_PLAYER = /<iframe\b[^>]*?\bsrc=["']https:\/\/www\.tiktok\.com\/player\/v1\/\d+[^"']*["'][^>]*>(?:\s*<\/iframe>)?/g;
@@ -23,6 +24,9 @@ export type VideoSite = "youtube" | "x" | "vimeo" | "instagram";
 
 /** What one media item is. */
 export type MediaKind = "tiktok_video" | "tiktok_photos" | "tiktok_cover" | "site_video" | "image";
+
+/** Each kind's icon, in the download list and the capture modal. */
+export const MEDIA_ICONS: Record<MediaKind, string> = { tiktok_video: "video", tiktok_photos: "images", tiktok_cover: "image", site_video: "video", image: "image" };
 
 /** Where a media item is in the note, so the saved file can take its place. */
 export type MediaSource =
@@ -104,9 +108,11 @@ const SITE_LABELS: Record<VideoSite, string> = { youtube: "YouTube video", x: "X
  * TikTok post's video or photos and its cover, videos from YouTube, X, Vimeo
  * and Instagram, images embedded from the web, and image addresses in
  * properties. Taken from the note's players, embeds and properties, and from
- * its bookmark URL when nothing in the note shows it. Plain links aren't media.
+ * its bookmark URL when nothing in the note shows it. Plain links aren't media,
+ * except a property's web address the template marked `|local` (`local`),
+ * which is taken as an image even without an image's extension.
  */
-export function findMedia(body: string, frontmatter: Record<string, unknown>, bookmarkUrl: string | null): MediaItem[] {
+export function findMedia(body: string, frontmatter: Record<string, unknown>, bookmarkUrl: string | null, local: readonly string[] = []): MediaItem[] {
   const items: MediaItem[] = [];
   const seen = new Set<string>();
   const add = (item: Omit<MediaItem, "key">) => {
@@ -154,8 +160,9 @@ export function findMedia(body: string, frontmatter: Record<string, unknown>, bo
 
   // Image addresses in properties; TikTok's expiring cover links are fetched fresh from the post.
   for (const [name, value] of Object.entries(frontmatter)) {
-    if (typeof value !== "string" || !isImageUrl(value.trim())) continue;
+    if (typeof value !== "string") continue;
     const url = value.trim();
+    if (!isImageUrl(url) && !(/^https?:\/\//i.test(url) && local.includes(url) && url !== bookmarkUrl)) continue;
     if (tiktokUrl && /tiktokcdn/i.test(url)) add({ kind: "tiktok_cover", label: "TikTok cover", url: tiktokUrl, source: { in: "property", name, value }, preview: url, via: "server" });
     else add({ kind: "image", label: imageLabel(url, name), url, source: { in: "property", name, value }, preview: url, via: "plugin" });
   }
@@ -171,6 +178,16 @@ export function findMedia(body: string, frontmatter: Record<string, unknown>, bo
     add({ kind: "site_video", label: SITE_LABELS[site], url: bookmarkUrl, source: { in: "end" }, preview: id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null, via: "server" });
   }
   return items;
+}
+
+/**
+ * Whether an item is one of the values a template marked `|local` (see
+ * RenderedNote.local): its text in the body, its property's value, or its
+ * address is, or is inside, a marked value.
+ */
+export function isMarked(item: MediaItem, local: readonly string[]): boolean {
+  const text = item.source.in === "body" ? item.source.text : item.source.in === "property" ? item.source.value.trim() : null;
+  return local.some((value) => (text !== null && (value.includes(text) || text.includes(value))) || value === item.url || value === item.preview);
 }
 
 /** A TikTok post already saved as files in the body. */

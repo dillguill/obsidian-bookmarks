@@ -1,4 +1,4 @@
-import { fileMarker, TIKTOK_IMAGE_MAX } from "./api.js";
+import { TIKTOK_IMAGE_MAX } from "./api.js";
 
 // TikTok video pages carry little useful metadata in their HTML: no
 // published date, a generic "<creator> on TikTok" title and an image-less
@@ -15,8 +15,9 @@ export const TIKTOK_VARIABLES = [
   "tiktok_author",
   "tiktok_author_handle",
   "tiktok_embed",
+  "tiktok_video",
   "tiktok_images",
-  "tiktok_save",
+  "tiktok_thumbnail",
   "tiktok_image_count",
   "tiktok_transcript",
   "tiktok_transcript_timestamps",
@@ -25,11 +26,11 @@ export type TikTokVariable = (typeof TIKTOK_VARIABLES)[number];
 
 export interface TikTokData {
   variables: Record<TikTokVariable, string>;
-  /** Cover image URLs (TikTok's mirrors of one image), saved as the tiktok_thumbnail file since they expire; empty when unknown. */
+  /** Cover image URLs (TikTok's mirrors of one image), which expire within days; empty when unknown. */
   cover: string[];
-  /** A photo post's carousel images in order, each as its mirror URLs, saved as tiktok_image_1… files. */
+  /** A photo post's carousel images in order, each as its mirror URLs. */
   images: string[][];
-  /** A video post's MP4 URLs (mirrors of one video), saved as the tiktok_video file; empty for photo posts. */
+  /** A video post's MP4 URLs (mirrors of one video); empty for photo posts. */
   video: string[];
 }
 
@@ -172,16 +173,13 @@ function clock(seconds: number): string {
 }
 
 /**
- * TikTok's variables for a post. `item` is null when no item JSON was found;
- * the id still gives the date and the embed. `transcript` is the captions'
- * cues, saved now since their links expire.
+ * TikTok's variables for a post, and its media addresses. `item` is null when
+ * no item JSON was found; the id still gives the date and the player.
+ * `transcript` is the captions' cues, saved now since their links expire. The
+ * post itself is always the player and the cover its web address; `|local`
+ * on them saves copies (see local-media.ts).
  */
-/**
- * The post's template variables and media addresses. With `media` false the
- * capture doesn't download the post's video or photos, so {{tiktok_save}} and
- * {{tiktok_images}} show the TikTok player instead of saved files.
- */
-export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript: TranscriptCue[] = [], media = true): TikTokData {
+export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript: TranscriptCue[] = []): TikTokData {
   const caption = (item?.desc ?? "").trim();
   const created = Number(item?.createTime);
   const date = Number.isFinite(created) && created > 0 ? new Date(created * 1000) : idTime(post.id);
@@ -192,9 +190,8 @@ export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript
   const video = images.length
     ? []
     : [...new Set([item?.video?.playAddr ?? "", ...(item?.video?.bitrateInfo ?? []).flatMap((rate) => rate.PlayAddr?.UrlList ?? [])].filter(Boolean))];
-  // Each marker becomes the saved file's vault path, as with any capture file.
-  const saved = images.map((_, i) => `![[${fileMarker(`tiktok_image_${i + 1}`)}]]`).join("\n");
-  const photos = media || !images.length ? saved : videoEmbed(post.id);
+  const cover = videoCover.length ? videoCover : urls(item?.imagePost?.cover);
+  const player = videoEmbed(post.id);
   return {
     variables: {
       tiktok_id: post.id,
@@ -203,15 +200,15 @@ export function tiktokData(post: TikTokPost, item: TikTokItem | null, transcript
       tiktok_published: date?.toISOString() ?? "",
       tiktok_author: item?.author?.nickname?.trim() ?? "",
       tiktok_author_handle: item?.author?.uniqueId?.trim() || post.handle,
-      tiktok_embed: videoEmbed(post.id),
-      tiktok_images: photos,
-      // The post saved in the vault: its video, or a carousel's photos.
-      tiktok_save: !media ? videoEmbed(post.id) : video.length ? `![[${fileMarker("tiktok_video")}]]` : photos,
+      tiktok_embed: player,
+      tiktok_video: images.length ? "" : player,
+      tiktok_images: images.length ? player : "",
+      tiktok_thumbnail: cover[0] ?? "",
       tiktok_image_count: images.length ? String(images.length) : "",
       tiktok_transcript: transcript.map((cue) => cue.text).join(" "),
       tiktok_transcript_timestamps: transcript.map((cue) => `[${clock(cue.start)}] ${cue.text}`).join("\n"),
     },
-    cover: videoCover.length ? videoCover : urls(item?.imagePost?.cover),
+    cover,
     images,
     video,
   };

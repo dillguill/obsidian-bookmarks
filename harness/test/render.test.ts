@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { bookmarkUrl, fileVariables } from "../src/render.js";
-import { currentSettings, DEFAULT_CAPTURE_SETTINGS, parseCaptureSettings, renameScreenshotVariables } from "../src/settings.js";
+import { currentSettings, DEFAULT_CAPTURE_SETTINGS, parseCaptureSettings, renameVariables } from "../src/settings.js";
 
 describe("bookmarkUrl", () => {
   it("prefers a same-site canonical link and drops tracking and bot-wall params", () => {
@@ -26,10 +26,6 @@ describe("fileVariables", () => {
       screenshot_article_dark: "",
       screenshot_thumbnail_dark: "",
       pdf_page: "",
-      image_local: "",
-      tiktok_thumbnail: "",
-      tiktok_video: "",
-      ...Object.fromEntries(Array.from({ length: 35 }, (_, i) => [`tiktok_image_${i + 1}`, ""])),
     });
   });
 });
@@ -37,18 +33,18 @@ describe("fileVariables", () => {
 describe("currentSettings", () => {
   it("drops settings saved by older versions", () => {
     const stored = { screenshotStyle: "banner", bannerSites: ["x.com"], noScreenshotSites: [], hideCaptureId: true } as never;
-    expect(currentSettings(stored)).toEqual({ ...DEFAULT_CAPTURE_SETTINGS, hideCaptureId: true, schemaRevision: 1 });
+    expect(currentSettings(stored)).toEqual({ ...DEFAULT_CAPTURE_SETTINGS, hideCaptureId: true, schemaRevision: 2 });
   });
 });
 
-describe("renameScreenshotVariables", () => {
+describe("renameVariables", () => {
   it("renames the old screenshot variables inside tags only", () => {
-    expect(renameScreenshotVariables("Screenshot: {{screenshot_embed}} {{ screenshot_link }} {{screenshot|wikilink}}")).toBe(
+    expect(renameVariables("Screenshot: {{screenshot_embed}} {{ screenshot_link }} {{screenshot|wikilink}}")).toBe(
       "Screenshot: ![[{{screenshot_page}}]] [[{{screenshot_page}}]] {{screenshot_page|wikilink}}",
     );
-    expect(renameScreenshotVariables("{{screenshot_page_embed}} {{screenshot_banner_link}}")).toBe("![[{{screenshot_page}}]] [[{{screenshot_banner}}]]");
-    expect(renameScreenshotVariables("{% if screenshot_embed %}a screenshot{% endif %}")).toBe("{% if screenshot_page %}a screenshot{% endif %}");
-    expect(renameScreenshotVariables("{{screenshot_page}} {{screenshot_banner}} {{screenshot_mobile}}")).toBe("{{screenshot_page}} {{screenshot_banner}} {{screenshot_mobile}}");
+    expect(renameVariables("{{screenshot_page_embed}} {{screenshot_banner_link}}")).toBe("![[{{screenshot_page}}]] [[{{screenshot_banner}}]]");
+    expect(renameVariables("{% if screenshot_embed %}a screenshot{% endif %}")).toBe("{% if screenshot_page %}a screenshot{% endif %}");
+    expect(renameVariables("{{screenshot_page}} {{screenshot_banner}} {{screenshot_mobile}}")).toBe("{{screenshot_page}} {{screenshot_banner}} {{screenshot_mobile}}");
   });
 
   it("applies to stored and imported templates", () => {

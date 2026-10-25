@@ -30,6 +30,12 @@ const meta = (url: string): PageMeta => ({
 });
 
 const renders: (RenderRequest | null | undefined)[] = [];
+/** What the real engine would list as marked `|local`, by template. */
+const LOCAL: Record<string, string[]> = {
+  Post: ['<iframe src="https://www.tiktok.com/player/v1/7300000000000000009?autoplay=0" />'],
+  Cover: ["https://p16.tiktokcdn.com/cover.jpeg"],
+  Image: ["https://example.com/a.png"],
+};
 const shot = Buffer.from([0xff, 0xd8, 0xff]);
 const engine: CaptureEngine = {
   async capture(url, render, progress) {
@@ -44,10 +50,14 @@ const engine: CaptureEngine = {
     }
     if (url.includes("blocked")) throw new BlockedError("Blocked by site: bot wall", meta(url));
     if (url.includes("slow")) await new Promise((resolve) => setTimeout(resolve, 300));
-    const note = url.includes("rendered") ? { template: render!.templateName ?? "Bookmark", noteName: "Hello", path: "Clips", frontmatter: "---\ntitle: \"Hello\"\n---\n", content: "# Hello", variables: {} } : null;
+    const local = LOCAL[render?.templateName ?? ""];
+    const note =
+      url.includes("rendered") || local
+        ? { template: render!.templateName ?? "Bookmark", noteName: "Hello", path: "Clips", frontmatter: "---\ntitle: \"Hello\"\n---\n", content: "# Hello", variables: {}, ...(local ? { local } : {}) }
+        : null;
     // The real engine takes the shots the rendered note's variables ask for.
     if (url.includes("nopic")) return { meta: meta(url), markdown: "# Hello", files: {}, screenshotExt: null, note };
-    const files = url.includes("all") ? { screenshot_page: shot, screenshot_banner: shot, screenshot_page_dark: shot, pdf_page: Buffer.from("%PDF-1.4"), image_local: shot, tiktok_video: Buffer.from("mp4") } : { screenshot_page: shot };
+    const files = url.includes("all") ? { screenshot_page: shot, screenshot_banner: shot, screenshot_page_dark: shot, pdf_page: Buffer.from("%PDF-1.4") } : { screenshot_page: shot };
     return { meta: meta(url), markdown: "# Hello", files, screenshotExt: "jpg", note };
   },
   async preview(url, render) {
@@ -70,9 +80,9 @@ const engine: CaptureEngine = {
       close: async () => void heldClosed++,
     };
   },
-  async tiktokPhotos(url, cover) {
+  async tiktokPhotos(url, want) {
     if (url.includes("gone")) throw new Error("the post is unavailable (deleted, private or behind a login)");
-    return { photos: [shot, shot], cover: cover ? shot : null, ext: "jpg" };
+    return { photos: want.photos ? [shot, shot] : [], cover: want.cover ? shot : null, ext: "jpg" };
   },
   async close() {},
 };
@@ -123,7 +133,7 @@ describe("http app", () => {
   it("reports health and API version", async () => {
     const res = await fetch(`${base}/health`, { headers: auth });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ok", apiVersion: 8, version: "0.0.0-test", media: { ytdlp: null } });
+    expect(await res.json()).toEqual({ status: "ok", apiVersion: 9, version: "0.0.0-test", media: { ytdlp: null } });
   });
 
   it("captures synchronously with ?wait=1 and serves assets", async () => {
@@ -180,7 +190,7 @@ describe("http app", () => {
       templates: [DEFAULT_TEMPLATE],
       propertyTypes: DEFAULT_TEMPLATE.properties.map(({ name, type }) => ({ name, type })),
       hideCaptureId: false,
-      schemaRevision: 1,
+      schemaRevision: 2,
     };
     expect(initial.settings).toEqual(defaults);
     const saved = await put({ screenshotStyle: "banner", bannerSites: ["news.com"], hideCaptureId: true });
@@ -195,20 +205,17 @@ describe("http app", () => {
       ((await (await post("/capture?wait=1", { url: target, origin: "shortcut" })).json()) as { job: Job }).job;
     const all = await capture("https://example.com/all");
     const none = await capture("https://example.com/nopic");
-    expect(all.assets).toEqual(["screenshot_page", "screenshot_banner", "screenshot_page_dark", "pdf_page", "image_local", "tiktok_video", "markdown"]);
+    expect(all.assets).toEqual(["screenshot_page", "screenshot_banner", "screenshot_page_dark", "pdf_page", "markdown"]);
     expect(none).toMatchObject({ status: "done", assets: ["markdown"], screenshotExt: null });
     const banner = await fetch(`${base}/jobs/${all.id}/asset/screenshot_banner`, { headers: auth });
     expect(banner.headers.get("content-type")).toBe("image/jpeg");
     expect(Buffer.from(await banner.arrayBuffer())).toEqual(shot);
-    for (const kind of ["screenshot_page_dark", "image_local"]) {
+    for (const kind of ["screenshot_page_dark"]) {
       const res = await fetch(`${base}/jobs/${all.id}/asset/${kind}`, { headers: auth });
       expect(res.headers.get("content-type")).toBe("image/jpeg");
     }
     const pdf = await fetch(`${base}/jobs/${all.id}/asset/pdf_page`, { headers: auth });
     expect(pdf.headers.get("content-type")).toBe("application/pdf");
-    const video = await fetch(`${base}/jobs/${all.id}/asset/tiktok_video`, { headers: auth });
-    expect(video.headers.get("content-type")).toBe("video/mp4");
-    expect(await video.text()).toBe("mp4");
     expect((await fetch(`${base}/jobs/${none.id}/asset/screenshot_banner`, { headers: auth })).status).toBe(404);
     expect((await fetch(`${base}/jobs/${all.id}/asset/screenshot_nope`, { headers: auth })).status).toBe(404);
   });
@@ -272,11 +279,11 @@ describe("http app", () => {
 
   it("passes asked-for capture files to the engine and keeps enrich jobs out of the delivery list", async () => {
     const { job } = (await (
-      await post("/capture?wait=1", { url: "https://example.com/enrich", origin: "enrich", files: ["image_local", "screenshot_banner"] })
+      await post("/capture?wait=1", { url: "https://example.com/enrich", origin: "enrich", files: ["pdf_page", "screenshot_banner"] })
     ).json()) as { job: Job };
     expect(job.status).toBe("done");
-    expect(job.files).toEqual(["image_local", "screenshot_banner"]);
-    expect(renders.at(-1)!.files).toEqual(["image_local", "screenshot_banner"]);
+    expect(job.files).toEqual(["pdf_page", "screenshot_banner"]);
+    expect(renders.at(-1)!.files).toEqual(["pdf_page", "screenshot_banner"]);
     const { jobs } = (await (await fetch(`${base}/jobs?status=done,failed,delivered&limit=200`, { headers: auth })).json()) as { jobs: Job[] };
     expect(jobs.some((j) => j.id === job.id)).toBe(false);
     // Still readable by id, for the plugin that asked.
@@ -414,7 +421,7 @@ describe("http app", () => {
 
     it("takes only screenshot and PDF files, then finishes and is delivered", async () => {
       const job = await preview("files");
-      expect((await post(`/jobs/${job.id}/files`, { files: ["tiktok_video"] })).status).toBe(400);
+      expect((await post(`/jobs/${job.id}/files`, { files: ["media_video"] })).status).toBe(400);
       expect((await post(`/jobs/${job.id}/files`, { files: [] })).status).toBe(400);
       expect((await post(`/jobs/${job.id}/files`, { files: ["screenshot_page", "screenshot_banner"], finish: true })).status).toBe(202);
       let now = await getJob(job.id);
@@ -517,20 +524,31 @@ describe("http app", () => {
       expect(done.error).toContain("yt-dlp");
     });
 
-    it("queues a phone capture's media when its template says Add and download media", async () => {
+    it("queues a phone capture's media marked |local, and only that", async () => {
       const put = (body: unknown) => fetch(`${base}/settings`, { method: "PUT", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify(body) });
-      await put({ templates: [{ name: "TikTok", noteContentFormat: "{{tiktok_save}}", properties: [], onCapture: "add-media" }, { name: "Plain", properties: [] }], schemaRevision: 1 });
+      await put({ templates: ["Post", "Cover", "Image", "Plain"].map((name) => ({ name, properties: [] })), schemaRevision: 2 });
       try {
         const capture = async (url: string, template: string) => ((await (await post("/capture?wait=1", { url, origin: "shortcut", template })).json()) as { job: Job }).job;
-        const shared = await capture("https://www.tiktok.com/@a/photo/7300000000000000009", "TikTok");
-        const followUp = shared.media?.followUp ?? (await getJob(shared.id)).media?.followUp;
-        expect(followUp).toBeTruthy();
-        const media = await settle(await getJob(followUp!));
-        expect(media).toMatchObject({ origin: "media", status: "done" });
-        expect(media.media).toMatchObject({ forCapture: shared.id, want: ["photos", "cover"] });
-        // Another template, or the plugin's own capture: nothing queued.
-        expect((await getJob((await capture("https://www.tiktok.com/@a/photo/7300000000000000010", "Plain")).id)).media).toBeNull();
-        const own = ((await (await post("/capture?wait=1", { url: "https://www.tiktok.com/@a/photo/7300000000000000011", origin: "plugin", template: "TikTok" })).json()) as { job: Job }).job;
+        const followUp = async (url: string, template: string) => {
+          const shared = await capture(url, template);
+          const id = (await getJob(shared.id)).media?.followUp;
+          return id ? { shared, media: await settle(await getJob(id)) } : null;
+        };
+        const photos = await followUp("https://www.tiktok.com/@a/photo/7300000000000000009", "Post");
+        expect(photos!.media).toMatchObject({ origin: "media", status: "done" });
+        expect(photos!.media.media).toMatchObject({ forCapture: photos!.shared.id, want: ["photos"], local: LOCAL.Post });
+        expect(photos!.media.assets).toEqual(["media_photo_1", "media_photo_2"]);
+        // Just the cover of a photo post: no photos downloaded.
+        const cover = await followUp("https://www.tiktok.com/@a/photo/7300000000000000012", "Cover");
+        expect(cover!.media.media).toMatchObject({ want: ["cover"] });
+        expect(cover!.media.assets).toEqual(["media_cover"]);
+        // An image is the plugin's to fetch: the job only lists it.
+        const image = await followUp("https://example.com/page", "Image");
+        expect(image!.media).toMatchObject({ status: "done", assets: [] });
+        expect(image!.media.media).toMatchObject({ want: [], local: LOCAL.Image });
+        // Nothing marked, or the plugin's own capture: nothing queued.
+        expect(await followUp("https://www.tiktok.com/@a/photo/7300000000000000010", "Plain")).toBeNull();
+        const own = ((await (await post("/capture?wait=1", { url: "https://www.tiktok.com/@a/photo/7300000000000000011", origin: "plugin", template: "Post" })).json()) as { job: Job }).job;
         expect((await getJob(own.id)).media).toBeNull();
       } finally {
         await put({});

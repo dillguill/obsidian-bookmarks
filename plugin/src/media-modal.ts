@@ -1,7 +1,5 @@
 import { App, Modal, setIcon } from "obsidian";
-import type { MediaItem, MediaKind } from "./media";
-
-const ICONS: Record<MediaKind, string> = { tiktok_video: "video", tiktok_photos: "images", tiktok_cover: "image", site_video: "video", image: "image" };
+import { MEDIA_ICONS as ICONS, type MediaItem } from "./media";
 
 /** Where an item is, for its row. */
 function whereText(item: MediaItem): string {

@@ -38,7 +38,7 @@ export class CaptureController {
 
     const show = (note: RenderedNote, job: Job) => {
       const template = this.plugin.templates.find((t) => t.name === note.template) ?? DEFAULT_TEMPLATE;
-      modal.filled(fieldsFrom(note, template, types, parseYaml), note.noteName, markersToTokens(note.content), template.name, note.path || template.path);
+      modal.filled(fieldsFrom(note, template, types, parseYaml), note.noteName, markersToTokens(note.content), template.name, note.path || template.path, note.local ?? []);
       preview = { job, read: true };
     };
 
@@ -47,7 +47,7 @@ export class CaptureController {
       types,
       propertyNames: () => this.plugin.vaultProperties(),
       match: (url) => chooseTemplate(this.plugin.templates, url),
-      canDownloadMedia: true,
+      urlProperty: urlPropertyName,
       onFetch: (url, template) => {
         letGo();
         const run = ++generation;
@@ -118,10 +118,8 @@ export class CaptureController {
     }
     const path = await this.add(draft, preview);
     this.plugin.openNote(path);
-    if (action === "add-media") {
-      const file = this.app.vault.getAbstractFileByPath(path);
-      if (file instanceof TFile) await this.plugin.media.download(file, { all: true });
-    }
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (draft.keep.length && file instanceof TFile) await this.plugin.media.saveLocal(file, draft.keep, draft.local);
   }
 
   /** Writes the note as shown, then asks the server for the screenshots it waits on; they're put in when they arrive. */

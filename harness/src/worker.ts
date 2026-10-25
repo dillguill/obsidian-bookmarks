@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assetExt, CAPTURE_FILES, type AssetKind, type CaptureFile, type Job, type MediaAsset, type MediaJobInfo, type PageMeta, type RenderedNote } from "./api.js";
+import { assetExt, CAPTURE_FILES, type AssetKind, type CaptureFile, type Job, type MediaAsset, type MediaJobInfo, type MediaWant, type PageMeta, type RenderedNote } from "./api.js";
 import { BlockedError, type CaptureEngine, type HeldPage } from "./capture.js";
 import type { JobStore } from "./db.js";
 import { startEgressProxy, type EgressProxy } from "./egress-proxy.js";
@@ -128,7 +128,7 @@ export class Worker extends EventEmitter {
       if (result.note) queue("note", JSON.stringify(result.note));
       await writes;
       this.store.finish(job.id, result.meta, this.written.get(job.id) ?? [], result.screenshotExt);
-      this.followUp(job, result.meta.finalUrl, result.note?.template ?? job.template);
+      this.followUp(job, result.meta.finalUrl, result.note);
     } catch (err) {
       const message = String((err as Error)?.message ?? err).split("\n")[0] ?? "capture failed";
       this.store.fail(job.id, message, err instanceof BlockedError ? err.meta : null);
@@ -255,18 +255,18 @@ export class Worker extends EventEmitter {
   // ---- media downloads ----
 
   /**
-   * A capture shared from elsewhere (a phone, a bookmarklet) whose template's
-   * preset is "Add and download media" gets its post's or video's media
-   * queued straight away, since nobody is there to ask for it, and posts can
-   * be deleted. The plugin puts the files in the note when it collects both.
+   * A capture shared from elsewhere (a phone, a bookmarklet) whose note marks
+   * media `|local` gets it queued straight away, since nobody is there to ask
+   * for it, and posts can be deleted. Images are left to the plugin, which
+   * fetches them itself; the job still lists them, so the plugin knows what
+   * to save when it collects the job with the note.
    */
-  private followUp(job: Job, url: string, templateName: string | null): void {
+  private followUp(job: Job, url: string, note: RenderedNote | null): void {
     if (job.origin === "plugin" || job.origin === "enrich" || job.origin === "media" || job.mode === "preview") return;
-    const template = this.store.getSettings().templates.find((t) => t.name === templateName);
-    if (template?.onCapture !== "add-media") return;
-    const want = mediaWanted(url);
-    if (!want) return;
-    const media = this.store.create(url, "media", null, [], "full", { url, want, made: [], errors: [], forCapture: job.id });
+    const local = note?.local ?? [];
+    if (!local.length) return;
+    const want = localWants(local, url);
+    const media = this.store.create(url, "media", null, [], "full", { url, want, made: [], errors: [], forCapture: job.id, local });
     this.store.setMedia(job.id, { url, want, made: [], errors: [], followUp: media.id });
     this.kickMedia();
   }
@@ -315,14 +315,15 @@ export class Worker extends EventEmitter {
     const failed = (want: MediaJobInfo["want"][number], message: string) => info.errors.push({ want, message });
     let ext: Job["screenshotExt"] = "jpg";
     const post = tiktokPost(job.url);
-    let photos = Boolean(post && (post.kind === "photo" || (wants("photos") && !wants("video"))));
+    // A photo post's cover comes with its photos, from the post in the browser.
+    let photos = Boolean(post && (wants("photos") || (post.kind === "photo" && wants("cover"))));
 
     if (!photos && (wants("video") || wants("cover"))) {
       const ytdlpPath = (await this.ytdlp) ? this.media.ytdlpPath : null;
       if (!ytdlpPath) {
         for (const want of info.want) failed(want, "video downloads aren't set up on the server (yt-dlp isn't installed)");
       } else {
-        const result = await runYtDlp(job.url, dir, { ytdlpPath, proxy: (await this.egress()).url, maxBytes: VIDEO_MAX_BYTES });
+        const result = await runYtDlp(job.url, dir, { ytdlpPath, proxy: (await this.egress()).url, maxBytes: VIDEO_MAX_BYTES, video: wants("video") });
         if (result.slideshow && post) photos = true;
         else {
           if (wants("video")) {
@@ -338,13 +339,13 @@ export class Worker extends EventEmitter {
     }
     if (photos) {
       try {
-        const result = await this.engine.tiktokPhotos(job.url, wants("cover"));
+        const result = await this.engine.tiktokPhotos(job.url, { photos: wants("photos") || wants("video"), cover: wants("cover") });
         ext = result.ext;
         for (const [i, photo] of result.photos.entries()) {
           await this.save(job.id, `media_photo_${i + 1}` as MediaAsset, photo, ext);
           made(`media_photo_${i + 1}` as MediaAsset, "photos", photo.length, i + 1);
         }
-        if (!result.photos.length) failed("photos", "the post has no photos the server could load");
+        if (!result.photos.length && (wants("photos") || wants("video"))) failed("photos", "the post has no photos the server could load");
         if (wants("cover")) {
           if (result.cover) {
             await this.save(job.id, "media_cover", result.cover, ext);
@@ -400,21 +401,38 @@ export class Worker extends EventEmitter {
   }
 }
 
-/** What a follow-up download fetches from a page: a TikTok post's video or photos and cover, or a video site's video; null for other pages. */
-export function mediaWanted(url: string): MediaJobInfo["want"] | null {
+/** The TikTok player, as {{tiktok_embed}} writes it. */
+const TIKTOK_PLAYER = /tiktok\.com\/player\/v1\/\d+/;
+
+/**
+ * What the server downloads for a note's `|local` values: a TikTok post's
+ * video or photos for its player, its cover for an address on TikTok's CDN,
+ * and a video site's video for its page. Other images aren't the server's
+ * (see followUp).
+ */
+export function localWants(local: readonly string[], url: string): MediaWant[] {
+  const want = new Set<MediaWant>();
   const post = tiktokPost(url);
-  if (post) return post.kind === "photo" ? ["photos", "cover"] : ["video", "cover"];
+  for (const value of local) {
+    if (post && TIKTOK_PLAYER.test(value)) want.add(post.kind === "photo" ? "photos" : "video");
+    else if (post && /^https?:\/\/[^/\s]*tiktokcdn/i.test(value)) want.add("cover");
+    else if (!post && value.includes(url) && videoPage(url)) want.add("video");
+  }
+  return [...want];
+}
+
+/** A YouTube, X, Vimeo or Instagram video's page. */
+export function videoPage(url: string): boolean {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase().replace(/^(www|m|mobile)\./, "");
-    const video =
+    return (
       ((host === "youtube.com" && (u.pathname === "/watch" || /^\/(shorts|live)\//.test(u.pathname))) || host === "youtu.be") ||
       ((host === "x.com" || host === "twitter.com") && /\/status\/\d+/.test(u.pathname)) ||
       (host === "vimeo.com" && /^\/\d+/.test(u.pathname)) ||
-      (host === "instagram.com" && /^\/(p|reel|reels|tv)\//.test(u.pathname));
-    return video ? ["video"] : null;
+      (host === "instagram.com" && /^\/(p|reel|reels|tv)\//.test(u.pathname))
+    );
   } catch {
-    return null;
+    return false;
   }
 }
-
