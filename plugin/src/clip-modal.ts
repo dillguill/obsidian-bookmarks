@@ -263,11 +263,6 @@ export abstract class ClipModal extends Modal {
     return area;
   }
 
-  /** An empty block under the body, for what a modal adds there (Capture URL's media switches). */
-  protected belowBody(cls: string): HTMLElement {
-    return this.scrollEl.createDiv({ cls });
-  }
-
   /** The footer: what goes on the left (the folder, a toggle), then the split action button. */
   protected footer(left: (el: HTMLElement) => void, onAction: (id: string) => void): void {
     const foot = this.contentEl.createDiv({ cls: "bookmarks-clip-footer" });

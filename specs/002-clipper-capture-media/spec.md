@@ -293,8 +293,8 @@ property links to a vault file.
 TikTok posts and their media links disappear. The user writes
 `[[{{tiktok_thumbnail|local}}]]` in the TikTok template's `cover` property, so
 every capture keeps a copy of the cover in the vault, while the video stays the
-TikTok player. For one post they want the video too, so in the capture modal they
-switch on the video under "Save in the vault" before selecting Add.
+TikTok player. For one post they want the video too, so after adding it they run
+Download media for current note and tick the video.
 
 **Why this priority**: It's the reason for the change: keeping ephemeral media
 without downloading everything on every capture, with one rule instead of a
@@ -312,9 +312,11 @@ downloaded too.
 2. **Given** a media variable with `|local`, **Then** the note is written showing
    the web address, and that media alone is downloaded afterwards and replaces the
    address with a link or embed of the vault file, in the user's link format.
-3. **Given** the capture modal, **Then** a "Save in the vault" list under the
-   body shows the note's media, each with a switch that's on when the template
-   used `|local`; changing it applies to this capture only.
+3. **Given** the capture modal, **Then** it adds nothing for media: Add saves
+   what the template marked `|local`, a marked value the user edited or deleted
+   in the modal isn't saved, and other media is saved afterwards with Download
+   media. *(Changed with the user: a "Save in the vault" list in the modal was
+   removed to keep the modal uncluttered.)*
 4. **Given** a download fails, **Then** the web address stays in the note and the
    failure is reported as in User Story 5.
 5. **Given** an existing template using a removed variable (`{{image_local}}`,

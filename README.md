@@ -61,10 +61,10 @@ your vault as deduplicated bookmark notes. See the
    where the template puts them, so the note never links to a missing file.
    The button's menu picks between that and **Copy Markdown** without saving, so
    you can look the note over first; the template's **On capture** setting picks
-   the starting one. Under the body, **Save in the vault** lists the note's
-   media, switched on where the template used `|local` (see Templates); what's
-   on is downloaded after Add and replaces its web address in the note. A page
-   that's already saved says so, with a link to the note.
+   the starting one. Media the template marks `|local` (see Templates) is
+   downloaded after Add and replaces its web address in the note; to save other
+   media for one note, run **Download media for current note** afterwards. A
+   page that's already saved says so, with a link to the note.
 
    **Bookmarks: Update note from source** shows the open note (any note with a
    URL property, even one this plugin didn't make) and fetches its page only when

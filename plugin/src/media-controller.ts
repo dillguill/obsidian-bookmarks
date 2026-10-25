@@ -35,9 +35,9 @@ export class MediaController {
     return findMedia(text.slice(getFrontMatterInfo(text).contentStart), this.plugin.frontmatterOf(file), this.plugin.noteUrl(file), local);
   }
 
-  /** Downloads, without asking, the media a note was just added with: the items with these keys (see MediaItem.key). */
-  async saveLocal(file: TFile, keys: readonly string[], local: readonly string[]): Promise<void> {
-    const items = (await this.find(file, local)).filter((item) => keys.includes(item.key));
+  /** Downloads, without asking, the media a note was just added with that its template marked `|local`; values edited since don't match, so aren't saved. */
+  async saveLocal(file: TFile, local: readonly string[]): Promise<void> {
+    const items = (await this.find(file, local)).filter((item) => isMarked(item, local));
     if (items.length) await this.run(file, items, null);
   }
 

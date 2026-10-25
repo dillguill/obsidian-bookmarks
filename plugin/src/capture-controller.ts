@@ -47,7 +47,6 @@ export class CaptureController {
       types,
       propertyNames: () => this.plugin.vaultProperties(),
       match: (url) => chooseTemplate(this.plugin.templates, url),
-      urlProperty: urlPropertyName,
       onFetch: (url, template) => {
         letGo();
         const run = ++generation;
@@ -119,7 +118,7 @@ export class CaptureController {
     const path = await this.add(draft, preview);
     this.plugin.openNote(path);
     const file = this.app.vault.getAbstractFileByPath(path);
-    if (draft.keep.length && file instanceof TFile) await this.plugin.media.saveLocal(file, draft.keep, draft.local);
+    if (draft.local.length && file instanceof TFile) await this.plugin.media.saveLocal(file, draft.local);
   }
 
   /** Writes the note as shown, then asks the server for the screenshots it waits on; they're put in when they arrive. */

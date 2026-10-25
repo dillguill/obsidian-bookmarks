@@ -1,9 +1,8 @@
-import { App, setIcon } from "obsidian";
+import { App } from "obsidian";
 import type { CaptureAction, ClipperTemplate } from "./api";
 import { ClipModal, type ClipAction } from "./clip-modal";
 import { confirm } from "./confirm";
-import { emptyFields, frontmatterFrom, type FieldType, type PropertyField } from "./fields";
-import { findMedia, isMarked, MEDIA_ICONS, type MediaItem } from "./media";
+import { emptyFields, type FieldType, type PropertyField } from "./fields";
 import { normalizeUrl } from "./url";
 
 /** What the footer button does. On a page already saved, Add saves another note: the status line has said so, with a link to the saved one. */
@@ -17,10 +16,8 @@ export interface ClipDraft {
   properties: PropertyField[];
   body: string;
   folder: string;
-  /** Values the template marked `|local`, from the rendered note. */
+  /** Values the template marked `|local`, from the rendered note: saved in the vault once it's added. */
   local: string[];
-  /** Keys of the media to save in the vault once the note is added (see MediaItem.key). */
-  keep: string[];
 }
 
 export interface CaptureHandlers {
@@ -30,8 +27,6 @@ export interface CaptureHandlers {
   propertyNames: () => string[];
   /** The template a URL's rules pick, before the page is read. */
   match: (url: string) => ClipperTemplate;
-  /** The name of the property holding the page's address for a template, so its media is found as it will be in the note. */
-  urlProperty: (template: ClipperTemplate) => string;
   /** Reads the page; `template` is null when the user hasn't picked one, so the server matches it (schema rules too). */
   onFetch: (url: string, template: string | null) => void;
   /** Renders the page already read with another template. */
@@ -72,9 +67,6 @@ export class CaptureModal extends ClipModal {
   private statusEl!: HTMLElement;
   private bodyInput!: HTMLTextAreaElement;
   private folderInput!: HTMLInputElement;
-  private mediaEl!: HTMLElement;
-  /** The media in the note as last filled in, each with a switch for saving it in the vault. */
-  private media: MediaItem[] = [];
 
   constructor(
     app: App,
@@ -83,7 +75,7 @@ export class CaptureModal extends ClipModal {
   ) {
     super(app);
     this.template = handlers.match(initialUrl);
-    this.draft = { url: initialUrl, template: this.template.name, noteName: "", properties: emptyFields(this.template, handlers.types), body: "", folder: this.template.path, local: [], keep: [] };
+    this.draft = { url: initialUrl, template: this.template.name, noteName: "", properties: emptyFields(this.template, handlers.types), body: "", folder: this.template.path, local: [] };
   }
 
   override onOpen(): void {
@@ -122,7 +114,6 @@ export class CaptureModal extends ClipModal {
       this.draft.body = body;
       this.markEdited();
     });
-    this.mediaEl = this.belowBody("bookmarks-clip-media");
     this.footer(
       (left) =>
         (this.folderInput = this.folderField(left, this.draft.folder, (folder) => {
@@ -168,7 +159,7 @@ export class CaptureModal extends ClipModal {
     this.edited = typed.size > 0;
     this.setChanged(this.edited);
     this.drawFields();
-    this.findMedia(local);
+    this.draft.local = local;
     this.status(this.statusEl, this.existingPath ? this.statusEl.getText() : "");
     if (this.existingPath) this.existing(this.existingPath, this.existingName);
     this.updateActions();
@@ -241,34 +232,6 @@ export class CaptureModal extends ClipModal {
       },
       empty: "This template has no properties.",
     });
-  }
-
-  /** Lists the note's media, each switched on when the template marked it `|local`. */
-  private findMedia(local: string[]): void {
-    const properties = frontmatterFrom(this.draft.properties);
-    const url = String(properties[this.handlers.urlProperty(this.template)] ?? "").trim() || this.draft.url;
-    this.media = findMedia(this.draft.body, properties, url, local);
-    this.draft.local = local;
-    this.draft.keep = this.media.filter((item) => isMarked(item, local)).map((item) => item.key);
-    this.drawMedia();
-  }
-
-  /** The media switches: what's on is saved in the vault after Add, for this capture only. */
-  private drawMedia(): void {
-    this.mediaEl.empty();
-    this.mediaEl.toggle(this.media.length > 0);
-    if (!this.media.length) return;
-    this.mediaEl.createDiv({ cls: "bookmarks-clip-media-head", text: "Save in the vault" });
-    for (const item of this.media) {
-      const row = this.mediaEl.createEl("label", { cls: "bookmarks-clip-media-row" });
-      const box = row.createEl("input", { type: "checkbox" });
-      box.checked = this.draft.keep.includes(item.key);
-      box.onchange = () => {
-        this.draft.keep = box.checked ? [...this.draft.keep, item.key] : this.draft.keep.filter((key) => key !== item.key);
-      };
-      setIcon(row.createSpan({ cls: "bookmarks-clip-media-icon" }), MEDIA_ICONS[item.kind]);
-      row.createSpan({ cls: "bookmarks-clip-media-label", text: item.source.in === "property" ? `${item.label} (${item.source.name})` : item.label });
-    }
   }
 
   private urlChanged(url: string, now: boolean): void {
@@ -344,6 +307,6 @@ export class CaptureModal extends ClipModal {
     if (!this.filledIn && !this.failedToRead) return;
     this.done = true;
     this.close();
-    this.handlers.onAction(action, { ...this.draft, properties: this.draft.properties.map((f) => ({ ...f })), keep: [...this.draft.keep] });
+    this.handlers.onAction(action, { ...this.draft, properties: this.draft.properties.map((f) => ({ ...f })), local: [...this.draft.local] });
   }
 }
