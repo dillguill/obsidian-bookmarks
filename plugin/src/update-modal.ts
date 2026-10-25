@@ -336,7 +336,7 @@ export class UpdateModal extends ClipModal {
       this.setActions(
         [
           { id: "apply", label: "Apply", icon: "check" },
-          { id: "replace-all", label: "Replace whole note", icon: "replace-all" },
+          { id: "replace-all", label: "Replace whole note", icon: "replace-all", runs: true },
         ],
         "apply",
       );

@@ -11,6 +11,8 @@ export interface ClipAction {
   id: string;
   label: string;
   icon: string;
+  /** Runs straight from the menu (it only changes what's shown, like Replace whole note); others are picked for the button. */
+  runs?: boolean;
 }
 
 /** A row's value input, by type: dates get date pickers only when the value fits one, so nothing typed is lost. */
@@ -55,6 +57,8 @@ export abstract class ClipModal extends Modal {
   private menuButton!: HTMLButtonElement;
   private actions: ClipAction[] = [];
   private mainAction = "";
+  /** The action the user picked from the menu; it stays the button's until the modal closes. */
+  private pickedAction: string | null = null;
 
   protected shell(): void {
     this.modalEl.addClass("bookmarks-clip-modal");
@@ -268,11 +272,28 @@ export abstract class ClipModal extends Modal {
     this.actionButton.onclick = () => onAction(this.mainAction);
     this.menuButton = split.createEl("button", { cls: "mod-cta bookmarks-clip-more", attr: { "aria-label": "More actions" } });
     setIcon(this.menuButton, "chevron-down");
+    // The menu picks what the button does, so the note can be looked over before
+    // pressing it; only actions that change what's shown run from the menu.
     this.menuButton.onclick = (evt) => {
       const menu = new Menu();
-      for (const action of this.actions.filter((a) => a.id !== this.mainAction)) {
-        menu.addItem((item) => item.setTitle(action.label).setIcon(action.icon).onClick(() => onAction(action.id)));
+      // One choice is just the button: the menu then only has the commands.
+      const choices = this.actions.filter((a) => !a.runs);
+      if (choices.length < 2) choices.length = 0;
+      for (const action of choices) {
+        menu.addItem((item) =>
+          item
+            .setTitle(action.label)
+            .setIcon(action.icon)
+            .setChecked(action.id === this.mainAction)
+            .onClick(() => {
+              this.pickedAction = action.id;
+              this.showMain(action.id);
+            }),
+        );
       }
+      const commands = this.actions.filter((a) => a.runs);
+      if (choices.length && commands.length) menu.addSeparator();
+      for (const action of commands) menu.addItem((item) => item.setTitle(action.label).setIcon(action.icon).onClick(() => onAction(action.id)));
       menu.showAtMouseEvent(evt);
     };
   }
@@ -287,17 +308,22 @@ export abstract class ClipModal extends Modal {
   }
 
   /** Sets the split button's actions, with `main` on the button and the rest in its menu. */
+  /** Sets the button's actions: `main` (the template's preset) is on the button unless the user picked another from the menu. */
   protected setActions(actions: ClipAction[], main: string): void {
     this.actions = actions;
-    this.mainAction = actions.some((a) => a.id === main) ? main : (actions[0]?.id ?? "");
-    this.actionButton.setText(this.actions.find((a) => a.id === this.mainAction)?.label ?? "");
+    const usable = (id: string | null) => id !== null && actions.some((a) => a.id === id && !a.runs);
+    this.showMain(usable(this.pickedAction) ? this.pickedAction! : usable(main) ? main : (actions.find((a) => !a.runs)?.id ?? ""));
     this.menuButton.toggle(this.actions.length > 1);
     this.actionButton.toggleClass("mod-alone", this.actions.length <= 1);
   }
 
+  private showMain(id: string): void {
+    this.mainAction = id;
+    if (!this.actionButton.disabled) this.actionButton.setText(this.actions.find((a) => a.id === id)?.label ?? "");
+  }
+
   protected setBusy(busy: boolean, label?: string): void {
     this.actionButton.disabled = busy;
-    this.menuButton.disabled = busy;
     if (label) this.actionButton.setText(label);
     else if (!busy) this.actionButton.setText(this.actions.find((a) => a.id === this.mainAction)?.label ?? "");
   }
